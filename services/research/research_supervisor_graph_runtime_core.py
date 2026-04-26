@@ -701,8 +701,7 @@ class AnalyzePaperFiguresTool:
         ]
         imported_papers = [
             p for p in task_response.papers
-            if p.ingest_status == "ingested"
-            and str(p.metadata.get("document_id") or "").strip()
+            if str(p.metadata.get("document_id") or "").strip()
             and str(p.metadata.get("storage_uri") or "").strip()
         ]
         if paper_ids:

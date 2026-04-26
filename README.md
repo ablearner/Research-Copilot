@@ -11,48 +11,49 @@
 - `rag_runtime/`
   底层 tool-first 执行层，负责 `parse / index / retrieve / answer / chart understanding`。
 
-前端工作区对应：
+当前活跃前端工作区（`web/` 目录）：
 
-- 页面入口：`app/page.tsx`
-- FastAPI 代理：`app/api/backend/[...path]/route.ts`
-- 状态控制：`lib/use-literature-research-controller.ts`
-- controller 拆分：`lib/literature-research-controller/{session,runtime,import-flow,qa-figure-flow,todo-flow,derived}.ts`
+- 技术栈：React 18 + Vite + TypeScript + Tailwind CSS
+- 主入口：`web/src/App.tsx`
+- API 封装：`web/src/api.ts`（直连 FastAPI `http://127.0.0.1:8000`）
+- 聊天视图：`web/src/components/ChatView.tsx`
+- 消息气泡：`web/src/components/MessageBubble.tsx`（含内联图片渲染）
 
 ### 前端设计
 
 前端采用类似 ChatGPT / Claude 的对话式布局：
 
-- **主区域**：居中的对话线程（`max-w-3xl`），占满屏幕高度
-- **输入栏**：底部固定，自适应高度的 textarea + 模式切换（检索/问答）
-- **侧边栏**：默认收起，点击左上角图标展开，包含会话列表、检索设置、论文导入、待办等面板
-- **视觉风格**：灰色中性色调，蓝色点缀，`rounded-lg` 圆角，无渐变/毛玻璃/装饰阴影
+- **主区域**：居中的对话线程，占满屏幕高度
+- **输入栏**：底部固定，支持检索/问答模式切换
+- **侧边栏**：默认收起，包含会话列表
+- **内联图片**：自动检测消息中的图片路径并渲染为 `<img>` 标签
+- **决策轨迹**：Agent 活动和 Trace 默认展开显示
 
-核心前端组件：
+核心前端组件（`web/src/components/`）：
 
 | 组件 | 职责 |
 |---|---|
-| `LiteratureResearchPanel` | 主布局 — 侧边栏 + 对话区 + 输入栏 |
-| `ResearchComposer` | 底部输入栏，支持检索/问答模式切换 |
-| `ResearchConversationMessage` | 对话气泡、论文卡片、trace 展示 |
-| `ResearchThreadPreamble` | 空状态欢迎页 + 建议卡片 |
-| `ResearchWorkspaceSidebar` | 右侧工作区面板（任务摘要、论文导入、分析） |
-| `ResearchSidebarSections` | 左侧会话列表和检索设置 |
-| `ResearchWorkspaceResults` | 综述、对比表、推荐结果展示 |
-| `ResearchThreadArtifacts` | 导入结果、候选论文池、QA 回答 |
+| `ChatView` | 聊天视图：消息过滤、发送、task_id 跟踪 |
+| `MessageBubble` | 消息气泡：Markdown 渲染、内联图片、论文卡片、决策轨迹 |
+| `InputBar` | 底部输入栏 |
+| `PaperCard` | 论文卡片 |
+| `Sidebar` | 侧边栏会话列表 |
+| `WelcomeScreen` | 空状态欢迎页 |
+
+旧前端（`app/`、`components/`、`lib/`）基于 Next.js，当前已不作为主入口使用。
 
 ## 架构概览
 
 ```text
-Browser
--> Next.js workspace
--> /api/backend/*
--> FastAPI routers
+Browser (http://localhost:3000)
+-> Vite dev server (web/)
+-> FastAPI (http://127.0.0.1:8000)
 -> LiteratureResearchService
 -> ResearchSupervisorGraphRuntime
 -> specialist agents / research services
 -> RagRuntime
 -> DocumentTools / RetrievalTools / AnswerTools / ChartTools
--> vector store / graph store / session memory / local persistence
+-> Milvus (vector) / Neo4j (graph) / session memory / local persistence
 ```
 
 ## 当前主能力
@@ -88,8 +89,10 @@ Browser
 
 ## 主要目录
 
+- `web/`
+  当前活跃前端（React + Vite + Tailwind），ChatGPT 风格对话式布局
 - `app/`、`components/`、`lib/`
-  前端研究工作区（ChatGPT 风格对话式布局）、状态控制和后端代理
+  旧 Next.js 前端（已不活跃）
 - `apps/api/`
   FastAPI 入口、依赖注入、runtime 装配和 HTTP 路由
 - `services/research/`
@@ -201,38 +204,74 @@ Browser
 - `APP_ENV=local` 时会暴露 `/uploads/*`
 - `UPLOAD_MAX_BYTES` 默认 `25 MiB`
 - `VECTOR_STORE_PROVIDER` 默认 `milvus`
-- `GRAPH_STORE_PROVIDER` 默认 `memory`
+- `GRAPH_STORE_PROVIDER` 默认 `neo4j`
 - `SESSION_MEMORY_PROVIDER` 默认 `auto`
 - `LONG_TERM_MEMORY_PROVIDER` 默认 `json`
 
 ## 本地启动
 
-### 1. 后端
+### 完整启动顺序（必须按顺序执行）
+
+#### 第一步：基础设施
 
 ```bash
-/bin/bash scripts/run_api_dev.sh
+# 1. 启动 Milvus（Docker）
+docker start research-copilot-milvus
+# 等待端口 19530 就绪（约 10-15 秒）
+# 检查：ss -tlnp | grep 19530
+
+# 2. 启动 Neo4j
+export JAVA_HOME=/home/myc/miniconda3/envs/Research-Copilot/lib/jvm
+/home/myc/neo4j/bin/neo4j start
+# 等待端口 7687 就绪
+# 检查：ss -tlnp | grep 7687
+
+# 3. 启动 Zotero Bridge（WSL 环境，需要 Windows 上先打开 Zotero 桌面程序）
+bash scripts/wsl_zotero_bridge.sh start
+# 检查：ss -tlnp | grep 23119
 ```
 
-实际启动：
+#### 第二步：后端
 
 ```bash
+cd /home/myc/Research-Copilot
 /home/myc/miniconda3/envs/Research-Copilot/bin/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --reload
+# 等待日志出现 "Application startup complete"
+# 如果卡在 "Waiting for application startup"，说明 Milvus 或 Neo4j 没启动
 ```
 
-### 2. 前端
+#### 第三步：前端
 
 ```bash
+cd /home/myc/Research-Copilot/web
 npm run dev
+# 访问 http://localhost:3000
 ```
 
-### 3. CLI
+### 端口一览
+
+| 服务 | 端口 | 启动方式 |
+|------|------|------|
+| Milvus | 19530 | `docker start research-copilot-milvus` |
+| Neo4j | 7474/7687 | `/home/myc/neo4j/bin/neo4j start` |
+| Zotero Bridge | 23119 | `bash scripts/wsl_zotero_bridge.sh start` |
+| 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
+| 前端 (Vite) | 3000 | `cd web && npm run dev` |
+
+### WSL 环境注意事项
+
+- WSL 默认只分配宿主机一半内存，建议在 `C:\Users\<用户名>\.wslconfig` 中配置 `memory=24GB`
+- `wsl --shutdown` 后所有服务需要重新启动
+- Milvus 在内存不足时会因 etcd 连接丢失反复崩溃
+
+### CLI
 
 ```bash
 /home/myc/miniconda3/envs/Research-Copilot/bin/python apps/cli.py --help
 /home/myc/miniconda3/envs/Research-Copilot/bin/python apps/cli.py agent
 ```
 
-### 4. 环境自检
+### 环境自检
 
 ```bash
 /home/myc/miniconda3/envs/Research-Copilot/bin/python scripts/check_env.py
@@ -243,16 +282,17 @@ npm run dev
 1. [apps/api/main.py](apps/api/main.py)
 2. [apps/api/runtime.py](apps/api/runtime.py)
 3. [apps/api/research_runtime.py](apps/api/research_runtime.py)
-4. [app/api/backend/[...path]/route.ts](app/api/backend/[...path]/route.ts)
-5. [components/LiteratureResearchPanel.tsx](components/LiteratureResearchPanel.tsx)
-6. [lib/use-literature-research-controller.ts](lib/use-literature-research-controller.ts)
-7. [services/research/research_supervisor_graph_runtime_core.py](services/research/research_supervisor_graph_runtime_core.py)
-8. [services/research/literature_research_service.py](services/research/literature_research_service.py)
-9. [services/research/research_function_service.py](services/research/research_function_service.py)
-10. [rag_runtime/runtime.py](rag_runtime/runtime.py)
-11. [memory/memory_manager.py](memory/memory_manager.py)
-12. [retrieval/hybrid_retriever.py](retrieval/hybrid_retriever.py)
-13. [skills/research/__init__.py](skills/research/__init__.py)
+4. [web/src/App.tsx](web/src/App.tsx)
+5. [web/src/api.ts](web/src/api.ts)
+6. [web/src/components/ChatView.tsx](web/src/components/ChatView.tsx)
+7. [web/src/components/MessageBubble.tsx](web/src/components/MessageBubble.tsx)
+8. [services/research/research_supervisor_graph_runtime_core.py](services/research/research_supervisor_graph_runtime_core.py)
+9. [services/research/literature_research_service.py](services/research/literature_research_service.py)
+10. [services/research/research_function_service.py](services/research/research_function_service.py)
+11. [rag_runtime/runtime.py](rag_runtime/runtime.py)
+12. [memory/memory_manager.py](memory/memory_manager.py)
+13. [retrieval/hybrid_retriever.py](retrieval/hybrid_retriever.py)
+14. [skills/research/__init__.py](skills/research/__init__.py)
 
 ## 相关文档
 

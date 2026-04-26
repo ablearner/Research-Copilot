@@ -15,3 +15,5 @@ coverage/
 dist/
 build/
 *.egg-info/
+docs/
+evaluation/
