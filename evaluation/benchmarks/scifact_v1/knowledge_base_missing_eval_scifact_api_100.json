@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "benchmark": "beir_scifact",
+    "source_repo": "BeIR/scifact",
+    "qrels_repo": "BeIR/scifact-qrels",
+    "qrels_split": "test",
+    "case_count": 100,
+    "document_count": 5183,
+    "derived_from": "knowledge_base.json",
+    "missing_from_collection": "eval_scifact_api_100",
+    "existing_count": 5183,
+    "missing_count": 0
+  },
+  "documents": []
+}

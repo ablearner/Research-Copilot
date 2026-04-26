@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "defaults": {
+    "answer_prompt_path": "prompts/document/answer_question_with_hybrid_rag.txt",
+    "rewrite_prompt_path": "prompts/retrieval/rewrite_query.txt",
+    "chart_prompt_path": "prompts/chart/parse_chart.txt",
+    "graph_prompt_path": "prompts/graph/extract_triples.txt"
+  },
+  "skills": {
+    "default": {},
+    "document_qa": {},
+    "financial_report": {
+      "answer_prompt_path": "prompts/document/answer_question_with_hybrid_rag_financial_report.txt",
+      "rewrite_prompt_path": "prompts/retrieval/rewrite_query_financial_report.txt"
+    },
+    "research_report": {
+      "answer_prompt_path": "prompts/document/answer_question_with_hybrid_rag_research_report.txt",
+      "rewrite_prompt_path": "prompts/retrieval/rewrite_query_research_report.txt"
+    }
+  },
+  "aliases": {
+    "doc_qa": "document_qa"
+  }
+}

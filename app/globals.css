@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import "katex/dist/katex.min.css";
+
+:root {
+  color-scheme: light;
+  --color-bg: #f9fafb;
+  --color-sidebar-bg: #f3f4f6;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #9ca3af;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-user-bubble: #2563eb;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  color: var(--color-text);
+  background: var(--color-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+button, input, textarea { font: inherit; }
+
+/* ── Scrollbar ── */
+.chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+  overscroll-behavior: contain;
+}
+.chat-scroll::-webkit-scrollbar { width: 5px; }
+.chat-scroll::-webkit-scrollbar-track { background: transparent; }
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 999px;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* legacy alias */
+.chart-chat-scroll { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; overscroll-behavior: contain; }
+.chart-chat-scroll::-webkit-scrollbar { width: 5px; }
+.chart-chat-scroll::-webkit-scrollbar-track { background: transparent; }
+.chart-chat-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 999px; }
+
+/* ── Markdown ── */
+.chat-markdown p { margin: 0.4em 0; }
+.chat-markdown ul, .chat-markdown ol { margin: 0.4em 0 0.4em 1.2em; padding: 0; }
+.chat-markdown li { margin: 0.15em 0; }
+.chat-markdown li::marker { color: #9ca3af; }
+.chat-markdown code {
+  border-radius: 4px;
+  background: #f3f4f6;
+  padding: 0.15em 0.4em;
+  font-size: 0.87em;
+  font-weight: 500;
+  color: #1f2937;
+}
+.chat-markdown pre { border-radius: 8px; overflow: hidden; background: #1f2937; }
+.chat-markdown pre code { background: transparent; padding: 0; border-radius: 0; color: #e5e7eb; }
+.chat-markdown strong { font-weight: 600; color: #111827; }
+.chat-markdown a { color: var(--color-accent); text-decoration: none; }
+.chat-markdown a:hover { text-decoration: underline; }
+.chat-markdown .katex { font-size: 1.02em; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 { margin-top: 0.8em; margin-bottom: 0.4em; font-weight: 600; color: #111827; }
+.chat-markdown h1 { font-size: 1.2em; }
+.chat-markdown h2 { font-size: 1.1em; }
+.chat-markdown h3 { font-size: 1.02em; }
+.chat-markdown blockquote {
+  border-left: 3px solid #e5e7eb;
+  padding: 0.4em 1em;
+  margin: 0.5em 0;
+  color: #6b7280;
+  background: #f9fafb;
+  border-radius: 0 6px 6px 0;
+}
+.chat-markdown table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.chat-markdown th, .chat-markdown td { border: 1px solid #e5e7eb; padding: 0.4em 0.75em; text-align: left; font-size: 0.9em; }
+.chat-markdown th { background: #f9fafb; font-weight: 600; }
+
+/* legacy alias */
+.chart-markdown p { margin: 0.4em 0; }
+.chart-markdown ul, .chart-markdown ol { margin: 0.4em 0 0.4em 1.2em; padding: 0; }
+.chart-markdown li { margin: 0.15em 0; }
+.chart-markdown li::marker { color: #9ca3af; }
+.chart-markdown code { border-radius: 4px; background: #f3f4f6; padding: 0.15em 0.4em; font-size: 0.87em; font-weight: 500; }
+.chart-markdown pre { border-radius: 8px; overflow: hidden; }
+.chart-markdown pre code { background: transparent; padding: 0; border-radius: 0; }
+.chart-markdown strong { font-weight: 600; color: #111827; }
+.chart-markdown a { color: var(--color-accent); text-decoration: none; }
+.chart-markdown a:hover { text-decoration: underline; }
+.chart-markdown .katex { font-size: 1.02em; }
+.chart-markdown h1, .chart-markdown h2, .chart-markdown h3 { margin-top: 0.8em; margin-bottom: 0.4em; font-weight: 600; }
+.chart-markdown h1 { font-size: 1.2em; }
+.chart-markdown h2 { font-size: 1.1em; }
+.chart-markdown h3 { font-size: 1.02em; }
+.chart-markdown blockquote { border-left: 3px solid #e5e7eb; padding: 0.4em 1em; margin: 0.5em 0; color: #6b7280; }
+.chart-markdown table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.chart-markdown th, .chart-markdown td { border: 1px solid #e5e7eb; padding: 0.4em 0.75em; text-align: left; font-size: 0.9em; }
+.chart-markdown th { background: #f9fafb; font-weight: 600; }
+
+/* ── KV rows ── */
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(84px, 112px) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.kv-row:last-child { border-bottom: 0; }
+.kv-label { font-size: 11px; line-height: 1.4; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: #9ca3af; }
+.kv-value { min-width: 0; font-size: 13px; line-height: 1.65; color: #374151; word-break: break-word; }
+
+@layer components {
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-4; }
+  .badge-success { @apply badge bg-emerald-50 text-emerald-700; }
+  .badge-warning { @apply badge bg-amber-50 text-amber-700; }
+  .badge-info { @apply badge bg-blue-50 text-blue-700; }
+  .badge-muted { @apply badge bg-gray-100 text-gray-600; }
+  .badge-danger { @apply badge bg-red-50 text-red-700; }
+
+  .btn-accent {
+    @apply rounded-lg px-4 py-2 text-[13px] font-medium text-white transition-colors duration-150;
+    background: var(--color-accent);
+  }
+  .btn-accent:hover { background: var(--color-accent-hover); }
+  .btn-accent:disabled { @apply opacity-40 cursor-not-allowed; }
+
+  .btn-ghost {
+    @apply rounded-lg px-3 py-1.5 text-[12px] font-medium text-gray-500 transition-colors duration-150;
+  }
+  .btn-ghost:hover { @apply bg-gray-100 text-gray-800; }
+
+  .chat-pop { animation: chat-pop 240ms ease-out both; }
+}
+
+@keyframes chat-pop {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.12);
+  color: #111827;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}

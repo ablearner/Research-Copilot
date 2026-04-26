@@ -1,0 +1,232 @@
+{
+  "runtime_mode": "retrieval_only",
+  "retrieval_mode": "vector",
+  "recall_k": 5,
+  "metrics": {
+    "total_cases": 3,
+    "hit_at_k": 1.0,
+    "recall_at_k": 0.3742424242424242,
+    "latency_p50_ms": 0.19,
+    "latency_p95_ms": 0.29
+  },
+  "cases": [
+    {
+      "case_id": "ragbench_pubmedqa_pubmedqa_11200",
+      "hit_at_k": true,
+      "recall_at_k": 0.2727272727272727,
+      "matched_evidence_ids": [],
+      "matched_source_ids": [
+        "ragbench_pubmedqa_pubmedqa_11200_doc_1_sent_1b",
+        "ragbench_pubmedqa_pubmedqa_11200_doc_3_sent_3c",
+        "ragbench_pubmedqa_pubmedqa_11200_doc_3_sent_3d"
+      ],
+      "matched_retrieval_keywords": [],
+      "latency_ms": 0.29,
+      "top_hits": [
+        {
+          "id": "emb_179830e83879dd6afc0bbd45",
+          "content": "(3) Do surface porosity and pore size influence the cellular response to PEEK?",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_11200_doc_0_sent_0c",
+          "document_id": "ragbench_pubmedqa_pubmedqa_11200_doc_0",
+          "evidence_ids": [],
+          "vector_score": 0.8320502943378439,
+          "graph_score": null,
+          "merged_score": 0.8320502943378439
+        },
+        {
+          "id": "emb_3642e6a5571d543768260fda",
+          "content": "However, additional work is needed to investigate the effect of pore size on both the mechanical properties and cellular response to PEEK.QUESTIONS/",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_11200_doc_2_sent_2d",
+          "document_id": "ragbench_pubmedqa_pubmedqa_11200_doc_2",
+          "evidence_ids": [],
+          "vector_score": 0.55,
+          "graph_score": null,
+          "merged_score": 0.55
+        },
+        {
+          "id": "emb_3fe67cdb1cf28f9df911bd1a",
+          "content": "Porosity and pore layer depth ranged from 61% to 69% and 303 to 391 µm, respectively.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_11200_doc_1_sent_1b",
+          "document_id": "ragbench_pubmedqa_pubmedqa_11200_doc_1",
+          "evidence_ids": [],
+          "vector_score": 0.4375,
+          "graph_score": null,
+          "merged_score": 0.4375
+        },
+        {
+          "id": "emb_ac56573ac90671a68974ac0c",
+          "content": "The cellular response to PEEK-SP, assessed by proliferation, alkaline phosphatase activity, vascular endothelial growth factor production, and calcium content of osteoblast, mesenchymal stem cell, and preosteoblast (MC3T3-E1) cultures, was compared with that of machined smooth PEEK and Ti6Al4V.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_11200_doc_3_sent_3d",
+          "document_id": "ragbench_pubmedqa_pubmedqa_11200_doc_3",
+          "evidence_ids": [],
+          "vector_score": 0.3889087296526011,
+          "graph_score": null,
+          "merged_score": 0.3889087296526011
+        },
+        {
+          "id": "emb_7b397f082c7b8e9fbd8f8ea2",
+          "content": "Tensile, fatigue, and interfacial shear tests were performed to compare the mechanical properties of PEEK-SP with injection-molded PEEK (PEEK-IM).",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_11200_doc_3_sent_3c",
+          "document_id": "ragbench_pubmedqa_pubmedqa_11200_doc_3",
+          "evidence_ids": [],
+          "vector_score": 0.3651483716701107,
+          "graph_score": null,
+          "merged_score": 0.3651483716701107
+        }
+      ]
+    },
+    {
+      "case_id": "ragbench_pubmedqa_pubmedqa_25899",
+      "hit_at_k": true,
+      "recall_at_k": 0.6,
+      "matched_evidence_ids": [],
+      "matched_source_ids": [
+        "ragbench_pubmedqa_pubmedqa_25899_doc_0_sent_0a",
+        "ragbench_pubmedqa_pubmedqa_25899_doc_4_sent_4d",
+        "ragbench_pubmedqa_pubmedqa_25899_doc_4_sent_4e"
+      ],
+      "matched_retrieval_keywords": [],
+      "latency_ms": 0.17,
+      "top_hits": [
+        {
+          "id": "emb_b3163d88a7aa74c464d7ca78",
+          "content": "All 20 endoluminal devices were accurately positioned in the infrarenal aorta without early or delayed evidence of device thrombosis, significant lumen narrowing, or device deformity.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4_sent_4a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4",
+          "evidence_ids": [],
+          "vector_score": 0.3481553119113957,
+          "graph_score": null,
+          "merged_score": 0.3481553119113957
+        },
+        {
+          "id": "emb_a7924ebc171d6f52175fafca",
+          "content": "The in vivo hemodynamic performance of a bioprosthesis implanted in an aortic position is affected by the characteristics of the prosthesis and the sizing strategy adopted.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_25899_doc_2_sent_2a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_25899_doc_2",
+          "evidence_ids": [],
+          "vector_score": 0.27914526311954124,
+          "graph_score": null,
+          "merged_score": 0.27914526311954124
+        },
+        {
+          "id": "emb_230e7e10d25c8f9366af5ea7",
+          "content": "To evaluate placement of polyester (Dacron) coverings on nitinol stents implanted in the canine aorta to determine the effect on cross-sectional lumen area, development of intimal hyperplasia, device endothelialization, and flow hemodynamics.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_25899_doc_0_sent_0a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_25899_doc_0",
+          "evidence_ids": [],
+          "vector_score": 0.18392019594868114,
+          "graph_score": null,
+          "merged_score": 0.18392019594868114
+        },
+        {
+          "id": "emb_c4f9e3756e88f2f00098d7f5",
+          "content": "Mean surface area endothelialization in the proximal, middle, and distal sections of each device was similar (p>0.05) in covered (59%, 56%, and 69%) and bare (59%, 65%, and 53%) stents.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4_sent_4e",
+          "document_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4",
+          "evidence_ids": [],
+          "vector_score": 0.1305582419667734,
+          "graph_score": null,
+          "merged_score": 0.1305582419667734
+        },
+        {
+          "id": "emb_d9dc55ef31fb920cbf4fea25",
+          "content": "Intima-to-media height ratios were greater in the covered stents (3.0+/-1.1 compared with 1.1+/-0.2, p<0.003).",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4_sent_4d",
+          "document_id": "ragbench_pubmedqa_pubmedqa_25899_doc_4",
+          "evidence_ids": [],
+          "vector_score": 0.09090909090909091,
+          "graph_score": null,
+          "merged_score": 0.09090909090909091
+        }
+      ]
+    },
+    {
+      "case_id": "ragbench_pubmedqa_pubmedqa_623",
+      "hit_at_k": true,
+      "recall_at_k": 0.25,
+      "matched_evidence_ids": [],
+      "matched_source_ids": [
+        "ragbench_pubmedqa_pubmedqa_623_doc_0_sent_0a"
+      ],
+      "matched_retrieval_keywords": [],
+      "latency_ms": 0.19,
+      "top_hits": [
+        {
+          "id": "emb_4ae1e541233d1b6cd554354e",
+          "content": "There is controversy about whether diabetes mellitus is a risk factor for pancreatic cancer or an epiphenomenon of the cancer.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_623_doc_4_sent_4a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_623_doc_4",
+          "evidence_ids": [],
+          "vector_score": 0.5063696835418332,
+          "graph_score": null,
+          "merged_score": 0.5063696835418332
+        },
+        {
+          "id": "emb_d759eb5ae9d2650e1e0688ec",
+          "content": "The present study aims to determine if long-term diabetes is a risk factor for pancreatic cancer.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_623_doc_4_sent_4b",
+          "document_id": "ragbench_pubmedqa_pubmedqa_623_doc_4",
+          "evidence_ids": [],
+          "vector_score": 0.5009794328681195,
+          "graph_score": null,
+          "merged_score": 0.5009794328681195
+        },
+        {
+          "id": "emb_5b1c375cc3ac799634aedc37",
+          "content": "It has been demonstrated that there are a lot of different prognostic factors which are worthy of consideration whereas diabetes mellitus (DM) has not been clearly or consistently identified as a prognostic value in advanced non-small cell lung cancer (NSCLC).",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_623_doc_0_sent_0a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_623_doc_0",
+          "evidence_ids": [],
+          "vector_score": 0.4057411124598246,
+          "graph_score": null,
+          "merged_score": 0.4057411124598246
+        },
+        {
+          "id": "emb_84ee4563d09c70d56030c87f",
+          "content": "Previous studies have pointed to many different prognostic factors for small cell lung cancer (SCLC) but diabetes mellitus (DM) has not been clearly or consistently identified as of prognostic value.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_623_doc_1_sent_1a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_623_doc_1",
+          "evidence_ids": [],
+          "vector_score": 0.3195048252113468,
+          "graph_score": null,
+          "merged_score": 0.3195048252113468
+        },
+        {
+          "id": "emb_e70032bde15dab4f9d9db93b",
+          "content": "Previous studies have suggested that chronic obstructive pulmonary disease (COPD) is an independent risk factor for lung cancer.",
+          "source_type": "text_block",
+          "source_id": "ragbench_pubmedqa_pubmedqa_623_doc_3_sent_3a",
+          "document_id": "ragbench_pubmedqa_pubmedqa_623_doc_3",
+          "evidence_ids": [],
+          "vector_score": 0.3042903097250923,
+          "graph_score": null,
+          "merged_score": 0.3042903097250923
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "ingest": {
+      "knowledge_base": "evaluation/benchmarks/ragbench_pubmedqa_test_v1/knowledge_base.json",
+      "documents": 15,
+      "text_blocks": 42,
+      "indexed_records": 42,
+      "skipped_blocks": 0
+    },
+    "core_metric_scope": "retrieval_only"
+  }
+}

@@ -1,0 +1,514 @@
+{
+  "generated_at": "2026-04-17T05:36:37+00:00",
+  "dataset_root": "<repo-root>/evaluation/datasets",
+  "overall": {
+    "file_count": 145,
+    "total_size_bytes": 230600332,
+    "case_dataset_count": 2,
+    "case_count": 100,
+    "image_file_count": 100,
+    "pdf_file_count": 20,
+    "pdf_corpus_count": 1
+  },
+  "case_datasets": [
+    {
+      "name": "chartqa_eval_50",
+      "path": "evaluation/datasets/chartqa_eval_50",
+      "cases_path": "evaluation/datasets/chartqa_eval_50/cases.json",
+      "case_count": 50,
+      "unique_case_id_count": 50,
+      "duplicate_case_ids": [],
+      "kind_counts": {
+        "ask_fused": 50
+      },
+      "expected_route_counts": {
+        "ask_fused": 50
+      },
+      "skill_counts": {
+        "chart_qa": 50
+      },
+      "source_dataset_counts": {
+        "HuggingFaceM4/ChartQA": 50
+      },
+      "dataset_split_counts": {
+        "test": 23,
+        "val": 27
+      },
+      "source_file_counts": {
+        "chartqa_test_300.jsonl": 23,
+        "chartqa_valid_300.jsonl": 27
+      },
+      "unique_document_count": 50,
+      "unique_image_count": 50,
+      "image_file_count": 50,
+      "missing_image_count": 0,
+      "missing_images": [],
+      "orphan_image_count": 0,
+      "orphan_images": [],
+      "expected_tool_counts": {
+        "ChartAgent.ask_chart": 50
+      },
+      "require_evidence_counts": {
+        "False": 50
+      },
+      "top_k": {
+        "count": 50,
+        "min": 5,
+        "max": 5,
+        "mean": 5,
+        "median": 5.0
+      },
+      "question_length_chars": {
+        "count": 50,
+        "min": 31,
+        "max": 138,
+        "mean": 64.96,
+        "median": 64.5
+      },
+      "question_word_count": {
+        "count": 50,
+        "min": 6,
+        "max": 20,
+        "mean": 11.12,
+        "median": 10.5
+      },
+      "expected_keyword_count": {
+        "count": 50,
+        "min": 1,
+        "max": 1,
+        "mean": 1,
+        "median": 1.0
+      },
+      "cases_with_expected_keywords": 50,
+      "cases_without_expected_keywords": 0,
+      "min_keyword_recall": {
+        "count": 50,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "median": 0.5
+      },
+      "reference_answer": {
+        "count": 50,
+        "type_counts": {
+          "boolean": 1,
+          "long_text": 2,
+          "numeric": 37,
+          "short_text": 10
+        },
+        "char_length": {
+          "count": 50,
+          "min": 1,
+          "max": 27,
+          "mean": 4.98,
+          "median": 4.0
+        },
+        "word_count": {
+          "count": 50,
+          "min": 1,
+          "max": 4,
+          "mean": 1.18,
+          "median": 1.0
+        }
+      },
+      "images": {
+        "file_count": 50,
+        "total_size_bytes": 2272971,
+        "size_bytes": {
+          "count": 50,
+          "min": 11355,
+          "max": 76650,
+          "mean": 45459.42,
+          "median": 42806.0
+        },
+        "width_px": {
+          "count": 50,
+          "min": 204,
+          "max": 850,
+          "mean": 773.48,
+          "median": 800.0
+        },
+        "height_px": {
+          "count": 50,
+          "min": 321,
+          "max": 1016,
+          "mean": 628.7,
+          "median": 557.0
+        }
+      },
+      "size_bytes": 2318677
+    },
+    {
+      "name": "scigraphqa_easy_50",
+      "path": "evaluation/datasets/scigraphqa_easy_50",
+      "cases_path": "evaluation/datasets/scigraphqa_easy_50/cases.json",
+      "case_count": 50,
+      "unique_case_id_count": 50,
+      "duplicate_case_ids": [],
+      "kind_counts": {
+        "ask_fused": 50
+      },
+      "expected_route_counts": {
+        "ask_fused": 50
+      },
+      "skill_counts": {
+        "chart_qa": 50
+      },
+      "source_dataset_counts": {
+        "SciGraphQA": 50
+      },
+      "dataset_split_counts": {
+        "": 50
+      },
+      "source_file_counts": {
+        "scigraphqa_test.jsonl": 29,
+        "scigraphqa_valid.jsonl": 21
+      },
+      "unique_document_count": 50,
+      "unique_image_count": 50,
+      "image_file_count": 50,
+      "missing_image_count": 0,
+      "missing_images": [],
+      "orphan_image_count": 0,
+      "orphan_images": [],
+      "expected_tool_counts": {
+        "ChartAgent.ask_chart": 50
+      },
+      "require_evidence_counts": {
+        "False": 50
+      },
+      "top_k": {
+        "count": 50,
+        "min": 5,
+        "max": 5,
+        "mean": 5,
+        "median": 5.0
+      },
+      "question_length_chars": {
+        "count": 50,
+        "min": 37,
+        "max": 532,
+        "mean": 108.84,
+        "median": 84.0
+      },
+      "question_word_count": {
+        "count": 50,
+        "min": 8,
+        "max": 90,
+        "mean": 18.78,
+        "median": 15.0
+      },
+      "expected_keyword_count": {
+        "count": 50,
+        "min": 1,
+        "max": 8,
+        "mean": 7.82,
+        "median": 8.0
+      },
+      "cases_with_expected_keywords": 50,
+      "cases_without_expected_keywords": 0,
+      "min_keyword_recall": {
+        "count": 50,
+        "min": 0.5,
+        "max": 0.5,
+        "mean": 0.5,
+        "median": 0.5
+      },
+      "reference_answer": {
+        "count": 50,
+        "type_counts": {
+          "long_text": 50
+        },
+        "char_length": {
+          "count": 50,
+          "min": 40,
+          "max": 1219,
+          "mean": 438.98,
+          "median": 388.0
+        },
+        "word_count": {
+          "count": 50,
+          "min": 7,
+          "max": 209,
+          "mean": 74.16,
+          "median": 66.5
+        }
+      },
+      "images": {
+        "file_count": 50,
+        "total_size_bytes": 1795334,
+        "size_bytes": {
+          "count": 50,
+          "min": 4091,
+          "max": 153849,
+          "mean": 35906.68,
+          "median": 26153.5
+        },
+        "width_px": {
+          "count": 50,
+          "min": 221,
+          "max": 1061,
+          "mean": 550.94,
+          "median": 474.5
+        },
+        "height_px": {
+          "count": 50,
+          "min": 149,
+          "max": 834,
+          "mean": 353.58,
+          "median": 318.0
+        }
+      },
+      "size_bytes": 1975949
+    }
+  ],
+  "pdf_corpora": [
+    {
+      "name": "pdfqa_benchmark",
+      "path": "evaluation/datasets/pdfqa_benchmark",
+      "manifest_path": "evaluation/datasets/pdfqa_benchmark/pdf_manifest.json",
+      "repo_id": "pdfqa/pdfQA-Benchmark",
+      "limit_per_dataset": 5,
+      "dataset_count": 4,
+      "pdf_count": 20,
+      "total_size_bytes": 226302303,
+      "page_count": {
+        "count": 20,
+        "min": 33,
+        "max": 233,
+        "mean": 123.7,
+        "median": 124.0
+      },
+      "total_pages": 2474,
+      "datasets": {
+        "ClimRetrieve": {
+          "manifest_selected_count": 5,
+          "manifest_local_count": 5,
+          "actual_pdf_count": 5,
+          "total_size_bytes": 107363171,
+          "page_count": {
+            "count": 5,
+            "min": 33,
+            "max": 178,
+            "mean": 90.8,
+            "median": 81
+          },
+          "total_pages": 454,
+          "pdfs": [
+            {
+              "filename": "2022 Microsoft Environmental Sustainability Report.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimRetrieve/2022 Microsoft Environmental Sustainability Report.pdf",
+              "size_bytes": 17917999,
+              "size_mb": 17.09,
+              "page_count": 81,
+              "read_error": null
+            },
+            {
+              "filename": "2022_BXP_ESG_Report.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimRetrieve/2022_BXP_ESG_Report.pdf",
+              "size_bytes": 9601567,
+              "size_mb": 9.16,
+              "page_count": 81,
+              "read_error": null
+            },
+            {
+              "filename": "2023 Lloyds sustainability report.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimRetrieve/2023 Lloyds sustainability report.pdf",
+              "size_bytes": 14849417,
+              "size_mb": 14.16,
+              "page_count": 178,
+              "read_error": null
+            },
+            {
+              "filename": "AEO 2022 ESG Report.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimRetrieve/AEO 2022 ESG Report.pdf",
+              "size_bytes": 51543926,
+              "size_mb": 49.16,
+              "page_count": 81,
+              "read_error": null
+            },
+            {
+              "filename": "AT&T 2022 Sustainability Summary.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimRetrieve/AT&T 2022 Sustainability Summary.pdf",
+              "size_bytes": 13450262,
+              "size_mb": 12.83,
+              "page_count": 33,
+              "read_error": null
+            }
+          ]
+        },
+        "ClimateFinanceBench": {
+          "manifest_selected_count": 5,
+          "manifest_local_count": 5,
+          "actual_pdf_count": 5,
+          "total_size_bytes": 80898991,
+          "page_count": {
+            "count": 5,
+            "min": 42,
+            "max": 166,
+            "mean": 98.4,
+            "median": 100
+          },
+          "total_pages": 492,
+          "pdfs": [
+            {
+              "filename": "015157_LVMH_RSE_committed_to_positive_impact_2023_GB_SR_MEL_080724 (6)_2024-09-19_10_56.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimateFinanceBench/015157_LVMH_RSE_committed_to_positive_impact_2023_GB_SR_MEL_080724 (6)_2024-09-19_10_56.pdf",
+              "size_bytes": 14838685,
+              "size_mb": 14.15,
+              "page_count": 166,
+              "read_error": null
+            },
+            {
+              "filename": "2017-2018-NTPC-Sustainability-Report-Final_opt.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimateFinanceBench/2017-2018-NTPC-Sustainability-Report-Final_opt.pdf",
+              "size_bytes": 36296968,
+              "size_mb": 34.62,
+              "page_count": 132,
+              "read_error": null
+            },
+            {
+              "filename": "2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimateFinanceBench/2019.pdf",
+              "size_bytes": 5676130,
+              "size_mb": 5.41,
+              "page_count": 52,
+              "read_error": null
+            },
+            {
+              "filename": "2022.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimateFinanceBench/2022.pdf",
+              "size_bytes": 15717907,
+              "size_mb": 14.99,
+              "page_count": 42,
+              "read_error": null
+            },
+            {
+              "filename": "2023-advancing-climate-solutions-progress-report.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/ClimateFinanceBench/2023-advancing-climate-solutions-progress-report.pdf",
+              "size_bytes": 8369301,
+              "size_mb": 7.98,
+              "page_count": 100,
+              "read_error": null
+            }
+          ]
+        },
+        "FinanceBench": {
+          "manifest_selected_count": 5,
+          "manifest_local_count": 5,
+          "actual_pdf_count": 5,
+          "total_size_bytes": 6469475,
+          "page_count": {
+            "count": 5,
+            "min": 158,
+            "max": 233,
+            "mean": 182.6,
+            "median": 176
+          },
+          "total_pages": 913,
+          "pdfs": [
+            {
+              "filename": "3M_2015_10K.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/FinanceBench/3M_2015_10K.pdf",
+              "size_bytes": 1160173,
+              "size_mb": 1.11,
+              "page_count": 158,
+              "read_error": null
+            },
+            {
+              "filename": "3M_2016_10K.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/FinanceBench/3M_2016_10K.pdf",
+              "size_bytes": 1449990,
+              "size_mb": 1.38,
+              "page_count": 233,
+              "read_error": null
+            },
+            {
+              "filename": "3M_2017_10K.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/FinanceBench/3M_2017_10K.pdf",
+              "size_bytes": 1375146,
+              "size_mb": 1.31,
+              "page_count": 176,
+              "read_error": null
+            },
+            {
+              "filename": "3M_2018_10K.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/FinanceBench/3M_2018_10K.pdf",
+              "size_bytes": 1252586,
+              "size_mb": 1.19,
+              "page_count": 160,
+              "read_error": null
+            },
+            {
+              "filename": "3M_2019_10K.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/FinanceBench/3M_2019_10K.pdf",
+              "size_bytes": 1231580,
+              "size_mb": 1.17,
+              "page_count": 186,
+              "read_error": null
+            }
+          ]
+        },
+        "Tat-QA": {
+          "manifest_selected_count": 5,
+          "manifest_local_count": 5,
+          "actual_pdf_count": 5,
+          "total_size_bytes": 31570666,
+          "page_count": {
+            "count": 5,
+            "min": 83,
+            "max": 178,
+            "mean": 123,
+            "median": 116
+          },
+          "total_pages": 615,
+          "pdfs": [
+            {
+              "filename": "Auto-Trader_2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/Tat-QA/Auto-Trader_2019.pdf",
+              "size_bytes": 5301807,
+              "size_mb": 5.06,
+              "page_count": 142,
+              "read_error": null
+            },
+            {
+              "filename": "Hansen-Technologies_2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/Tat-QA/Hansen-Technologies_2019.pdf",
+              "size_bytes": 3248323,
+              "size_mb": 3.1,
+              "page_count": 96,
+              "read_error": null
+            },
+            {
+              "filename": "Intu-Properties_2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/Tat-QA/Intu-Properties_2019.pdf",
+              "size_bytes": 10877415,
+              "size_mb": 10.37,
+              "page_count": 178,
+              "read_error": null
+            },
+            {
+              "filename": "Monolithic-Power-Systems-Inc_2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/Tat-QA/Monolithic-Power-Systems-Inc_2019.pdf",
+              "size_bytes": 4499946,
+              "size_mb": 4.29,
+              "page_count": 83,
+              "read_error": null
+            },
+            {
+              "filename": "Nextdc-Ltd_2019.pdf",
+              "path": "evaluation/datasets/pdfqa_benchmark/real-pdfQA/01.2_Input_Files_PDF/Tat-QA/Nextdc-Ltd_2019.pdf",
+              "size_bytes": 7643175,
+              "size_mb": 7.29,
+              "page_count": 116,
+              "read_error": null
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "warnings": [
+    "No dataset integrity warnings."
+  ]
+}

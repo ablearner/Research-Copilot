@@ -1,0 +1,2436 @@
+{
+  "cases": [
+    {
+      "id": "1307.6512v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "How do these differences manifest in the graphs?",
+      "document_id": "1307.6512v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1307.6512v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "minimum",
+        "mean",
+        "bayes",
+        "risk",
+        "error",
+        "quantizer",
+        "more",
+        "spread"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "minimum",
+        "mean",
+        "bayes",
+        "risk",
+        "error",
+        "quantizer",
+        "more",
+        "spread"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1307.6512v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The minimum mean Bayes risk error quantizer is more spread out across the probability simplex, while the minimax Bayes risk error quantizer is more clustered in the middle of the probability simplex. This is because the minimum mean Bayes risk error quantizer is more concerned with minimizing the expected squared error, while the minimax Bayes risk error quantizer is more concerned with minimizing the maximum squared error.",
+        "context": {
+          "title": "Optimal Grouping for Group Minimax Hypothesis Testing",
+          "caption": "Fig. 3. (a) Minimum mean and (b) minimax Bayes risk error quantizers forµ = 1, σ2 = 1, c10 = 1, c01 = 1.",
+          "first_mention": "Fig. 3 shows quantizers for equal Bayes costs and equal mean and standard deviation. In the plots, the black curve is J(p0) and the dashed line is J(p0, q4(p0)), with their difference being d(p0‖q4(p0)). The circle markers are the representation points and the vertical lines indicate the interval boundaries of the groups. The divergence value d(p0‖q4(p0)) is shown in Fig. 4. The minimax groups and representation points are more clustered in the middle of the probability simplex and around the peak of J(p0) than the minimum mean groups and representation points. This is more apparent in the quantizers for the noisier measurement model with µ = 1 and σ2 = 2 shown in Fig. 5, and the quantizers for unequal Bayes costs c10 = 10 and c01 = 1 shown in Fig. 7. The divergence values for these other two cases are shown in Fig. 6 and Fig. 8.",
+          "abstract": "Bayesian hypothesis testing and minimax hypothesis testing represent extreme instances of detection in which the prior probabilities of the hypotheses are either completely and precisely known, or are completely unknown. Group minimax, also known as Gamma-minimax, is a robust intermediary between Bayesian and minimax hypothesis testing that allows for coarse or partial advance knowledge of the hypothesis priors by using information on sets in which the prior lies. Existing work on group minimax, however, does not consider the question of how to define the sets or groups of priors; it is assumed that the groups are given. In this work, we propose a novel intermediate detection scheme formulated through the quantization of the space of prior probabilities that optimally determines groups and also representative priors within the groups. We show that when viewed from a quantization perspective, group minimax amounts to determining centroids with a minimax Bayes risk error divergence distortion criterion: the appropriate Bregman divergence for this task. Moreover, the optimal partitioning of the space of prior probabilities is a Bregman Voronoi diagram. Together, the optimal groupin..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1809.02702v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "What is the interpretation guide for ROC plots?",
+      "document_id": "1809.02702v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1809.02702v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "interpretation",
+        "guide",
+        "roc",
+        "plots",
+        "graphical",
+        "representation",
+        "helps",
+        "visualize"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "interpretation",
+        "guide",
+        "roc",
+        "plots",
+        "graphical",
+        "representation",
+        "helps",
+        "visualize"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1809.02702v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The interpretation guide for ROC plots is a graphical representation that helps to visualize the performance of a binary classifier. The guide is typically a two-dimensional plot, with the false positive rate (FPR) on the x-axis and the true positive rate (TPR) on the y-axis. The plot is created by plotting the points corresponding to the FPR and TPR values for each possible threshold value. The ideal classifier would have a TPR of 1 and an FPR of 0, which would correspond to a point in the upper left corner of the plot. However, in practice, no classifier is perfect, and the points on the plot will typically fall somewhere below the ideal line. The interpretation guide can be used to compare the performance of different classifiers. The classifier with the highest TPR and the lowest FPR is considered to be the best. The guide can also be used to evaluate the performance of a classifier over time. If the points on the plot move closer to the ideal line, this indicates that the classifier is improving. The interpretation guide can be a useful tool for understanding and evaluating the performance of binary classifiers.",
+        "context": {
+          "title": "Empirical Vulnerability Analysis of Automated Smart Contracts Security Testing on Blockchains",
+          "caption": "Figure 3: Interpretation guide",
+          "first_mention": "Following OWASP benchmark project6, Figure 3 shows the interpretation guide for ROC plots. Each plot shows a point plo ed",
+          "abstract": "The emerging blockchain technology supports decentralized computing paradigm shift and is a rapidly approaching phenomenon. While blockchain is thought primarily as the basis of Bitcoin, its application has grown far beyond cryptocurrencies due to the introduction of smart contracts. Smart contracts are self-enforcing pieces of software, which reside and run over a hosting blockchain. Using blockchain-based smart contracts for secure and transparent management to govern interactions (authentication, connection, and transaction) in Internet-enabled environments, mostly IoT, is a niche area of research and practice. However, writing trustworthy and safe smart contracts can be tremendously challenging because of the complicated semantics of underlying domain-specific languages and its testability. There have been high-profile incidents that indicate blockchain smart contracts could contain various code-security vulnerabilities, instigating financial harms. When it involves security of smart contracts, developers embracing the ability to write the contracts should be capable of testing their code, for diagnosing security vulnerabilities, before deploying them to the immutable enviro..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2004.10982v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the Pareto front in the context of this graph?",
+      "document_id": "2004.10982v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2004.10982v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "pareto",
+        "front",
+        "curve",
+        "represents",
+        "set",
+        "all",
+        "optimal",
+        "solutions"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "pareto",
+        "front",
+        "curve",
+        "represents",
+        "set",
+        "all",
+        "optimal",
+        "solutions"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2004.10982v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The Pareto front is a curve that represents the set of all Pareto optimal solutions for a given set of objective functions. In other words, it is the set of solutions that are not dominated by any other solution in terms of all objective functions. In this case, the Pareto front represents the set of all controllers that are optimal in terms of both time domain performance and control energy expenses. The best controller is selected from this set by making a trade-off between the two objective functions.",
+        "context": {
+          "title": "Multiobjective Based LQR Design for Fractional Order Systems with Perturbations using PESA-II Algorithm",
+          "caption": "Figure 2. Pareto Front of the system for J1 and J2",
+          "first_mention": "In the first attempt, J1 and J2 are considered for good time domain performance, optimal control energy expenses and robust stability of the system with minimum perturbations effect. The best controller is selected among the non-dominated solutions after trade-off between the objective functions. A good trade-off for both the objective functions is to select a controller from the area indicated by red colored arrow on the magnified Pareto solutions represented in figure 2. The time responses of the controllers are shown in figure 3. The time response plots show the comparison between the responses for the commensurate order systems (with the optimized value of Q and R and without optimization by selecting Q=I and R=I). Settling time and tuned values of the design variables (weighting matrices) for the commensurate order systems represented by equations 7 and 9 are shown in the tables. Similarly, J2 - J3, J1 – J3 objectives have been solved in two dimensions by making trade-offs. Pareto fronts and the responses are shown in the figures 4, 5, 6, and 7 respectively. Finally, the entire objective functions (J1 - J2 - J3) are solved simultaneously by making the trade-off between all the objective functions so that all the performance criteria defined in equations 14, 16 and 17 are satisfied in a symmetrical fashion. The Pareto front and response corresponding to the vector-valued objective function is shown in figure 8 and 9 respectively. In each of the examples considered we can see that the trade-off between the entire objective functions (i.e. J1 - J2 - J3) gives a good result by making a compromise between extreme conditions. The weighting matrices variables value of the best controller solution after PESA-II optimization is shown in table I and table II with settling time which represents the speed of the response.",
+          "abstract": "In this work perturbed LQR design for fractional-order systems with multiple performance indices is proposed."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2010.04706v1-Figure6-1",
+      "kind": "ask_fused",
+      "question": "The graph shows a comparison of all NYT articles, articles with the dateline, and US-only articles based on a heuristic. What is the heuristic?",
+      "document_id": "2010.04706v1-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2010.04706v1-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "heuristic",
+        "used",
+        "determine",
+        "whether",
+        "article",
+        "us",
+        "only",
+        "based"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "heuristic",
+        "used",
+        "determine",
+        "whether",
+        "article",
+        "us",
+        "only",
+        "based"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2010.04706v1-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The heuristic used to determine whether an article is US-only is based on the dateline. If the dateline does not have a non-US city, then the article is considered to be US-only. This heuristic is not perfect, as there may be some articles that are about non-US news but do not have a non-US city in the dateline. However, it is a reasonable approximation that allows us to remove a large number of non-US articles from the corpus.",
+        "context": {
+          "title": "Uncertainty over Uncertainty: Investigating the Assumptions, Annotations, and Text Measurements of Economic Policy Uncertainty",
+          "caption": "Figure 6: NYT total documents (red), documents with datelines (green) and documents for which the dateline does not have a non-US city (blue). We checked and confirmed and the spike in 1995-10 is an artifact of the corpus.",
+          "first_mention": "Per month, on average, we remove 449 documents that were about non-US news. See Figure 6 for a comparison of all NYT articles, articles with the dateline, and US-only articles based on our heuristic.",
+          "abstract": "Methods and applications are inextricably linked in science, and in particular in the domain of text-as-data. In this paper, we examine one such text-as-data application, an established economic index that measures economic policy uncertainty from keyword occurrences in news. This index, which is shown to correlate with firm investment, employment, and excess market returns, has had substantive impact in both the private sector and academia. Yet, as we revisit and extend the original authors' annotations and text measurements we find interesting text-as-data methodological research questions: (1) Are annotator disagreements a reflection of ambiguity in language? (2) Do alternative text measurements correlate with one another and with measures of external predictive validity? We find for this application (1) some annotator disagreements of economic policy uncertainty can be attributed to ambiguity in language, and (2) switching measurements from keyword-matching to supervised machine learning classifiers results in low correlation, a concerning implication for the validity of the index."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1506.04512v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the results of targeted attack simulation mode with uniform networks. What are the main differences between these results and those obtained in the evolution simulation modes?",
+      "document_id": "1506.04512v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1506.04512v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "main",
+        "difference",
+        "between",
+        "results",
+        "targeted",
+        "attack",
+        "simulation",
+        "mode"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "main",
+        "difference",
+        "between",
+        "results",
+        "targeted",
+        "attack",
+        "simulation",
+        "mode"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1506.04512v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The main difference between the results of the targeted attack simulation mode with uniform networks and those obtained in the evolution simulation modes is that the numbers of 1st and 2nd neighbors decrease for the none protocol in the targeted attack simulation mode. This is because, in the evolution simulation modes, the nodes are able to establish links with other nodes in the network, which helps to maintain a larger network size. However, in the targeted attack simulation mode, the node with the highest degree is removed from the network, which disrupts the network topology and leads to a decrease in the number of 1st and 2nd neighbors.",
+        "context": {
+          "title": "Self-Healing Protocols for Connectivity Maintenance in Unstructured Overlays",
+          "caption": "Fig. 5. Uniform networks – Targeted attack simulation mode.",
+          "first_mention": "1) Uniform Networks: When considering the targeted attack simulation mode with uniform networks results are not that different to those performed during the evolution. Indeed, there are no important differences between nodes, since all start with the same initial degree, during the network evolution links are established arbitrarily, and there are no important hubs in the network. Thus, the selection of the node with highest degree has not a significant impact on the topology (see Figure 5). Nevertheless, it is possible to appreciate that the numbers of 1st and 2nd neighbors decrease for the none protocol, w.r.t. results obtained for the evolution simulation modes. Similarly, in the none protocol the average size of the main component results lower w.r.t. that obtained in the evolution simulations.",
+          "abstract": "In this paper, we discuss on the use of self-organizing protocols to improve the reliability of dynamic Peer-to-Peer (P2P) overlay networks. Two similar approaches are studied, which are based on local knowledge of the nodes' 2nd neighborhood. The first scheme is a simple protocol requiring interactions among nodes and their direct neighbors. The second scheme adds a check on the Edge Clustering Coefficient (ECC), a local measure that allows determining edges connecting different clusters in the network. The performed simulation assessment evaluates these protocols over uniform networks, clustered networks and scale-free networks. Different failure modes are considered. Results demonstrate the effectiveness of the proposal."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1909.10820v1-Figure8-1",
+      "kind": "ask_fused",
+      "question": "What are the implications of the results shown in the graph?",
+      "document_id": "1909.10820v1-Figure8-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1909.10820v1-Figure8-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "have",
+        "several",
+        "implications",
+        "first",
+        "linear"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "have",
+        "several",
+        "implications",
+        "first",
+        "linear"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1909.10820v1-Figure8-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in the graph have several implications. First, the linear dependence between the inverse depth and the distortion norm suggests that the distortion can be used to estimate the depth of a pixel in the image. Second, the higher slope of the line for pixels closer to the edges of the image suggests that these pixels are more likely to be affected by distortion. This means that it is important to take into account the distortion when analyzing images, especially for pixels that are close to the edges of the image.",
+        "context": {
+          "title": "Distortion Estimation Through Explicit Modeling of the Refractive Surface",
+          "caption": "Fig. 8: Individual and average pixel distortions as a function of the inverse depth. We see a linear dependence between the inverse depth and the distortion norm.",
+          "first_mention": "A consequence of the physical generative model is the possibility to inspect the dependence of the distortions on pixel depth, as shown in Fig. 8. The image shows the change of distortion norm for two individual pixels with coordinates (820, 1232) and (410, 1232), as well as the change of the mean distortion norm. We can observe, that the distortion norm shows a linear dependence on the inverse depth of the pixel. The figure shows the distortions for the inverse depth interval of 0.5 (corresponding to a depth of 2 m) to 10 (depth of 10 cm). We can also observe that the slope of the line showing the change of distortion increases as we get closer to the edges of the image, where the change of distortion is 2.4 pixels over the analyzed interval, compared to the change of 1.64 pixels for the point closer to the image center.",
+          "abstract": "Precise calibration is a must for high reliance 3D computer vision algorithms. A challenging case is when the camera is behind a protective glass or transparent object: due to refraction, the image is heavily distorted; the pinhole camera model alone can not be used and a distortion correction step is required. By directly modeling the geometry of the refractive media, we build the image generation process by tracing individual light rays from the camera to a target. Comparing the generated images to their distorted - observed - counterparts, we estimate the geometry parameters of the refractive surface via model inversion by employing an RBF neural network. We present an image collection methodology that produces data suited for finding the distortion parameters and test our algorithm on synthetic and real-world data. We analyze the results of the algorithm."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1609.07245v2-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What are some other interesting aspects of this graph?",
+      "document_id": "1609.07245v2-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1609.07245v2-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "another",
+        "interesting",
+        "aspect",
+        "graph",
+        "expectation",
+        "standard",
+        "deviation",
+        "not"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "another",
+        "interesting",
+        "aspect",
+        "graph",
+        "expectation",
+        "standard",
+        "deviation",
+        "not"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1609.07245v2-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "Another interesting aspect of the graph is that the expectation and standard deviation are not perfectly correlated. This means that the amplitude of the spectrum can vary significantly even when the expectation is relatively constant. This could be due to a number of factors, such as the speaker's voice quality or the recording conditions. Overall, the graph provides some interesting insights into the nature of unvoiced [e]. This information could be useful for speech recognition and other applications.",
+        "context": {
+          "title": "A New Statistic Feature of the Short-Time Amplitude Spectrum Values for Human's Unvoiced Pronunciation",
+          "caption": "Fig. 2. The estimated expectation and standard deviation of the short-time amplitude spectrum for unvoiced [e]",
+          "first_mention": "In the STFT on each signal, the frame length is set to 512, which corresponds to a time interval of 32ms for a 16 kHz sampling frequency. A Hamming window is used on each frame in STFT. Let ωk denotes the k-th frequency component in STFT. Due to the randomness of the signal, the amplitude of ωk also varies randomly in each frame of the signal. Let μ(ωk) and σ2(ωk) represent the estimated average and variance of ωk’s amplitude respectively. And the estimated standard deviation σ(ωk) is the square-root of σ2(ωk). Mathematically, μ(ωk) and σ(ωk) are two functions, and their curves can be drawn after μ and σ are estimated for each frequency ωk. For a dozen of unvoiced phoneme, the above basic statistic is estimated. Some typical results are shown in Fig. 1 and Fig. 2 as the curves of μ(ωk) and σ(ωk). It can be observed evidently that there is clear similarity between the curves of μ(ωk) and σ(ωk). Such similarity also exists in all the other results of unvoiced pronunciation in the experiments, which inspires the study of the relationship between the two function μ(ωk) and σ(ωk) as following.",
+          "abstract": "In this paper, a new statistic feature of the discrete short-time amplitude spectrum is discovered by experiments for the signals of unvoiced pronunciation. For the random-varying short-time spectrum, this feature reveals the relationship between the amplitude's average and its standard for every frequency component. On the other hand, the association between the amplitude distributions for different frequency components is also studied. A new model representing such association is inspired by the normalized histogram of amplitude. By mathematical analysis, the new statistic feature discovered is proved to be necessary evidence which supports the proposed model, and also can be direct evidence for the widely used hypothesis of \"identical distribution of amplitude for all frequencies\"."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1706.01174v3-Figure6-1",
+      "kind": "ask_fused",
+      "question": "What is the relationship between the number of quantizers and the probability of detection (Pd) for the ramp signal in subgraph (a) and the sinusoidal signal in subgraph (b)?",
+      "document_id": "1706.01174v3-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1706.01174v3-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "probability",
+        "detection",
+        "pd",
+        "increases",
+        "number",
+        "quantizers"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "probability",
+        "detection",
+        "pd",
+        "increases",
+        "number",
+        "quantizers"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1706.01174v3-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the probability of detection (Pd) increases with the number of quantizers for both the ramp signal and the sinusoidal signal. This is because as the number of quantizers increases, the signal becomes more finely quantized, which makes it easier to distinguish between the signal and the noise. The graph also shows that the probability of detection is higher for the ramp signal than for the sinusoidal signal. This is because the ramp signal is a more predictable signal, which makes it easier to detect.",
+        "context": {
+          "title": "Signal Amplitude Estimation and Detection from Unlabeled Binary Quantized Samples",
+          "caption": "Fig. 6: Pd vs. number of quantizers N for the ramp signal in subgraph (a) and the sinusoidal signal in subgraph (b).",
+          "first_mention": "In Fig. 6, the relationship between PD and the number of quantizers N is employed. Parameters are",
+          "abstract": "Signal amplitude estimation and detection from unlabeled quantized binary samples are studied, assuming that the order of the time indexes is completely unknown. First, maximum likelihood (ML) estimators are utilized to estimate both the permutation matrix and unknown signal amplitude under arbitrary, but known signal shape and quantizer thresholds. Sufficient conditions are provided under which an ML estimator can be found in polynomial time and an alternating maximization algorithm is proposed to solve the general problem via good initial estimates. In addition, the statistical identifiability of the model is studied. Furthermore, the generalized likelihood ratio test (GLRT) detector is adopted to detect the presence of signal. In addition, an accurate approximation to the probability of successful permutation matrix recovery is derived, and explicit expressions are provided to reveal the relationship between the number of signal samples and the number of quantizers. Finally, numerical simulations are performed to verify the theoretical results."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1807.10535v1-Figure6-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the execution time of a 256-bit AVX2 instruction after inactivity of the AVX2 unit?",
+      "document_id": "1807.10535v1-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1807.10535v1-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "execution",
+        "time",
+        "256",
+        "bit",
+        "avx2",
+        "instruction"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "execution",
+        "time",
+        "256",
+        "bit",
+        "avx2",
+        "instruction"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1807.10535v1-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the execution time of a 256-bit AVX2 instruction increases after inactivity of the AVX2 unit. This is because the AVX2 unit begins powering down after approximately 0.5ms of inactivity, which increases the execution time for any subsequent AVX2 instruction. The AVX2 unit is fully powered down after approximately 1ms, leading to the highest performance penalty if any AVX2 instruction is executed in this state.",
+        "context": {
+          "title": "NetSpectre: Read Arbitrary Memory over Network",
+          "caption": "Figure 6: The number of cycles it takes to execute the VPAND instruction (including measurement overhead) after not using the AVX2 unit. After approximately 0.5ms, the upper half of the AVX2 unit starts to power down, which increases the latency for subsequentAVX2 instructions. After approximately 1ms, it is fully powered down, and we see the maximum latency for subsequent AVX2 instructions.",
+          "first_mention": "Figure 6 shows the execution time of a 256-bit AVX2 instruction (specifically VPAND) after inactivity of the AVX2 unit. If the inactivity is shorter than 0.5ms, i.e., the last AVX2 instruction was executed not more than 0.5ms ago, there is no performance penalty when executing an AVX2 instruction which uses the upper half of theAVX2 unit. After that, theAVX2 unit begins powering down, increasing the execution time for any subsequent AVX2 instruction, since the unit has to be powered up again and only emulates AVX2 in the meantime [19]. The AVX2 unit is fully powered down after approximately 1ms, leading to the highest performance penalty if any AVX2 instruction is executed in this state.",
+          "abstract": "In this paper, we present NetSpectre, a generic remote Spectre variant 1 attack. For this purpose, we demonstrate the first access-driven remote Evict+Reload cache attack over network, leaking 15 bits per hour. Beyond retrofitting existing attacks to a network scenario, we also demonstrate the first Spectre attack which does not use a cache covert channel. Instead, we present a novel high-performance AVX-based covert channel that we use in our cache-free Spectre attack. We show that in particular remote Spectre attacks perform significantly better with the AVX-based covert channel, leaking 60 bits per hour from the target system. We verified that our NetSpectre attacks work in local-area networks as well as between virtual machines in the Google cloud. NetSpectre marks a paradigm shift from local attacks, to remote attacks, exposing a much wider range and larger number of devices to Spectre attacks. Spectre attacks now must also be considered on devices which do not run any potentially attacker-controlled code at all. We show that especially in this remote scenario, attacks based on weaker gadgets which do not leak actual data, are still very powerful to break address-space layo..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1911.03809v1-Figure7-1",
+      "kind": "ask_fused",
+      "question": "The image shows the results of an experiment on the IMDB dataset. The experiment was conducted with three different noise levels: 0.1%, 1.0%, and 5.0%. The results show that the model trained with gold data only achieves the highest test accuracy, followed by the model trained with the forward model, then the model trained with the GLC model, and finally the model trained with the L2R model.",
+      "document_id": "1911.03809v1-Figure7-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1911.03809v1-Figure7-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "What is the significance of the results?"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "What is the significance of the results?"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1911.03809v1-Figure7-1",
+        "turn_index": 1,
+        "reference_answer": "What is the significance of the results?",
+        "context": {
+          "title": "Meta Label Correction for Noisy Label Learning",
+          "caption": "Figure 7: Results on IMDB. All numbers reported are accuracies on the test set. For references, using gold data only to train a model yields test accurucies of (0.541?, 0.647? and 0.741?, for three gold data ratios respectively.",
+          "first_mention": "IMDB. Figure 7 presents the detailed results on all three noisy settings.",
+          "abstract": "Leveraging weak or noisy supervision for building effective machine learning models has long been an important research problem. Its importance has further increased recently due to the growing need for large-scale datasets to train deep learning models. Weak or noisy supervision could originate from multiple sources including non-expert annotators or automatic labeling based on heuristics or user interaction signals. There is an extensive amount of previous work focusing on leveraging noisy labels. Most notably, recent work has shown impressive gains by using a meta-learned instance re-weighting approach where a meta-learning framework is used to assign instance weights to noisy labels. In this paper, we extend this approach via posing the problem as label correction problem within a meta-learning framework. We view the label correction procedure as a meta-process and propose a new meta-learning based framework termed MLC (Meta Label Correction) for learning with noisy labels. Specifically, a label correction network is adopted as a meta-model to produce corrected labels for noisy labels while the main model is trained to leverage the corrected labeled. Both models are jointly..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1803.03711v1-Figure6-1",
+      "kind": "ask_fused",
+      "question": "What is the relationship between the PSNR and the σ value in the graph?",
+      "document_id": "1803.03711v1-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1803.03711v1-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "psnr",
+        "peak",
+        "signal",
+        "noise",
+        "ratio",
+        "measure",
+        "quality",
+        "digital"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "psnr",
+        "peak",
+        "signal",
+        "noise",
+        "ratio",
+        "measure",
+        "quality",
+        "digital"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1803.03711v1-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The PSNR (Peak Signal-to-Noise Ratio) is a measure of the quality of a digital image. It is calculated by comparing the original image to the denoised image and measuring the difference between the two. The PSNR is expressed in decibels (dB), and a higher value indicates a better quality image. In the graph, the PSNR is plotted against the σ value, which is a measure of the noise in the image. As the σ value increases, the noise in the image increases, and the PSNR decreases. This is because the noise in the image makes it more difficult to distinguish between the original and denoised images.",
+        "context": {
+          "title": "Local Kernels that Approximate Bayesian Regularization and Proximal Operators",
+          "caption": "Fig. 6: PSNR over σ for approximating Huber total variation regularized denoising with non-local means.",
+          "first_mention": "′(|xk−xj |) |xk−xj | vs. ρ′′(|xk− xj|). In Figure 5, we added white Gaussian noise with standard deviation of 10 and applied the first- and second-order kernel filters. The output with the first-order kernel approximation is both qualitatively and quantitatively close to the output of total variation denoising, while having the advantage of being a non-iterative method. Figure 6 shows the approximation PSNR swept over σ. The approximation is more accurate for small σ.",
+          "abstract": "In this work, we broadly connect kernel-based filtering (e.g. approaches such as the bilateral filters and nonlocal means, but also many more) with general variational formulations of Bayesian regularized least squares, and the related concept of proximal operators. The latter set of variational/Bayesian/proximal formulations often result in optimization problems that do not have closed-form solutions, and therefore typically require global iterative solutions. Our main contribution here is to establish how one can approximate the solution of the resulting global optimization problems with use of locally adaptive filters with specific kernels. Our results are valid for small regularization strength but the approach is powerful enough to be useful for a wide range of applications because we expose how to derive a \"kernelized\" solution to these problems that approximates the global solution in one-shot, using only local operations. As another side benefit in the reverse direction, given a local data-adaptive filter constructed with a particular choice of kernel, we enable the interpretation of such filters in the variational/Bayesian/proximal framework."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1807.11396v1-Figure10-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the relationship between library richness and design closure?",
+      "document_id": "1807.11396v1-Figure10-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1807.11396v1-Figure10-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "library",
+        "richness",
+        "important",
+        "design",
+        "closure",
+        "especially"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "library",
+        "richness",
+        "important",
+        "design",
+        "closure",
+        "especially"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1807.11396v1-Figure10-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that library richness is important for design closure, especially when pushing the design to a higher frequency. This is because a richer library provides more options for the designer to choose from, which can help to close the timing and achieve the desired frequency. For example, in the case of the 9-track architecture, the alpha library was able to close the timing at 0.9 GHz and 1.0 GHz, while the min library could not. This shows that the alpha library has more flexibility and can be used to achieve higher frequencies.",
+        "context": {
+          "title": "Standard Cell Library Design and Optimization Methodology for ASAP7 PDK",
+          "caption": "Figure 10: Timing results from synthesis (w/ placement and routing) with minimum library (min lib) and alpha library (alpha lib) under 7.5-track architecture, (a) WNS, (b) TNS.",
+          "first_mention": "Fig. 9 further demonstrates the importance of library richness when pushing the design closure to a higher frequency. Fig. 9(a) and Fig. 9(b) compare the “WNS” and “TNS”, respectively, between min lib and alpha lib under the 9-track architecture. At 0.9 GHz and 1.0 GHz, the alpha lib can close the timing while the min lib leads to timing failures, i.e., negative values for “WNS” and “TNS”. For other low-frequency cases, the alpha lib consistently obtains better “TNS” than the min lib, which represents much larger flexibility for further power and area optimizations. As shown in Fig. 10, there may exist exceptions for 7.5-track libraries in terms of the observations aforementioned. However, the alpha lib still generates better power and area results than the min lib for most of the cases as shown in Table 3.",
+          "abstract": "Standard cell libraries are the foundation for the entire backend design and optimization flow in modern application-specific integrated circuit designs. At 7nm technology node and beyond, standard cell library design and optimization is becoming increasingly difficult due to extremely complex design constraints, as described in the ASAP7 process design kit (PDK). Notable complexities include discrete transistor sizing due to FinFETs, complicated design rules from lithography and restrictive layout space from modern standard cell architectures. The design methodology presented in this paper enables efficient and high-quality standard cell library design and optimization with the ASAP7 PDK. The key techniques include exhaustive transistor sizing for cell timing optimization, transistor placement with generalized Euler paths and back-end design prototyping for library-level explorations."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1909.13101v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "How does the training process graph support your conclusion about the overfitting of the CNN model?",
+      "document_id": "1909.13101v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1909.13101v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "training",
+        "process",
+        "graph",
+        "shows",
+        "accuracy",
+        "increases",
+        "over",
+        "time"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "training",
+        "process",
+        "graph",
+        "shows",
+        "accuracy",
+        "increases",
+        "over",
+        "time"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1909.13101v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The training process graph shows that the training accuracy increases over time, while the validation accuracy plateaus after a certain point. This suggests that the model is starting to overfit to the training data, as it is no longer learning new information from the data.",
+        "context": {
+          "title": "Plasmodium Detection Using Simple CNN and Clustered GLCM Features",
+          "caption": "Figure 5. Epoch vs accuracy from training process",
+          "first_mention": "The CNN model training obtained 97% training accuracy and 99% validation accuracy. Validation data were obtained from 100 random images obtained from the data augmentation process, so there is a possibility that the high validation accuracy was due to the overfitting. The graph of the training process can be seen in Figure 5.",
+          "abstract": "Malaria is a serious disease caused by the Plasmodium parasite that transmitted through the bite of a female Anopheles mosquito and invades human erythrocytes. Malaria must be recognized precisely in order to treat the patient in time and to prevent further spread of infection. The standard diagnostic technique using microscopic examination is inefficient, the quality of the diagnosis depends on the quality of blood smears and experience of microscopists in classifying and counting infected and non-infected cells. Convolutional Neural Networks (CNN) is one of deep learning class that able to automate feature engineering and learn effective features that could be very effective in diagnosing malaria. This study proposes an intelligent system based on simple CNN for detecting malaria parasites through images of thin blood smears. The CNN model obtained high sensitivity of 97% and relatively high PPV of 81%. This study also proposes a false positive reduction method using feature clustering extracted from the gray level co-occurrence matrix (GLCM) from the Region of Interests (ROIs). Adding the GLCM feature can significantly reduce false positives. However, this technique requires..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1504.04407v2-Figure6-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the results of a comparison of several algorithms for the de-blurring problem. What are the key takeaways from this comparison?",
+      "document_id": "1504.04407v2-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1504.04407v2-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "ms2gd",
+        "algorithm",
+        "outperforms",
+        "sgd",
+        "s2gd",
+        "fista"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "ms2gd",
+        "algorithm",
+        "outperforms",
+        "sgd",
+        "s2gd",
+        "fista"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1504.04407v2-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the mS2GD algorithm outperforms SGD+, S2GD and FISTA in terms of both the convergence speed and the final error. SGD+ decreases the objective function very rapidly at the beginning, but slows down after 10-20 epochs. S2GD and FISTA also converge slowly, but they do not achieve the same level of accuracy as mS2GD.",
+        "context": {
+          "title": "Mini-Batch Semi-Stochastic Gradient Descent in the Proximal Setting",
+          "caption": "Fig. 6: Comparison of several algorithms for the de-blurring problem.",
+          "first_mention": "n , similarly as was done in [2]. Figure (5) shows the original test image (left) and a blurred image with added Gaussian noise (right). Figure 6 compares the mS2GD algorithm with SGD+, S2GD and FISTA. We run all algorithms for 100 epochs and plot the error. The plot suggests that SGD+ decreases the objective function very rapidly at beginning, but slows down after 10-20 epochs.",
+          "abstract": "We propose mS2GD: a method incorporating a mini-batching scheme for improving the theoretical complexity and practical performance of semi-stochastic gradient descent (S2GD). We consider the problem of minimizing a strongly convex function represented as the sum of an average of a large number of smooth convex functions, and a simple nonsmooth convex regularizer. Our method first performs a deterministic step (computation of the gradient of the objective function at the starting point), followed by a large number of stochastic steps. The process is repeated a few times with the last iterate becoming the new starting point. The novelty of our method is in introduction of mini-batching into the computation of stochastic steps. In each step, instead of choosing a single function, we sample $b$ functions, compute their gradients, and compute the direction based on this. We analyze the complexity of the method and show that it benefits from two speedup effects. First, we prove that as long as $b$ is below a certain threshold, we can reach any predefined accuracy with less overall work than without mini-batching. Second, our mini-batching scheme admits a simple parallel implementation..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1803.06291v1-Figure6-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results shown in Figure 6?",
+      "document_id": "1803.06291v1-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1803.06291v1-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "social",
+        "welfare",
+        "optimization",
+        "scheme"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "social",
+        "welfare",
+        "optimization",
+        "scheme"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1803.06291v1-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in Figure 6 demonstrate that the social welfare optimization scheme is more effective than the energy trading scheme in terms of overall utility. This is because the social welfare optimization scheme takes into account the utility of all users, while the energy trading scheme only takes into account the utility of the energy trading user. As a result, the social welfare optimization scheme is able to achieve a higher level of satisfaction for all users.",
+        "context": {
+          "title": "Secure Wireless Powered and Cooperative Jamming D2D Communications",
+          "caption": "Fig. 6: UL vs ξ.",
+          "first_mention": "Fig. 6 shows the utility function versus EH efficiency ξ, where the utility functions increase with ξ. Fig. 6(a) shows that the social welfare optimization scheme outperforms the",
+          "abstract": "This paper investigates a secure wireless-powered device-to-device (D2D) communication network in the presence of multiple eavesdroppers, where a hybrid base station (BS) in a cellular network not only provides power wirelessly for the D2D transmitter to guarantee power efficiency for the D2D network, but also serves as a cooperative jammer (CJ) to interfere with the eavesdroppers. The cellular and D2D networks can belong to different service providers, which means that the D2D transmitter would need to pay for the energy service released by the hybrid BS to guarantee secure D2D communication. In order to exploit the hierarchical interaction between the BS and the D2D transmitter, we first formulate a Stackelberg game based energy trading scheme, where the quadratic energy cost model is considered. Then, a non-energy trading based Stackelberg game is investigated to study the reversed roles of the BS and the D2D users. For comparison, we also formulate and resolve the social welfare optimization problem. We derive the closed-form Stackelberg equilibriums of the formulated games and the optimal solutions for the social welfare optimization problem. Simulation results are provided..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1901.09217v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "Why are the pictures in the first row of Figure 3 comparable to those in the other rows?",
+      "document_id": "1901.09217v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1901.09217v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "pictures",
+        "first",
+        "row",
+        "figure",
+        "comparable",
+        "those",
+        "other",
+        "rows"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "pictures",
+        "first",
+        "row",
+        "figure",
+        "comparable",
+        "those",
+        "other",
+        "rows"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1901.09217v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The pictures in the first row of Figure 3 are comparable to those in the other rows because they are all generated using the same function. This means that the only difference between the pictures is the distribution of ideal points. This allows for a more direct comparison of the different distributions.",
+        "context": {
+          "title": "What Do Multiwinner Voting Rules Do? An Experiment Over the Two-Dimensional Euclidean Domain",
+          "caption": "Figure 2: Plot of the function y = 1π/2 arctan ( x εT ) that we use for converting cell frequencies to color intensities.",
+          "first_mention": "where T is the sum of the frequencies of all the cells (so in our case T = 20 · 10000) and ε is a parameter. We used ε = 0.0004, so for the highest frequency of a cell in all our experiments (found for k-Borda with the Gaussian distribution) we have x/(εT ) = 10.9; for most other rules and distributions this value is below 1.5 and thus falls into the part where our function behaves fairly linearly (see Figure 2). To present the distributions themselves, we computed histograms of the ideal points generated using our distributions (on the technical side, to generate these histograms, we used candidate positions from 10 000 generated elections for each distribution; since formula (1) is normalized, the pictures in the first row of Figure 3 are comparable to those in the other rows).",
+          "abstract": "We visualize aggregate outputs of popular multiwinner voting rules--SNTV, STV, Bloc, k-Borda, Monroe, Chamberlin--Courant, and HarmonicBorda--for elections generated according to the two-dimensional Euclidean model. We consider three applications of multiwinner voting, namely, parliamentary elections, portfolio/movie selection, and shortlisting, and use our results to understand which of our rules seem to be best suited for each application. In particular, we show that STV (one of the few nontrivial rules used in real high-stake elections) exhibits excellent performance, whereas the Bloc rule (also often used in practice) performs poorly."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1902.04639v2-Figure1-1",
+      "kind": "ask_fused",
+      "question": "What is the difference between the two graphs in Figure 1?",
+      "document_id": "1902.04639v2-Figure1-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1902.04639v2-Figure1-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "two",
+        "graphs",
+        "figure",
+        "depict",
+        "margin",
+        "based",
+        "loss",
+        "minimum"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "two",
+        "graphs",
+        "figure",
+        "depict",
+        "margin",
+        "based",
+        "loss",
+        "minimum"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1902.04639v2-Figure1-1",
+        "turn_index": 1,
+        "reference_answer": "The two graphs in Figure 1 depict the margin-based α-loss and the minimum conditional risk for different values of α. The margin-based α-loss is a function of the margin z = yf(x), where y is the label and f(x) is the classification function. The minimum conditional risk is the minimum risk achievable by a classification function with respect to a given loss function.",
+        "context": {
+          "title": "A Tunable Loss Function for Binary Classification",
+          "caption": "Figure 1. (a) Margin-based α-loss, as a function of the margin z = yf(x); (b) minimum conditional risk for different values of α.",
+          "first_mention": "where the product yf(x) is called the margin. Observe that a negative margin corresponds to a mismatch between the signs of f(x) and y, i.e., a classification error by f . Similarly, a positive margin corresponds to a match between the signs of f(x) and y, i.e., a correct classification by f . Hence, most margin-based losses have a graph similar to those depicted in Figure 1(a). Since margin-based loss functions synthesize two quantities (Y and f ) into a single margin, they are commonly found in the binary classification literature [1], [2], [7]. The risk of a classification function f with respect to (w.r.t.) a margin-based loss function l̃ is defined as",
+          "abstract": "We present $\\alpha$-loss, $\\alpha \\in [1,\\infty]$, a tunable loss function for binary classification that bridges log-loss ($\\alpha=1$) and $0$-$1$ loss ($\\alpha = \\infty$). We prove that $\\alpha$-loss has an equivalent margin-based form and is classification-calibrated, two desirable properties for a good surrogate loss function for the ideal yet intractable $0$-$1$ loss. For logistic regression-based classification, we provide an upper bound on the difference between the empirical and expected risk at the empirical risk minimizers for $\\alpha$-loss by exploiting its Lipschitzianity along with recent results on the landscape features of empirical risk functions. Finally, we show that $\\alpha$-loss with $\\alpha = 2$ performs better than log-loss on MNIST for logistic regression."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1606.08906v1-Figure42-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the curve in Figure 42?",
+      "document_id": "1606.08906v1-Figure42-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1606.08906v1-Figure42-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "curve",
+        "figure",
+        "42",
+        "represents",
+        "realistic",
+        "servicing",
+        "characteristic",
+        "infinitesimally"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "curve",
+        "figure",
+        "42",
+        "represents",
+        "realistic",
+        "servicing",
+        "characteristic",
+        "infinitesimally"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1606.08906v1-Figure42-1",
+        "turn_index": 1,
+        "reference_answer": "The curve in Figure 42 represents a realistic servicing characteristic for infinitesimally fragmented plant. It shows how the number of transported bits increases as the priority of the plant fragments increases. This is because the higher the priority of a plant fragment, the more important it is to update it quickly. Therefore, the system will prioritize transporting bits that update the higher priority plant fragments. This ensures that the most important plant fragments are updated first, which is critical for maintaining the integrity of the plant.",
+        "context": {
+          "title": "Exploring high-level Perspectives on Self-Configuration Capabilities of Systems",
+          "caption": "Figure 42: A qualitative curve describing a realistic servicing characteristic for infinitesimally fragmented plant.",
+          "first_mention": "This approach does not require to have exactly three priorities and thee plant fragments. The plant fragmentation can be pursued into infinitesimal micro-scales. In that case there is up to an infinite number of priorities. Bit fragments arriving first are used to update plant fragments with highest priorities as shown in figure 42.",
+          "abstract": "Optimization of product performance repetitively introduces the need to make products adaptive in a more general sense. This more general idea is often captured under the term 'self-configuration'. Despite the importance of such capability, research work on this feature appears isolated by technical domains. It is not easy to tell quickly whether the approaches chosen in different technological domains introduce new ideas or whether the differences just reflect domain idiosyncrasies. For the sake of easy identification of key differences between systems with self-configuring capabilities, I will explore higher level concepts for understanding self-configuration, such as the {\\Omega}-units, in order to provide theoretical instruments for connecting different areas of technology and research."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2003.10152v3-Figure7-1",
+      "kind": "ask_fused",
+      "question": "What does the graph in Figure 7 show about the speed-accuracy trade-off for bounding-box object detection?",
+      "document_id": "2003.10152v3-Figure7-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2003.10152v3-Figure7-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "figure",
+        "shows",
+        "solov2",
+        "has",
+        "better",
+        "speed",
+        "accuracy"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "figure",
+        "shows",
+        "solov2",
+        "has",
+        "better",
+        "speed",
+        "accuracy"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2003.10152v3-Figure7-1",
+        "turn_index": 1,
+        "reference_answer": "The graph in Figure 7 shows that SOLOv2 has a better speed-accuracy trade-off than most other object detection methods. This means that SOLOv2 can achieve higher accuracy than other methods while still being faster.",
+        "context": {
+          "title": "SOLOv2: Dynamic and Fast Instance Segmentation",
+          "caption": "Figure 7 – Speed-accuracy trade-off of bounding-box object detection on the COCO test-dev.",
+          "first_mention": "As shown in Table 4, our detection results outperform most methods, especially for objects of large scales, demonstrating the effectiveness of SOLOv2 in object box detection. Similar to instance segmentation, we also plot the speed/accuracy trade-off curve for different methods in Figure 7. We show our models with ResNet-101 and two light-weight versions described above. The plot reveals that the bounding box performance of SOLOv2 beats most recent object detection methods in both",
+          "abstract": "In this work, we aim at building a simple, direct, and fast instance segmentation framework with strong performance. We follow the principle of the SOLO method of Wang et al. \"SOLO: segmenting objects by locations\". Importantly, we take one step further by dynamically learning the mask head of the object segmenter such that the mask head is conditioned on the location. Specifically, the mask branch is decoupled into a mask kernel branch and mask feature branch, which are responsible for learning the convolution kernel and the convolved features respectively. Moreover, we propose Matrix NMS (non maximum suppression) to significantly reduce the inference time overhead due to NMS of masks. Our Matrix NMS performs NMS with parallel matrix operations in one shot, and yields better results. We demonstrate a simple direct instance segmentation system, outperforming a few state-of-the-art methods in both speed and accuracy. A light-weight version of SOLOv2 executes at 31.3 FPS and yields 37.1% AP. Moreover, our state-of-the-art results in object detection (from our mask byproduct) and panoptic segmentation show the potential to serve as a new strong baseline for many instance-level reco..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2001.00616v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "What does the bifurcation curve represent in this graph?",
+      "document_id": "2001.00616v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2001.00616v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "bifurcation",
+        "curve",
+        "graph",
+        "represents",
+        "different",
+        "solutions",
+        "neumann",
+        "problem"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "bifurcation",
+        "curve",
+        "graph",
+        "represents",
+        "different",
+        "solutions",
+        "neumann",
+        "problem"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2001.00616v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The bifurcation curve in this graph represents the different solutions to the Neumann problem (5.1), with f(u) = u(u − 1)(7 − u), n = 1. The curve shows how the solution changes as the parameter λ is varied.",
+        "context": {
+          "title": "Continuation of global solution curves using global parameters",
+          "caption": "Figure 5: The global Neumann solution curves for the problem (5.1), with f(u) = u(u− 1)(7 − u), n = 1",
+          "first_mention": "In Figure 4 we present the program to compute the bifurcation diagrams for (5.1), in case f(u) = u(u − 1)(7 − u) (electronically available at http://homepages.uc.edu/∼kormanp/). For this f(u) the problem (5.1) has a trivial solution u(r) = 1 for all λ. Our computations show that the situation is different for the cases n = 1 and n ≥ 2. In the case n = 1 there are two half-branches bifurcating from u = 1 at some λ0 ≈ 1.65 that continue for all λ > λ0 without any turns, see Figure 5. That both half-branches bifurcating from u = 1 do not turn was proved rigorously by R. Schaaf [24], in case n = 1, for a class of nonlinearities f(u) which includes polynomials with simple roots. In Figure 6 we present the bifurcation picture for n = 5, which is typical for all other dimensions n ≥ 2 that we tried. This time two half-branches bifurcate from u = 1 at some λ1 ≈ 5.5. The lower branch continues without any turns for all λ > λ1, while the upper branch continues for decreasing λ, and makes exactly one turn. Proving these facts rigorously is a very challenging open problem. The bifurcation methods as in e.g., P. Korman [12] or T. Ouyang and J. Shi [21] appear to be inapplicable here.",
+          "abstract": "This paper provides both the theoretical results and numerical calculations of global solution curves, by continuation in global parameters. Each point on the solution curves is computed directly as the global parameter is varied, so that all of the turns that the solution curves make, as well as its different branches, appear automatically on the computer screen. For radial $p$-Laplace equations we present a simplified derivation of the regularizing transformation from P. Korman [15], and use this transformation for more accurate numerical computations. While for $p>2$ the solutions are not of class $C^2$, we show that they are of the form $w(r^{\\frac{p}{2(p-1)}})$, where $w(z)$ is of class $C^2$. Bifurcation diagrams are also calculated for non-autonomous problems, and for the fourth order equations modeling elastic beams. We show that the first harmonic of the solution can also serve as a global parameter."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1912.03832v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "What does the x-axis and y-axis represent in the precision-recall curve?",
+      "document_id": "1912.03832v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1912.03832v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "axis",
+        "precision",
+        "recall",
+        "curve",
+        "represents",
+        "while"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "axis",
+        "precision",
+        "recall",
+        "curve",
+        "represents",
+        "while"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1912.03832v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The x-axis of the precision-recall curve represents the recall, while the y-axis represents the precision.",
+        "context": {
+          "title": "Effective Attention Modeling for Neural Relation Extraction",
+          "caption": "Figure 3: Precision-Recall curve for the NYT10 dataset.",
+          "first_mention": "We present the results of our final model on the relation extraction task on the two datasets in Table 2. Our model outperforms the previous stateof-the-art models on both datasets in terms of F1 score. On the NYT10 dataset, it achieves 4.3% higher F1 score compared to the previous best state-of-the-art model EA. Similarly, it achieves 3.3% higher F1 score compared to the previous best state-of-the-model PCNN on the NYT11 dataset. Our model improves the precision scores on both datasets with good recall scores. This will help to build a cleaner knowledge base with fewer false positives. We also show the precision-recall curves for the NYT10 and NYT11 datasets in Figures 3 and 4 respectively. The goal of any relation extraction system is to extract as many relations as possible with minimal false positives. If the recall score becomes very low, the coverage of",
+          "abstract": "Relation extraction is the task of determining the relation between two entities in a sentence. Distantly-supervised models are popular for this task. However, sentences can be long and two entities can be located far from each other in a sentence. The pieces of evidence supporting the presence of a relation between two entities may not be very direct, since the entities may be connected via some indirect links such as a third entity or via co-reference. Relation extraction in such scenarios becomes more challenging as we need to capture the long-distance interactions among the entities and other words in the sentence. Also, the words in a sentence do not contribute equally in identifying the relation between the two entities. To address this issue, we propose a novel and effective attention model which incorporates syntactic information of the sentence and a multi-factor attention mechanism. Experiments on the New York Times corpus show that our proposed model outperforms prior state-of-the-art models."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1904.11251v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results shown in the graph?",
+      "document_id": "1904.11251v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1904.11251v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "provide",
+        "evidence",
+        "lstm",
+        "model",
+        "can"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "provide",
+        "evidence",
+        "lstm",
+        "model",
+        "can"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1904.11251v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in the graph provide evidence that the LSTM-P model can achieve good performance by balancing syntactic coherence and global coverage. The model achieves the best performance when λ is set to 0.3, which suggests that it is reasonable to encourage both syntactic coherence and global coverage of objects in the output sentence for boosting novel object captioning.",
+        "context": {
+          "title": "Pointing Novel Objects in Image Captioning",
+          "caption": "Figure 5. The effect of the tradeoff parameter λ in our LSTM-P over (a) F1average (%) and (b) METEOR (%) on held-out COCO.",
+          "first_mention": "Effect of the Tradeoff Parameter λ. To clarify the effect of the tradeoff parameter λ in Eq.(10), we illustrate the performance curves over two evaluation metrics with a different tradeoff parameter in Figure 5. As shown in the figure, we can see that all performance curves are generally like the “∧” shapes when λ varies in a range from 0 to 1. Hence we set the tradeoff parameter λ as 0.3 in our experiments, which can achieve the best performance. This again proves that it is reasonable to encourage both the syntactic coherence and the global coverage of objects in the output sentence for boosting novel object captioning.",
+          "abstract": "Image captioning has received significant attention with remarkable improvements in recent advances. Nevertheless, images in the wild encapsulate rich knowledge and cannot be sufficiently described with models built on image-caption pairs containing only in-domain objects. In this paper, we propose to address the problem by augmenting standard deep captioning architectures with object learners. Specifically, we present Long Short-Term Memory with Pointing (LSTM-P) --- a new architecture that facilitates vocabulary expansion and produces novel objects via pointing mechanism. Technically, object learners are initially pre-trained on available object recognition data. Pointing in LSTM-P then balances the probability between generating a word through LSTM and copying a word from the recognized objects at each time step in decoder stage. Furthermore, our captioning encourages global coverage of objects in the sentence. Extensive experiments are conducted on both held-out COCO image captioning and ImageNet datasets for describing novel objects, and superior results are reported when comparing to state-of-the-art approaches. More remarkably, we obtain an average of 60.9% in F1 score on..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2010.09814v1-Figure7-1",
+      "kind": "ask_fused",
+      "question": "What can be inferred from the graph about the performance of the neural network?",
+      "document_id": "2010.09814v1-Figure7-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2010.09814v1-Figure7-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "neural",
+        "network",
+        "able",
+        "accurately",
+        "predict",
+        "system"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "neural",
+        "network",
+        "able",
+        "accurately",
+        "predict",
+        "system"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2010.09814v1-Figure7-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the neural network is able to accurately predict the system response for both turbines 1 and 2. This is evident from the fact that the neural network predictions are in close agreement with the results from FOWFSim-Dyn, which is a validated simulation tool. The neural network is also able to capture the dynamics of the system, as evidenced by the smooth curves in the graph. This suggests that the neural network is a promising tool for modeling and control of floating wind turbines.",
+        "context": {
+          "title": "Social Hierarchy-based Distributed Economic Model Predictive Control of Floating Offshore Wind Farms",
+          "caption": "Figure 7: Sample validation data for the neural network of the upstream machine (i.e. turbine 2) in a two-turbine floating wind farm.",
+          "first_mention": "For validation, FOWFSim-Dyn and the neural networks were given the same randomly generated initial condition and turbine input sequences over 60 time-steps (i.e. 3,600 sec). Their predictions of the system response are compared for both turbines 1 and 2 in Fig. 6 and Fig. 7, respectively. These plots correspond to a single run, and have been",
+          "abstract": "This paper implements a recently developed social hierarchy-based distributed economic model predictive control (DEMPC) algorithm in floating offshore wind farms for the purpose of power maximization. The controller achieves this objective using the concept of yaw and induction-based turbine repositioning (YITuR), which minimizes the overlap areas between adjacent floating wind turbine rotors in real-time to minimize the wake effect. Floating wind farm dynamics and performance are predicted numerically using FOWFSim-Dyn. To ensure fast decision-making by the DEMPC algorithm, feed-forward neural networks are used to estimate floating wind turbine dynamics during the process of dynamic optimization. For simulated wind farms with layouts ranging from 1-by-2 to 1-by-5, an increase of 20% in energy production is predicted when using YITuR instead of greedy operation. Increased variability in wind speed and direction is also studied and is shown to diminish controller performance due to rising errors in neural network predictions."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2007.00982v1-Figure4-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the rewards of PPO training in simulation over 5 runs. What can be inferred about the performance of the trained model based on this graph?",
+      "document_id": "2007.00982v1-Figure4-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2007.00982v1-Figure4-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "rewards",
+        "trained",
+        "model",
+        "converged",
+        "very",
+        "quickly"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "rewards",
+        "trained",
+        "model",
+        "converged",
+        "very",
+        "quickly"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2007.00982v1-Figure4-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the rewards of the trained model converged very quickly, and the model achieved a good performance after about 30 minutes of training. This is an impressive result, as it shows that the model can be trained efficiently and effectively in simulation. This is important, as it allows for the development of new robotic systems without the need for a real-world robot.",
+        "context": {
+          "title": "Towards Generalization and Data Efficient Learning of Deep Robotic Grasping",
+          "caption": "Fig. 4. The process of policy training in simulation. The rewards converged very quickly and the model trained has achieved a good performance after about 30 minutes. The policy model used in all experiments is trained for 200 episodes, as indicated by the red arrow.",
+          "first_mention": "Both the training of PPO and Mask R-CNN is done on a PC with a RTX 2080Ti GPU. The average rewards of PPO training in simulation over 5 runs are shown in Fig.4. Very impressive results are obtained after about 30 minutes training of PPO, indicating by the red arrow in Fig.4. By contrast, the interactions with the same number of episodes would take tens of hours for a real physical robot. The training of Mask RCNN on our own dataset takes about 10 hours. This training may be not necessary since a pre-trained model on general dataset usually works well in many cases. It is worth noting that all the training above does not require a real-world robot and the trained networks will be transferred into a real-world",
+          "abstract": "Deep reinforcement learning (DRL) has been proven to be a powerful paradigm for learning complex control policy autonomously. Numerous recent applications of DRL in robotic grasping have successfully trained DRL robotic agents end-to-end, mapping visual inputs into control instructions directly, but the amount of training data required may hinder these applications in practice. In this paper, we propose a DRL based robotic visual grasping framework, in which visual perception and control policy are trained separately rather than end-to-end. The visual perception produces physical descriptions of grasped objects and the policy takes use of them to decide optimal actions based on DRL. Benefiting from the explicit representation of objects, the policy is expected to be endowed with more generalization power over new objects and environments. In addition, the policy can be trained in simulation and transferred in real robotic system without any further training. We evaluate our framework in a real world robotic system on a number of robotic grasping tasks, such as semantic grasping, clustered object grasping, moving object grasping. The results show impressive robustness and general..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2004.07753v2-Figure5-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the relationship between the minimum number of IRS elements required and the distance between the source and the destination?",
+      "document_id": "2004.07753v2-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2004.07753v2-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "minimum",
+        "number",
+        "irs",
+        "elements",
+        "required",
+        "achieve"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "minimum",
+        "number",
+        "irs",
+        "elements",
+        "required",
+        "achieve"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2004.07753v2-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the minimum number of IRS elements required to achieve a lower transmit power than that of SISO and DF relaying increases as the distance between the source and the destination increases. This is because the IRS must be placed closer to the source in order to effectively reflect the signal to the destination.",
+        "context": {
+          "title": "The Impact of 5G Channel Models on the Performance of Intelligent Reflecting Surfaces and Decode-and-Forward Relaying",
+          "caption": "Figure 5. Minimum number of IRS elements (Nmin) for IRS to support R̄ = 6 bits/sec/Hz for a lower transmit power than DF relaying and SISO. Number Nmin is depicted as a function of dsr for fc = 3 GHz, B = 10 MHz and various values of d1.",
+          "first_mention": "The impact of d1 and dsr on the performance of ISR is further investigated in Fig. 5, where dsr ranges from 10m to 80m and d1 = {(1/2)dsr, (3/4)dsr, (5/4)dsr, (3/2)dsr}. The figure shows the minimum required number of elements for the IRS case to achieve a transmit power that is lower than that of SISO and DF relaying when R̄ = 6 bits/sec/Hz. We observe that, for d1 = dsr/2, the IRS case outperforms SISO and DF relaying across the dsr range for any N ≥ 1. As the ISR moves away from the source and dsr increases, more elements are needed as d1 approaches and exceeds the value of dsr. Fig. 4b and Fig. 5 establish that a large number of elements is required to extend the coverage of the source, i.e., when d1 > dsr, making DF relaying the best option. However, IRS is a viable solution when the objective is to reduce the transmit power at the source for a given coverage, i.e., when",
+          "abstract": "An intelligent reflecting surface (IRS) is an array of discrete elements with configurable scattering properties. It has the capability to beamform arriving radio waves to an intended receiver, making it an attractive candidate technology for fifth-generation (5G) communications. A recent study debunked the notion that IRSs can replace relays because a large number of IRS elements is required even to approach the performance of simple single-antenna decode-and-forward (DF) relays. The study introduced 4G channel models into a theoretical framework to obtain simulation results, based on which comparisons between the two schemes were carried out. In this paper, we consider 5G channel models, reflect on the revised results, and argue that IRSs and DF relays can complement each other's strengths and can both have a place in 5G and beyond 5G architectures."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1902.09581v2-Figure9-1",
+      "kind": "ask_fused",
+      "question": "What is the main focus of this graph?",
+      "document_id": "1902.09581v2-Figure9-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1902.09581v2-Figure9-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "main",
+        "focus",
+        "graph",
+        "examine",
+        "effect",
+        "skewness",
+        "parameter",
+        "zipfian"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "main",
+        "focus",
+        "graph",
+        "examine",
+        "effect",
+        "skewness",
+        "parameter",
+        "zipfian"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1902.09581v2-Figure9-1",
+        "turn_index": 1,
+        "reference_answer": "The main focus of this graph is to examine the effect of the skewness parameter of the Zipfian distribution on the distortion reduction. The skewness parameter, η, is a measure of the distribution's diversity. A low value of η indicates a more diverse distribution, while a high value of η indicates a less diverse distribution.",
+        "context": {
+          "title": "Tile-Based Joint Caching and Delivery of $360^o$ Videos in Heterogeneous Networks",
+          "caption": "Fig. 9. Distortion reduction with respect to Zipf shape parameter for all schemes under comparison.",
+          "first_mention": "5) Video popularity distribution: In Fig. 9, we examine the effect of the skewness parameter of the Zipfian distribution on the distortion reduction. To this end, we vary the shape parameter η from 0.5 up to 2.5. For small values of η, i.e., very diverse content demands, the difference between the proposed scheme and ICNT and JCNT is approximately 54% and 25%, respectively. This difference is due to the encoding in tiles which permits to cache the base layer tiles locally and hence satisfy most of the users’ requests with a basic video quality. This is not the case in ICNT and JCNT as without encoding in tiles and layers the local caches are occupied by large data chunks which can satisfy only a small percentage of the diverse users’ requests. Similar to previous comparisons we can see that performance difference between the proposed algorithm and JCL and IC is smaller than that with ICNT and JCNT because former schemes consider data chunks of smaller size, layers for JCL and tiles for IC. The proposed scheme outperforms IC because of the exploitation of cache collaboration opportunities. The performance gap closes when η value becomes higher, as the majority of the user requests refer to a smaller number of videos. Higher values of η are more beneficial for ICNT and JCNT, as these schemes do not encode videos in tiles and layers, but even for such η values, ICNT and JCNT schemes performance remains inferior to that of the other schemes. It is worth to note that for higher η values collaboration becomes less important, as there is less variety in",
+          "abstract": "The recent surge of applications involving the use of $360^o$ video challenges mobile networks infrastructure, as $360^o$ video files are of significant size, and current delivery and edge caching architectures are unable to guarantee their timely delivery. In this paper, we investigate the problem of joint collaborative content-aware caching and delivery of $360^o$ videos in a video on demand setting. The proposed scheme takes advantage of $360^o$ video encoding in multiple tiles and layers to make fine-grained decisions regarding which tiles to cache in each Small Base Station (SBS), and where to deliver them from to the end users, as users may reside in the coverage area of multiple SBSs. This permits to cache the most popular tiles in the SBSs, while the remaining tiles may be obtained through the backhaul. In addition, we explicitly consider the time delivery constraints to ensure continuous video playback. To reduce the computational complexity of the optimization problem, we simplify it by introducing a fairness constraint. This allows us to split the original problem into subproblems corresponding to Groups of Pictures (GoP). Each of the subproblems is then solved with t..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2009.02575v2-Figure8-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the dry-contact sEMG sensor's CMRR?",
+      "document_id": "2009.02575v2-Figure8-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2009.02575v2-Figure8-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "dry",
+        "contact",
+        "semg",
+        "sensor",
+        "has",
+        "cmrr"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "dry",
+        "contact",
+        "semg",
+        "sensor",
+        "has",
+        "cmrr"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2009.02575v2-Figure8-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the dry-contact sEMG sensor has a CMRR of 80dB at 10Hz, which is higher than the CMRR of the buffer gain mismatch, differential filter, and bio-potential amplifier (g.HIamp). This indicates that the sensor is able to reject noise from other sources, such as the buffer gain mismatch and the differential filter.",
+        "context": {
+          "title": "Low-cost Active Dry-Contact Surface EMG Sensor for Bionic Arms",
+          "caption": "Fig. 8. The measured CMRR of the dry-contact sEMG sensor, compared to the CMRR of the buffer gain mismatch, differential filter, and bio-potential amplifier (g.HIamp).",
+          "first_mention": "The results of the CMRR characterization are summarized in Fig. 8. The sensor was tested in the frequency range from 10Hz to 500Hz, corresponding to the sEMG signal bandwidth.",
+          "abstract": "Surface electromyography (sEMG) is a popular bio-signal used for controlling prostheses and finger gesture recognition mechanisms. Myoelectric prostheses are costly, and most commercially available sEMG acquisition systems are not suitable for real-time gesture recognition. In this paper, a method of acquiring sEMG signals using novel low-cost, active, dry-contact, flexible sensors has been proposed. Since the active sEMG sensor was developed to be used along with a bionic arm, the sensor was tested for its ability to acquire sEMG signals that could be used for real-time classification of five selected gestures. In a study of 4 subjects, the average classification accuracy for real-time gesture classification using the active sEMG sensor system was 85%. The common-mode rejection ratio of the sensor was measured to 59 dB, and thus the sensor's performance was not substantially limited by its active circuitry. The proposed sensors can be interfaced with a variety of amplifiers to perform fully wearable sEMG acquisition. This satisfies the need for a low-cost sEMG acquisition system for prostheses."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1405.2377v1-Figure1-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results shown in Figure 1?",
+      "document_id": "1405.2377v1-Figure1-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1405.2377v1-Figure1-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "enhanced",
+        "monte",
+        "carlo",
+        "algorithm"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "enhanced",
+        "monte",
+        "carlo",
+        "algorithm"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1405.2377v1-Figure1-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in Figure 1 demonstrate that the enhanced Monte Carlo algorithm is able to find the global optimum of the score function, whereas the original Monte Carlo algorithm does not. This is because the enhanced Monte Carlo algorithm uses the expected improvement algorithm to select the next point to evaluate, which is expected to lead to a more efficient search for the global optimum.",
+        "context": {
+          "title": "A Hybrid Monte Carlo Architecture for Parameter Optimization",
+          "caption": "Figure 1: Demonstration of the enhanced Monte Carlobased algorithm versus the original expected improvement Gaussian process optimization procedure. Notice that the enhanced algorithm finds the global optimum of the score function, whereas the alternative does not.",
+          "first_mention": "initialize both algorithms with an identical triplet of known function points, and ask the algorithms to run twenty iterations unless convergence is achieved. In the case of the original optimization algorithm, the Gaussian process quickly finds the local optimum, but chooses to discontinue searching the space after four iterations. By contrast, the hybrid architecture also finds the local optimum in four iterations, but then evaluates the point of largest uncertainty, which is near the global maximum. This phenomenon is illustrated in Figure 1 and leads us to validate the hypothesis that our algorithm is capable of finding improved maxima in optimization problems.",
+          "abstract": "Much recent research has been conducted in the area of Bayesian learning, particularly with regard to the optimization of hyper-parameters via Gaussian process regression. The methodologies rely chiefly on the method of maximizing the expected improvement of a score function with respect to adjustments in the hyper-parameters. In this work, we present a novel algorithm that exploits notions of confidence intervals and uncertainties to enable the discovery of the best optimal within a targeted region of the parameter space. We demonstrate the efficacy of our algorithm with respect to machine learning problems and show cases where our algorithm is competitive with the method of maximizing expected improvement."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1907.11294v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results shown in the graph?",
+      "document_id": "1907.11294v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1907.11294v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "demonstrate",
+        "sliding",
+        "brnn",
+        "detector",
+        "able"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "demonstrate",
+        "sliding",
+        "brnn",
+        "detector",
+        "able"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1907.11294v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in the graph demonstrate that the sliding BRNN detector is able to outperform the Viterbi detector with imperfect CSI. This is because the sliding BRNN detector is able to exploit the temporal correlation of the received signal to compensate for the imperfect CSI.",
+        "context": {
+          "title": "Deep Neural Network Symbol Detection for Millimeter Wave Communications",
+          "caption": "Fig. 5. Comparison of SER between sliding BRNN detector and Viterbi with imperfect CSI.",
+          "first_mention": "Next, we numerically evaluate the generalization capability of the sliding BRNN under CSI uncertainty. In particular, we consider the case where the CSI estimate is imprecise or the channel varies slightly over time. With this aim, we evaluate the SER of the sliding BRNN detector on a mmWave channel realization whose CIR varies by 2.5% or 1.0% compared to the CIR used during training. Specifically, the sliding BRNN is trained under one particular channel realization and a 0 dB SNR. Then, in evaluation, we randomly distort the amplitude at each tap {am,c,n} by 2.5% or 1.0% on average for each message block compared to the channel used during training. For comparison, we use the Viterbi detector with the same level of CSI error. The results of this simulation are depicted in Fig. 5, where it is observed that the sliding BRNN detector consistently outperforms the Viterbi detector with imperfect",
+          "abstract": "This paper proposes to use a deep neural network (DNN)-based symbol detector for mmWave systems such that CSI acquisition can be bypassed. In particular, we consider a sliding bidirectional recurrent neural network (BRNN) architecture that is suitable for the long memory length of typical mmWave channels. The performance of the DNN detector is evaluated in comparison to that of the Viterbi detector. The results show that the performance of the DNN detector is close to that of the optimal Viterbi detector with perfect CSI, and that it outperforms the Viterbi algorithm with CSI estimation error. Further experiments show that the DNN detector is robust to a wide range of noise levels and varying channel conditions, and that a pretrained detector can be reliably applied to different mmWave channel realizations with minimal overhead."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1804.06628v2-Figure9-1",
+      "kind": "ask_fused",
+      "question": "What is the relationship between the visual quality and the embedding payloads of the proposed scheme and two schemes [27, 28] on four videos with the resolution of 176×144?",
+      "document_id": "1804.06628v2-Figure9-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1804.06628v2-Figure9-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "proposed",
+        "scheme",
+        "has",
+        "best",
+        "visual",
+        "quality"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "proposed",
+        "scheme",
+        "has",
+        "best",
+        "visual",
+        "quality"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1804.06628v2-Figure9-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the proposed scheme has the best visual quality, followed by the scheme in [27], and then Kim et al.’s scheme [28]. This is because the proposed scheme can avoid intra frame distortion drift, thus resulting in best visual quality compared with the rest two schemes. For our proposed method, the last nonzero coefficients of each embeddable 4×4 blocks, i.e., AC15, may be changed for DH and they are usually located in high frequency regions. Therefore, the proposed scheme can avoid intra frame distortion drift, which is the main reason for the best visual quality.",
+        "context": {
+          "title": "Reversible Video Data Hiding Using Zero QDCT Coefficient-Pairs",
+          "caption": "Fig. 9 Relationship between visual quality (PSNR: dB) and embedding payloads (bits) of the proposed scheme and two schemes [27, 28] on four videos with the resolution of 176×144. (a) Akiyo. (b) Foreman. (c) Mobile. (d) Container.",
+          "first_mention": "bits on Akiyo, Foreman, Mobile and Container, which are with the resolution of 176×144. As seen in Fig. 9, on each video Liu et al.’s scheme [27] has a less impact on visual quality of PSNR. However, Kim et al.’s scheme [28] provides the largest impact on visual quality when compared with the proposed scheme and the scheme of [27]. In addition, using the proposed scheme and Liu et al.’s scheme has a close degradation of PSNR. In other words, using the two schemes leads to a very close difference between the maximum PSNR value and the minimum PSNR value (shown in Fig. 9). However, exploiting Kim et al.’s scheme results in far larger difference of that than exploiting the proposed scheme and the scheme of [27]. The scheme in [27] can avoid intra frame distortion drift, thus resulting in best visual quality compared with the rest two schemes. For our proposed method, the last nonzero coefficients of each embeddable 4×4 blocks, i.e., AC15, may be changed for DH and they are usually located in high",
+          "abstract": "H.264/Advanced Video Coding (AVC) is one of the most commonly used video compression standard currently. In this paper, we propose a Reversible Data Hiding (RDH) method based on H.264/AVC videos. In the proposed method, the macroblocks with intra-frame $4\\times 4$ prediction modes in intra frames are first selected as embeddable blocks. Then, the last zero Quantized Discrete Cosine Transform (QDCT) coefficients in all $4\\times 4$ blocks of the embeddable macroblocks are paired. In the following, a modification mapping rule based on making full use of modification directions are given. Finally, each zero coefficient-pair is changed by combining the given mapping rule with the to-be-embedded information bits. Since most of last QDCT coefficients in all $4\\times 4$ blocks are zero and they are located in high frequency area. Therefore, the proposed method can obtain high embedding capacity and low distortion."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1409.3126v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the MSE vs. σ2s/σ 2 n plot in Fig. 5?",
+      "document_id": "1409.3126v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1409.3126v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "mse",
+        "vs",
+        "σ2s",
+        "plot",
+        "fig",
+        "shows",
+        "effect",
+        "received"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "mse",
+        "vs",
+        "σ2s",
+        "plot",
+        "fig",
+        "shows",
+        "effect",
+        "received"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1409.3126v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The MSE vs. σ2s/σ 2 n plot in Fig. 5 shows the effect of the received signal interference from the primary users on the MSE. The plot shows that the MSE increases with increasing σ2s/σ 2 n, which indicates that channel estimation is being performed in a noisier channel in the presence of stronger interference from primary user transmissions.",
+        "context": {
+          "title": "Performance Analysis of Cognitive Radio Systems with Imperfect Channel Sensing and Estimation",
+          "caption": "Fig. 5. MSE vs.σ2s/σ 2 n, whenPd = 0.9, Pf = 0.2, M = 10, E0 = 10, andE1 = 1.",
+          "first_mention": "In order to investigate the effects of the received signal interference from the primary users on the MSE, we plot the MSE vs. σ2s/σ 2 n in Fig. 5. We see that the performances of MMSE and L-MMSE estimators are again close, with discrepancy increasing as σ2s/σ 2 n becomes larger. Note that when σ 2 s = 0, we have channel estimation in Gaussian noise in which case MMSE and L-MMSE estimators are identical. For σ2s > 0, estimation is performed in Gaussian mixture noise due to sensing uncertainty. As σ 2 s increases and σ2s/σ 2 n grows, the departure from the Gaussian setting is emphasized and so is the difference between the performances of MMSE and L-MMSE estimators. In Fig. 5, we also immediately notice that the MSE of both estimation schemes gets larger with increasing σ2s . Obviously, in the presence of stronger interference from primary user transmissions, channel estimation is being performed in a noisier channel",
+          "abstract": "In cognitive radio systems, employing sensing-based spectrum access strategies, secondary users are required to perform channel sensing in order to detect the activities of primary users. In realistic scenarios, channel sensing occurs with possible errors due to miss-detections and false alarms. As another challenge, time-varying fading conditions in the channel between the secondary transmitter and the secondary receiver have to be learned via channel estimation. In this paper, performance of causal channel estimation methods in correlated cognitive radio channels under imperfect channel sensing results is analyzed, and achievable rates under both channel and sensing uncertainty are investigated. Initially, cognitive radio channel model with channel sensing error and channel estimation is described. Then, using pilot symbols, minimum mean square error (MMSE) and linear-MMSE (L-MMSE) estimation methods are employed at the secondary receiver to learn the channel fading coefficients. Expressions for the channel estimates and mean-squared errors (MSE) are determined, and their dependencies on channel sensing results, and pilot symbol period and energy are investigated. Since sensin..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1703.10558v1-Figure9-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the AFOT performance with respect to cache size M. What does AFOT stand for?",
+      "document_id": "1703.10558v1-Figure9-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1703.10558v1-Figure9-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "afot",
+        "stands",
+        "average",
+        "file",
+        "outage",
+        "time",
+        "measure",
+        "takes"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "afot",
+        "stands",
+        "average",
+        "file",
+        "outage",
+        "time",
+        "measure",
+        "takes"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1703.10558v1-Figure9-1",
+        "turn_index": 1,
+        "reference_answer": "AFOT stands for average file outage time. It is a measure of the average time it takes for a user to receive the file they request. The lower the AFOT, the better the performance of the system.",
+        "context": {
+          "title": "Modeling, Analysis, and Optimization of Coded Caching in Small-Cell Networks",
+          "caption": "Fig. 9: AFOT with respect to cache size M , with γ = 0.6, τ = −10 dB.",
+          "first_mention": "Fig. 9 illustrates the AFOT performance with respect to cache size M . It is observed that the proposed coded caching scheme performs significantly better than the two benchmarks. This is because coded",
+          "abstract": "Coded caching is able to exploit accumulated cache size and hence superior to uncoded caching by distributing different fractions of a file in different nodes. This work investigates coded caching in a large-scale small-cell network (SCN) where the locations of small base stations (SBSs) are modeled by stochastic geometry. We first propose a content delivery framework, where multiple SBSs that cache different coded packets of a desired file transmit concurrently upon a user request and the user decodes the signals using successive interference cancellation (SIC). We characterize the performance of coded caching by two performance metrics, average fractional offloaded traffic (AFOT) and average ergodic rate (AER), for which a closed-form expression and a tractable expression are derived, respectively, in the high signal-to-noise ratio region. We then formulate the coded cache placement problem for AFOT maximization as a multiple-choice knapsack problem (MCKP). By utilizing the analytical properties of AFOT, a greedy but optimal algorithm is proposed. We also consider the coded cache placement problem for AER maximization. By converting this problem into a standard MCKP, a heurist..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2007.02574v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "The graph shows two different approaches to predicting trajectories. What are the advantages and disadvantages of each approach?",
+      "document_id": "2007.02574v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2007.02574v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "two",
+        "approaches",
+        "predicting",
+        "trajectories",
+        "using",
+        "rasterized",
+        "map",
+        "instance"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "two",
+        "approaches",
+        "predicting",
+        "trajectories",
+        "using",
+        "rasterized",
+        "map",
+        "instance"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2007.02574v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The two approaches to predicting trajectories are using rasterized map and instance-aware lane encoding. Rasterized map is a holistic map representation that can be used to directly predict six trajectories. However, it may suffer from model collapse, as shown in Fig. 3. The six predictions cannot cover the \"turning\", while our instance-aware encoding can explicitly tell the model to cover all the cases.",
+        "context": {
+          "title": "Probabilistic Multi-modal Trajectory Prediction with Lane Attention for Autonomous Vehicles",
+          "caption": "Fig. 3. Left: using rasterized map and directly predict six trajectories [6]. Right: our results. We show that using rasterized map may not able to cover all the possibilities",
+          "first_mention": "2) Rasterized Map vs Instance-aware Lane Encoding: We also implement the method proposed in [6] and report the results in TABLE I. Our methods can achieve better results with much a smaller model size. Besides, the holistic map representation may suffer from model collapse, as shown in Fig. 3. The six predictions cannot cover the “turning”, while our instance-aware encoding can explicitly tell the model to cover all the cases.",
+          "abstract": "Trajectory prediction is crucial for autonomous vehicles. The planning system not only needs to know the current state of the surrounding objects but also their possible states in the future. As for vehicles, their trajectories are significantly influenced by the lane geometry and how to effectively use the lane information is of active interest. Most of the existing works use rasterized maps to explore road information, which does not distinguish different lanes. In this paper, we propose a novel instance-aware representation for lane representation. By integrating the lane features and trajectory features, a goal-oriented lane attention module is proposed to predict the future locations of the vehicle. We show that the proposed lane representation together with the lane attention module can be integrated into the widely used encoder-decoder framework to generate diverse predictions. Most importantly, each generated trajectory is associated with a probability to handle the uncertainty. Our method does not suffer from collapsing to one behavior modal and can cover diverse possibilities. Extensive experiments and ablation studies on the benchmark datasets corroborate the effectiv..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2007.05196v1-Figure5-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the success rate of training an agent on different sizes of goal object sets. What can we infer from this graph?",
+      "document_id": "2007.05196v1-Figure5-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2007.05196v1-Figure5-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "success",
+        "rate",
+        "training",
+        "agent",
+        "different",
+        "sizes"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "success",
+        "rate",
+        "training",
+        "agent",
+        "different",
+        "sizes"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2007.05196v1-Figure5-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the success rate of training an agent on different sizes of goal object sets decreases as the size of the goal set increases. This is likely because it is more difficult for the agent to learn to perform a wider variety of tasks.",
+        "context": {
+          "title": "Pre-trained Word Embeddings for Goal-conditional Transfer Learning in Reinforcement Learning",
+          "caption": "Figure 5. Comparing training performance on different sizes of goal object sets (results are averaged over 3 runs).",
+          "first_mention": "We plotted the results of training our agent using different sizes of goal sets, in Figure 5. These results demonstrate that larger sets of goals are significantly harder to train. This finding supports our claim that a lifelong learning agent significantly benefits from first learning a small sub-set of goals, and gradually expanding its capabilities through transfer learning.",
+          "abstract": "Reinforcement learning (RL) algorithms typically start tabula rasa, without any prior knowledge of the environment, and without any prior skills. This however often leads to low sample efficiency, requiring a large amount of interaction with the environment. This is especially true in a lifelong learning setting, in which the agent needs to continually extend its capabilities. In this paper, we examine how a pre-trained task-independent language model can make a goal-conditional RL agent more sample efficient. We do this by facilitating transfer learning between different related tasks. We experimentally demonstrate our approach on a set of object navigation tasks."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1801.10282v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the block diagram in Figure 2?",
+      "document_id": "1801.10282v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1801.10282v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "block",
+        "diagram",
+        "figure",
+        "model",
+        "drift",
+        "plus",
+        "penalty",
+        "algorithm"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "block",
+        "diagram",
+        "figure",
+        "model",
+        "drift",
+        "plus",
+        "penalty",
+        "algorithm"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1801.10282v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The block diagram in Figure 2 is a model of the drift-plus-penalty algorithm as a control system. It shows how the algorithm's virtual queues Qi(t) and Fi(t) accumulate errors and how these errors are used to adjust the algorithm's parameters. This model can be used to understand the algorithm's behavior and to design modifications that improve its performance.",
+        "context": {
+          "title": "Stochastic Optimization and Control Framework for 5G Network Slicing with Effective Isolation",
+          "caption": "Figure 2: Block diagram of the equivalent control system.",
+          "first_mention": "With that in mind, the drift-plus-penalty algorithm can be modeled as a control system as shown in Fig. 2. Since the virtual queues Qi(t) and Fi(t) accumulate errors, they are shown as integrators in Fig. 2. Therefore, we can see that the drift-plus-penalty algorithm consists of a proportional-integral (PI) controller. As we will see in Section V, this method suffers from the same drawbacks of PI controllers, that is, it is not sensitive to steady state error as long as the average error is zero. By adding another type of controller to the drift-pluspenalty method, instead of PI controller in Fig. 2, we can improve both steady state error and transient time response of the drift-plus-penalty method.",
+          "abstract": "Network slicing is an emerging technique for providing resources to diverse wireless services with heterogeneous quality-of-service needs. However, beyond satisfying end-to-end requirements of network users, network slicing needs to also provide isolation between slices so as to prevent one slice's faults and congestion from affecting other slices. In this paper, the problem of network slicing is studied in the context of a wireless system having a time-varying number of users that require two types of slices: reliable low latency (RLL) and self-managed (capacity limited) slices. To address this problem, a novel control framework for stochastic optimization is proposed based on the Lyapunov drift-plus-penalty method. This new framework enables the system to minimize power, maintain slice isolation, and provide reliable and low latency end-to-end communication for RLL slices. Simulation results show that the proposed approach can maintain the system's reliability while providing effective slice isolation in the event of sudden changes in the network environment."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1512.01998v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the relationship between the number of antennas and the number of users in the cell?",
+      "document_id": "1512.01998v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1512.01998v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "number",
+        "antennas",
+        "used",
+        "bs",
+        "directly",
+        "proportional"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "number",
+        "antennas",
+        "used",
+        "bs",
+        "directly",
+        "proportional"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1512.01998v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the number of antennas used by the BS is directly proportional to the number of users in the cell. This is because when there are more users in the cell, the BS needs to use more antennas in order to provide adequate coverage and capacity. However, the relationship is not linear, as the number of antennas needed does not increase at the same rate as the number of users. This is because the BS can use a combination of different antenna configurations to achieve the desired coverage and capacity.",
+        "context": {
+          "title": "Energy Efficiency of Massive MIMO: Coping with Daily Load Variation",
+          "caption": "Fig. 2. Number of antennas as a function of the number of users in the cell at 13%, 50% and 100% load.",
+          "first_mention": "The probability of getting different number of users served by the BS simultaneously depends on the average network load, for example, see Fig. 1. In Fig. 2, we show how Mc varies with Kc when the network loads are low (13%), medium (50%) and high (100%) which corresponds to the user distribution as shown in Fig. 1. When the EE is optimized over the varying number of users, Mc adapts to the user profile resulting in an approximately linear relation between Mc and Kc. However, the ratio between Mc and Kc is quite high when the BS serves only a few users and ends up around two at high load. When Kc is very small, the energy consumed by activation of an additional antenna is not significant compared to the fixed energy consumption",
+          "abstract": "Massive MIMO is a promising technique to meet the exponential growth of mobile traffic demand. However, contrary to the current systems, energy consumption of next generation networks is required to be load adaptive as the network load varies significantly throughout the day. In this paper, we propose a load adaptive multi-cell massive MIMO system where each base station (BS) adapts the number of antennas to the daily load profile (DLP) in order to maximize the downlink energy efficiency (EE). In order to incorporate the DLP, the load at each BS is modeled as an M/G/m/m state dependent queue under the assumption that the network is dimensioned to serve a maximum number of users at the peak load. The EE maximization problem is formulated in a game theoretic framework where the number of antennas to be used by a BS is determined through best response iteration. This load adaptive system achieves around 24% higher EE and saves around 40% energy compared to a baseline system where the BSs always run with the fixed number of antennas that is most energy efficient at the peak load and that can be switched off when there is no traffic."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1306.4447v1-Figure4-1",
+      "kind": "ask_fused",
+      "question": "What is the difference between the two graphs?",
+      "document_id": "1306.4447v1-Figure4-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1306.4447v1-Figure4-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "two",
+        "graphs",
+        "represent",
+        "centroids",
+        "means",
+        "traffic",
+        "classifier",
+        "when"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "two",
+        "graphs",
+        "represent",
+        "centroids",
+        "means",
+        "traffic",
+        "classifier",
+        "when"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1306.4447v1-Figure4-1",
+        "turn_index": 1,
+        "reference_answer": "The two graphs represent the centroids of the K-Means traffic classifier when there is traffic to Google.com and when there is no traffic to Google.com. The centroids are the center points of each cluster. In the first graph, the centroids of the two clusters are clearly separated, which indicates that the classifier is able to distinguish between web traffic and DNS traffic. In the second graph, the centroids of the two clusters are more closely aligned, which indicates that the classifier is less able to distinguish between web traffic and DNS traffic.",
+        "context": {
+          "title": "Hacking Smart Machines with Smarter Ones: How to Extract Meaningful Data from Machine Learning Classifiers",
+          "caption": "Fig. 4. Centroids of the K-Means traffic classifier without differential privacy.",
+          "first_mention": "With respect to the classifier with no differential privacy, we represent the centroids when there is traffic to Google.com in figure 4(a), and no traffic to Google.com in figure 4(b). It is easy to see that the positions of the centroids are quite different, allowing us to easily distinguish between these two cases.",
+          "abstract": "Machine Learning (ML) algorithms are used to train computers to perform a variety of complex tasks and improve with experience. Computers learn how to recognize patterns, make unintended decisions, or react to a dynamic environment. Certain trained machines may be more effective than others because they are based on more suitable ML algorithms or because they were trained through superior training sets. Although ML algorithms are known and publicly released, training sets may not be reasonably ascertainable and, indeed, may be guarded as trade secrets. While much research has been performed about the privacy of the elements of training sets, in this paper we focus our attention on ML classifiers and on the statistical information that can be unconsciously or maliciously revealed from them. We show that it is possible to infer unexpected but useful information from ML classifiers. In particular, we build a novel meta-classifier and train it to hack other classifiers, obtaining meaningful information about their training sets. This kind of information leakage can be exploited, for example, by a vendor to build more effective classifiers or to simply acquire trade secrets from a co..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2005.03948v2-Figure2-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the effect of increasing compression ratio on the performance of the Lego CNN model. What can be inferred from the graph about the relationship between compression ratio and performance?",
+      "document_id": "2005.03948v2-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2005.03948v2-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "compression",
+        "ratio",
+        "increases",
+        "performance",
+        "lego",
+        "cnn"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "compression",
+        "ratio",
+        "increases",
+        "performance",
+        "lego",
+        "cnn"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2005.03948v2-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that as the compression ratio increases, the performance of the Lego CNN model decreases. This is likely due to the fact that the model becomes more complex and less efficient as the compression ratio increases. This is a common problem with deep learning models, and it is one of the reasons why it is important to find the right balance between performance and complexity.",
+        "context": {
+          "title": "Layer-wise training convolutional neural networks with smaller filters for human activity recognition using wearable sensors",
+          "caption": "Fig. 2. Overview of the loss of different compression for OPPORTUNITY.",
+          "first_mention": "As there is a notable imbalance in the OPPORTUNITY dataset where the NULL class represents 72.28%, the model performance is evaluated considering the NULL class. Fig. 2 shows the effect of increasing compression ratio on the performance with Lego CNN(o=2,m=0.5), Lego CNN(o=4,m=0.5),",
+          "abstract": "Recently, convolutional neural networks (CNNs) have set latest state-of-the-art on various human activity recognition (HAR) datasets. However, deep CNNs often require more computing resources, which limits their applications in embedded HAR. Although many successful methods have been proposed to reduce memory and FLOPs of CNNs, they often involve special network architectures designed for visual tasks, which are not suitable for deep HAR tasks with time series sensor signals, due to remarkable discrepancy. Therefore, it is necessary to develop lightweight deep models to perform HAR. As filter is the basic unit in constructing CNNs, it deserves further research whether re-designing smaller filters is applicable for deep HAR. In the paper, inspired by the idea, we proposed a lightweight CNN using Lego filters for HAR. A set of lower-dimensional filters is used as Lego bricks to be stacked for conventional filters, which does not rely on any special network structure. The local loss function is used to train model. To our knowledge, this is the first paper that proposes lightweight CNN for HAR in ubiquitous and wearable computing arena. The experiment results on five public HAR dat..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1402.4678v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results presented in the graph?",
+      "document_id": "1402.4678v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1402.4678v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "presented",
+        "graph",
+        "show",
+        "algorithm",
+        "able",
+        "learn",
+        "frequency"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "presented",
+        "graph",
+        "show",
+        "algorithm",
+        "able",
+        "learn",
+        "frequency"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1402.4678v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The results presented in the graph show that the algorithm is able to learn the frequency of the source. The algorithm is also able to converge faster when the increment size is larger and the input frequency is higher.",
+        "context": {
+          "title": "When Learners Surpass their Sources: Mathematical Modeling of Learning from an Inconsistent Source",
+          "caption": "Figure 3: Convergence time of the algorithm for M = 2 forms. (a) Typical numerical runs are shown where the current frequency of the learner is plotted against the iteration number, for four different values of s. (b) The time to convergence is plotted as a function of the quantity s. This was calculated as the number of iterations until the moving average frequency of the learner reached the predicted mean frequency (formula (3)) within the margin of 0.1%. The moving average was taken over 200 iterations, and the resulting convergence times averaged over 200 runs. The frequency of the source for (a) and (b) is ν = 0.7.",
+          "first_mention": "Next, the dependence of the convergence time on the input frequency was studied. Figure 3(a) shows some typical runs for several values of the learning increment, s. It is clear thas as s increases, the algorithm converges faster. This was investigated formally in figure 3(b). The convergence time was calculated by computing output probabilities taking a running average over 200 steps to smooth out the curve, and then by defining the time to converge as the first step, n, such that the output frequency at n steps is within .001 of the analytically calculated expected output frequency. All of the data was averaged over 200 trials. To investigate how the convergence time depends on the increment size, figure 3(b) plots the convergence time as a function of s. We can see that convergence time decreases as s increases. The same trend holds for multi-form inputs, see figure 4(a) where we plot the current frequency of learners for M = 3, for four typical runes with different increments s. Figure 4(b) plots the convergence time as a function of the input frequency for M = 2. It decreases with increasing input frequency.",
+          "abstract": "We present a new algorithm to model and investigate the learning process of a learner mastering a set of grammatical rules from an inconsistent source. The compelling interest of human language acquisition is that the learning succeeds in virtually every case, despite the fact that the input data are formally inadequate to explain the success of learning. Our model explains how a learner can successfully learn from or even surpass its imperfect source without possessing any additional biases or constraints about the types of patterns that exist in the language. We use the data collected by Singleton and Newport (2004) on the performance of a 7-year boy Simon, who mastered the American Sign Language (ASL) by learning it from his parents, both of whom were imperfect speakers of ASL. We show that the algorithm possesses a frequency-boosting property, whereby the frequency of the most common form of the source is increased by the learner. We also explain several key features of Simon's ASL."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1802.05130v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the relationship between ADE training data size and F1-score?",
+      "document_id": "1802.05130v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1802.05130v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "there",
+        "clear",
+        "correlation",
+        "between",
+        "ade",
+        "training"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "there",
+        "clear",
+        "correlation",
+        "between",
+        "ade",
+        "training"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1802.05130v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that there is a clear correlation between the ADE training data size and F1-score. As the ADE training data size is increased, the F1-score also increases monotonously. This suggests that the ADE task is important for improving the performance of the main task, and that more training data for the ADE task leads to better performance.",
+        "context": {
+          "title": "Multi-Task Learning for Extraction of Adverse Drug Reaction Mentions from Tweets",
+          "caption": "Fig. 2: Performance variation with % ADE data-size",
+          "first_mention": "To answer the first question, we perform MTL experiments with varying ADE dataset size. The results are presented in Figure 2. F1-score has a clear correlation with the percentage training size for the ADE task. As the ADE dataset size is increased, the F1-score also increases monotonously. Similar trend is observed for both the datasets. It clearly indicates the importance of the auxiliary task in the MTL setting.",
+          "abstract": "Adverse drug reactions (ADRs) are one of the leading causes of mortality in health care. Current ADR surveillance systems are often associated with a substantial time lag before such events are officially published. On the other hand, online social media such as Twitter contain information about ADR events in real-time, much before any official reporting. Current state-of-the-art in ADR mention extraction uses Recurrent Neural Networks (RNN), which typically need large labeled corpora. Towards this end, we propose a multi-task learning based method which can utilize a similar auxiliary task (adverse drug event detection) to enhance the performance of the main task, i.e., ADR extraction. Furthermore, in the absence of auxiliary task dataset, we propose a novel joint multi-task learning method to automatically generate weak supervision dataset for the auxiliary task when a large pool of unlabeled tweets is available. Experiments with 0.48M tweets show that the proposed approach outperforms the state-of-the-art methods for the ADR mention extraction task by 7.2% in terms of F1 score."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1412.4875v2-Figure7-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the graph in Figure 7? How does it compare to the graph in Figure 3?",
+      "document_id": "1412.4875v2-Figure7-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1412.4875v2-Figure7-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "figure",
+        "shows",
+        "standard",
+        "deviation",
+        "extinction",
+        "time",
+        "which"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "figure",
+        "shows",
+        "standard",
+        "deviation",
+        "extinction",
+        "time",
+        "which"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1412.4875v2-Figure7-1",
+        "turn_index": 1,
+        "reference_answer": "The graph in Figure 7 shows the standard deviation of the extinction time τ, which is a measure of the uncertainty in the time at which the epidemic will die out. The graph in Figure 3 shows the standard deviation of the outbreak size Ω, which is a measure of the uncertainty in the number of people who will be infected by the epidemic. The general picture from Figure 3 holds for Figure 7 as well: the decay is roughly exponential. However, there is more structure in the curves for the standard deviation of the extinction time. The decay fits the exponential form worse than what σΩ does. This is because the extinction time is more sensitive to the initial conditions of the epidemic than the outbreak size. Several of the στ curves for the random-regular and scale-free graphs plateau at intermediate β values. This means that there are times when predicting the outbreak size gets more precise with time, but predicting how long the epidemics will last does not. This is because the outbreak size is more sensitive to the initial conditions of the epidemic than the extinction time.",
+        "context": {
+          "title": "Time evolution of predictability of epidemics on networks",
+          "caption": "FIG. 7: (Color online) This figure corresponds to Fig. 3, but shows the standard deviation of the extinction time rather than the outbreak size.",
+          "first_mention": "ing quantity for the extinction time τ—in Fig. 7. The general picture from Fig. 3 holds—the decay is roughly exponential. However, there is more structure in these curves. The decay fits the exponential form worse than what σΩ does. Several of the στ curves for the randomregular and scale-free graphs plateaus at intermediate β values. This means there are times when predicting the outbreak size gets more precise with time, but predicting how long the epidemics will last does not.",
+          "abstract": "Epidemic outbreaks of new pathogens, or known pathogens in new populations, cause a great deal of fear because they are hard to predict. For theoretical models of disease spreading, on the other hand, quantities characterizing the outbreak converge to deterministic functions of time. Our goal in this paper is to shed some light on this apparent discrepancy. We measure the diversity of (and, thus, the predictability of) outbreak sizes and extinction times as functions of time given different scenarios of the amount of information available. Under the assumption of perfect information -- i.e., knowing the state of each individual with respect to the disease -- the predictability decreases exponentially, or faster, with time. The decay is slowest for intermediate values of the per-contact transmission probability. With a weaker assumption on the information available, assuming that we know only the fraction of currently infectious, recovered, or susceptible individuals, the predictability also decreases exponentially most of the time. There are, however, some peculiar regions in this scenario where the predictability decreases. In other words, to predict its final size with a given..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1705.01576v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the compression ratio and RSE in dB on the graph?",
+      "document_id": "1705.01576v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1705.01576v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "compression",
+        "ratio",
+        "measure",
+        "much",
+        "data",
+        "has",
+        "been",
+        "compressed"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "compression",
+        "ratio",
+        "measure",
+        "much",
+        "data",
+        "has",
+        "been",
+        "compressed"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1705.01576v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "The compression ratio is a measure of how much the data has been compressed. A higher compression ratio means that the data has been compressed more, and therefore takes up less space. The RSE in dB is a measure of the error between the original data and the compressed data. A lower RSE in dB means that the compressed data is more accurate, and therefore more useful.",
+        "context": {
+          "title": "Fourth-order Tensors with Multidimensional Discrete Transforms",
+          "caption": "Fig. 2. Comparison of compression performance: SVD, t-SVD, dct-SVD, and dwt-SVD.",
+          "first_mention": "Fig. 2 shows the compression results for the two videos. All tensor-based compression methods have lower RSE, since the tensor representation can exploit the inter-frame correlations. For the NBA video, dct-SVD achieves about 3dB gains over tSVD while dwt-SVD achieves 3 ∼ 10dB gains. This observation suggests that the human movements in videos are better captured by the discrete cosine domain representation and the discrete wavelet domain representation.",
+          "abstract": "The big data era is swamping areas including data analysis, machine/deep learning, signal processing, statistics, scientific computing, and cloud computing. The multidimensional feature and huge volume of big data put urgent requirements to the development of multilinear modeling tools and efficient algorithms. In this paper, we build a novel multilinear tensor space that supports useful algorithms such as SVD and QR, while generalizing the matrix space to fourth-order tensors was believed to be challenging. Specifically, given any multidimensional discrete transform, we show that fourth-order tensors are bilinear operators on a space of matrices. First, we take a transform-based approach to construct a new tensor space by defining a new multiplication operation and tensor products, and accordingly the analogous concepts: identity, inverse, transpose, linear combinations, and orthogonality. Secondly, we define the $\\mathcal{L}$-SVD for fourth-order tensors and present an efficient algorithm, where the tensor case requires a stronger condition for unique decomposition than the matrix case. Thirdly, we define the tensor $\\mathcal{L}$-QR decomposition and propose a Householder QR a..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1902.04023v1-Figure2-1",
+      "kind": "ask_fused",
+      "question": "The graph shows two different methods of estimating the cumulative distribution function (CDF) near the tails of a distribution. The left panel shows linear interpolation of the CDF using 100 equal sized bins, while the right panel shows the same interpolation using variable size bins as given by a strongly ordered t-digest with δ = 100. The numbers above the data points represent the number of points in each bin. What are the advantages of using a strongly ordered t-digest to estimate the CDF near the tails of a distribution?",
+      "document_id": "1902.04023v1-Figure2-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1902.04023v1-Figure2-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "strongly",
+        "ordered",
+        "digest",
+        "data",
+        "structure",
+        "can",
+        "used",
+        "represent"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "strongly",
+        "ordered",
+        "digest",
+        "data",
+        "structure",
+        "can",
+        "used",
+        "represent"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1902.04023v1-Figure2-1",
+        "turn_index": 1,
+        "reference_answer": "A strongly ordered t-digest is a data structure that can be used to represent a distribution. It is constructed by merging clusters of data points into larger clusters, with the size of each cluster determined by a scale function. This scale function is designed to keep clusters small near extreme values of the distribution, which can improve the accuracy of CDF estimates near the tails. In the graph, the left panel shows that linear interpolation of the CDF using 100 equal sized bins results in a large error near the tails of the distribution. This is because the bins are too large to accurately capture the distribution of the data points. In contrast, the right panel shows that using a strongly ordered t-digest with δ = 100 results in a much smaller error near the tails. This is because the scale function of the t-digest keeps the clusters small near the tails, which allows for more accurate CDF estimates. Overall, the graph shows that using a strongly ordered t-digest to estimate the CDF near the tails of a distribution can improve the accuracy of the estimates. This is because the scale function of the t-digest keeps the clusters small near the tails, which allows for more accurate CDF estimates.",
+        "context": {
+          "title": "Computing Extremely Accurate Quantiles Using t-Digests",
+          "caption": "Fig. 2. The left panel shows linear interpolation of the cumulative distribution function near q = 0 with 100 equal sized bins applied to 10, 000 data points sampled from an exponential distribution. The right panel shows the same interpolation with variable size bins as given by a strongly ordered t-digest with δ = 100. The numbers above the data points represent the number of points in each bin.",
+          "first_mention": "Figure 2 shows how estimating q near tails is improved for a strongly ordered, fully merged t-digest constructed with a scale function that keeps clusters small near extreme values of q. This figure shows roughly the first percentile of 10,000 data points sampled",
+          "abstract": "We present on-line algorithms for computing approximations of rank-based statistics that give high accuracy, particularly near the tails of a distribution, with very small sketches. Notably, the method allows a quantile $q$ to be computed with an accuracy relative to $\\max(q, 1-q)$ rather than absolute accuracy as with most other methods. This new algorithm is robust with respect to skewed distributions or ordered datasets and allows separately computed summaries to be combined with no loss in accuracy. An open-source Java implementation of this algorithm is available from the author. Independent implementations in Go and Python are also available."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2010.06471v2-Figure3-1",
+      "kind": "ask_fused",
+      "question": "What is the significance of the results shown in Figure 3?",
+      "document_id": "2010.06471v2-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2010.06471v2-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "accuracy",
+        "model",
+        "chopping",
+        "algorithm"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "figure",
+        "demonstrate",
+        "accuracy",
+        "model",
+        "chopping",
+        "algorithm"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "2010.06471v2-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in Figure 3 demonstrate the accuracy of the model for the (k, t) chopping algorithm. The predicted results and measured results using the ping-pong program in the Noleland cluster with InfiniBand match well, which shows that the model is able to accurately predict the performance of the algorithm.",
+        "context": {
+          "title": "CryptMPI: A Fast Encrypted MPI Library",
+          "caption": "Fig. 3: Latency of encrypted ping-pong under CryptMPI on InfiniBand: benchmark versus model prediction.",
+          "first_mention": "MODELING (k, t)-CHOPPING. To find the best values of k and t in the (k, t) chopping algorithm, we developed a performance model for it in the ping-pong setting, for generic k and t. The model is highly accurate on all of the systems that we tested including all of the ones used in our experiments. Fig. 3 shows an example: the predicted results and measured results using the ping-pong program in our Noleland cluster with InfiniBand (described in Section V) match well. We later used the model to estimate the optimal choice of k and t that maximizes the ping-pong performance. The model has two sub-components: a model for unencrypted communication, and another for multi-threading encryption.",
+          "abstract": "The cloud infrastructure must provide security for High-Performance Computing (HPC) applications of sensitive data to execute in such an environment. However, supporting security in the communication infrastructure of today's public cloud is challenging, because current networks for data centers are so fast that adding encryption can incur very significant overheads. In this work, we introduce CryptMPI, a high performance encrypted MPI library that supports communication with both integrity and privacy. We present the techniques in CryptMPI and report our benchmarking results using micro-benchmarks and NAS parallel benchmarks. The evaluation results indicate that the aforementioned techniques are effective in improving the performance of encrypted communication."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1606.04288v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "What is the purpose of the microbenchmark in Figure 3?",
+      "document_id": "1606.04288v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1606.04288v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "microbenchmark",
+        "figure",
+        "designed",
+        "measure",
+        "impact",
+        "memory",
+        "access",
+        "latency"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "microbenchmark",
+        "figure",
+        "designed",
+        "measure",
+        "impact",
+        "memory",
+        "access",
+        "latency"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1606.04288v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The microbenchmark in Figure 3 is designed to measure the impact of memory access latency on the execution time of a program. The microbenchmark repeatedly accesses a 16MB array allocated to take exactly one shared memory page managed by controller 0. The total execution time of the microbenchmark is measured depending on how many hops away the core running the microbenchmark is from the controller. This allows us to see how the latency difference between cores that are closer to the controller and cores that are further away from the controller affects the execution time of the program.",
+        "context": {
+          "title": "BDDT-SCC: A Task-parallel Runtime for Non Cache-Coherent Multicores",
+          "caption": "Fig. 3. Memory access latency Fig. 4. Memory contention effects",
+          "first_mention": "The SCC architecture results in a different latency for accessing DRAM depending on a core’s distance from the respective memory controller [18,19]. We measured the impact of the latency difference using a microbenchmark that repeatedly accesses a 16MB array allocated to take exactly one shared memory page managed by controller 0. Figure 3 shows the total execution time depending on how many hops away the core running the microbenchmark was from the controller. Similarly, the MPB access latency varies depending on the core’s distance from the respective MPB.",
+          "abstract": "This paper presents BDDT-SCC, a task-parallel runtime system for non cache-coherent multicore processors, implemented for the Intel Single-Chip Cloud Computer. The BDDT-SCC runtime includes a dynamic dependence analysis and automatic synchronization, and executes OpenMP-Ss tasks on a non cache-coherent architecture. We design a runtime that uses fast on-chip inter-core communication with small messages. At the same time, we use non coherent shared memory to avoid large core-to-core data transfers that would incur a high volume of unnecessary copying. We evaluate BDDT-SCC on a set of representative benchmarks, in terms of task granularity, locality, and communication. We find that memory locality and allocation plays a very important role in performance, as the architecture of the SCC memory controllers can create strong contention effects. We suggest patterns that improve memory locality and thus the performance of applications, and measure their impact."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2005.06209v1-Figure3-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the results of an experiment on depth estimation. What are the main findings of the experiment?",
+      "document_id": "2005.06209v1-Figure3-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2005.06209v1-Figure3-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "experiment",
+        "shows",
+        "proposed",
+        "method",
+        "which",
+        "uses",
+        "monocular",
+        "stereo"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "experiment",
+        "shows",
+        "proposed",
+        "method",
+        "which",
+        "uses",
+        "monocular",
+        "stereo"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2005.06209v1-Figure3-1",
+        "turn_index": 1,
+        "reference_answer": "The experiment shows that the proposed method, which uses a monocular+stereo (MS) supervision, achieves the best performance in terms of sparsification error, as measured by Abs Rel, RMSE and δ ≥ 1.25. This suggests that the MS supervision is effective in improving the depth estimation accuracy.",
+        "context": {
+          "title": "On the uncertainty of self-supervised monocular depth estimation",
+          "caption": "Figure 3. Sparsification Error curves for monocular+stereo (MS) supervision. From left to right, Abs Rel, RMSE and δ ≥ 1.25.",
+          "first_mention": "Figure 3. Uncertainty by image flipping. The difference between the depth d, inferred from image I, and the depth −→←− d , from the flipped image ←−I , provides a basic form of uncertainty.",
+          "abstract": "Self-supervised paradigms for monocular depth estimation are very appealing since they do not require ground truth annotations at all. Despite the astonishing results yielded by such methodologies, learning to reason about the uncertainty of the estimated depth maps is of paramount importance for practical applications, yet uncharted in the literature. Purposely, we explore for the first time how to estimate the uncertainty for this task and how this affects depth accuracy, proposing a novel peculiar technique specifically designed for self-supervised approaches. On the standard KITTI dataset, we exhaustively assess the performance of each method with different self-supervised paradigms. Such evaluation highlights that our proposal i) always improves depth accuracy significantly and ii) yields state-of-the-art results concerning uncertainty estimation when training on sequences and competitive results uniquely deploying stereo pairs."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1911.05235v2-Figure11-1",
+      "kind": "ask_fused",
+      "question": "What are the implications of the results shown in the graph?",
+      "document_id": "1911.05235v2-Figure11-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1911.05235v2-Figure11-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "indicate",
+        "adaptive",
+        "greedy",
+        "algorithm",
+        "more"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "results",
+        "shown",
+        "graph",
+        "indicate",
+        "adaptive",
+        "greedy",
+        "algorithm",
+        "more"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_valid.jsonl",
+        "source_id": "1911.05235v2-Figure11-1",
+        "turn_index": 1,
+        "reference_answer": "The results shown in the graph indicate that the adaptive greedy algorithm is a more efficient and accurate algorithm for batch chromatography. It converges more quickly and achieves a lower maximal true error than the standard greedy algorithm. This makes it a more suitable choice for applications where speed and accuracy are important.",
+        "context": {
+          "title": "Adaptive Basis Construction and Improved Error Estimation for Parametric Nonlinear Dynamical Systems",
+          "caption": "FIGURE 11 Batch chromatography: Convergence of the greedy algorithms: Algorithms 5 and 7.",
+          "first_mention": "the greedy loop: 10 iterations as compared to 16 iterations that the standard greedy algorithm needs. We show the convergence of the modified error indicator and the true error for both algorithms. In Fig. 7 and Fig. 11 the maximal errors are defined over all the parameters in the training set Ξ. In particular, Δ̄max ∶= max ∈Ξ Δ̄( ), where Δ̄( ) is defined in (31). The maximal true error",
+          "abstract": "An adaptive scheme to generate reduced-order models for parametric nonlinear dynamical systems is proposed. It aims to automatize the POD-Greedy algorithm combined with empirical interpolation. At each iteration, it is able to adaptively determine the number of the reduced basis vectors and the number of the interpolation basis vectors for basis construction. The proposed technique is able to derive a suitable match between the reduced basis and the interpolation basis vectors, making the generation of a stable, compact and reliable reduced-order model possible. This is achieved by adaptively adding new basis vectors or removing unnecessary ones, at each iteration of the greedy algorithm. An efficient output error indicator plays a key role in the adaptive scheme. We also propose an improved output error indicator based on previous work. Upon convergence of the POD-Greedy algorithm, the new error indicator is shown to be sharper than the existing ones, implicating that a more reliable reduced-order model can be constructed. The proposed method is tested on several nonlinear dynamical systems, namely, the viscous Burgers' equation and two other models from chemical engineering."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "1710.06081v3-Figure4-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the cosine similarity of two successive perturbations in I-FGSM and MI-FGSM when attacking Inc-v3 model. What does this mean?",
+      "document_id": "1710.06081v3-Figure4-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/1710.06081v3-Figure4-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "cosine",
+        "similarity",
+        "two",
+        "successive",
+        "perturbations",
+        "measure",
+        "similar",
+        "case"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "cosine",
+        "similarity",
+        "two",
+        "successive",
+        "perturbations",
+        "measure",
+        "similar",
+        "case"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "1710.06081v3-Figure4-1",
+        "turn_index": 1,
+        "reference_answer": "The cosine similarity of two successive perturbations is a measure of how similar the two perturbations are. In this case, the cosine similarity is calculated between two successive perturbations generated by I-FGSM and MI-FGSM. The results show that the cosine similarity of two successive perturbations in MI-FGSM is higher than that in I-FGSM. This means that the update direction of MI-FGSM is more stable than that of I-FGSM.",
+        "context": {
+          "title": "Boosting Adversarial Attacks with Momentum",
+          "caption": "Figure 4. The cosine similarity of two successive perturbations in I-FGSM and MI-FGSM when attacking Inc-v3 model. The results are averaged over 1000 images.",
+          "first_mention": "To interpret why MI-FGSM demonstrates better transferability, we further examine the update directions given by IFGSM and MI-FGSM along the iterations. We calculate the cosine similarity of two successive perturbations and show the results in Fig. 4 when attacking Inc-v3. The update direction of MI-FGSM is more stable than that of I-FGSM due to the larger value of cosine similarity in MI-FGSM.",
+          "abstract": "Deep neural networks are vulnerable to adversarial examples, which poses security concerns on these algorithms due to the potentially severe consequences. Adversarial attacks serve as an important surrogate to evaluate the robustness of deep learning models before they are deployed. However, most of existing adversarial attacks can only fool a black-box model with a low success rate. To address this issue, we propose a broad class of momentum-based iterative algorithms to boost adversarial attacks. By integrating the momentum term into the iterative process for attacks, our methods can stabilize update directions and escape from poor local maxima during the iterations, resulting in more transferable adversarial examples. To further improve the success rates for black-box attacks, we apply momentum iterative algorithms to an ensemble of models, and show that the adversarially trained models with a strong defense ability are also vulnerable to our black-box attacks. We hope that the proposed methods will serve as a benchmark for evaluating the robustness of various deep models and defense methods. With this method, we won the first places in NIPS 2017 Non-targeted Adversarial Atta..."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2002.02040v1-Figure6-1",
+      "kind": "ask_fused",
+      "question": "The graph shows the relationship between precision and recall for the three classes of surface wave data. What can we infer about the performance of the model from this graph?",
+      "document_id": "2002.02040v1-Figure6-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2002.02040v1-Figure6-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "model",
+        "has",
+        "high",
+        "precision",
+        "recall",
+        "all"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "model",
+        "has",
+        "high",
+        "precision",
+        "recall",
+        "all"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2002.02040v1-Figure6-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the model has high precision and recall for all three classes of surface wave data. This means that the model is able to accurately classify individual pixels into the correct class. The median precision for the noise class is 99%, while the median precision for the fundamental and 1st-order modes is 98% and 99%, respectively. The median recall for the noise class is 95%, while the median recall for the fundamental and 1st-order modes is 94% and 95%, respectively. These results indicate that the model is able to accurately classify individual pixels into the correct class, and that the model is able to do so for all three classes of surface wave data.",
+        "context": {
+          "title": "Extracting dispersion curves from ambient noise correlations using deep learning",
+          "caption": "Fig. 6: Precision and Recall. Median precision and recall compared with the number of stations presented to the neural network simultaneously. N = 23 (top 10% of N = 239 models in validation error) of synthetically trained, then Long-Beach trained models. Variations are due to changes in random seed for the model training, which changes the weight initializations and the order of training data shown.",
+          "first_mention": "Example output predictions are shown in Figure 5 along with the raw feature input and labels. It is clear that the model performs well for this examined image, correctly recovering nearly all fundamental and 1st overtone picks. Quantitative performance results on the validation set are provided in Figure 6, where precision and recall are computed for each of the three classes. The noise class has the highest precision and recall of the three classes (¿99%), which probably reflects the fact that the composition of the training dataset is heavily skewed toward noise. The fundamental and 1st-order modes have around 99% and 98% median precision, respectively, demonstrating that the model can accurately classify individual pixels. The median recalls for these classes are about 95% and 94%, respectively. The application of ML to this problem is able to substantially reduce the human-labor in analyzing surface wave data.",
+          "abstract": "We present a machine-learning approach to classifying the phases of surface wave dispersion curves. Standard FTAN analysis of surfaces observed on an array of receivers is converted to an image, of which, each pixel is classified as fundamental mode, first overtone, or noise. We use a convolutional neural network (U-net) architecture with a supervised learning objective and incorporate transfer learning. The training is initially performed with synthetic data to learn coarse structure, followed by fine-tuning of the network using approximately 10% of the real data based on human classification. The results show that the machine classification is nearly identical to the human picked phases. Expanding the method to process multiple images at once did not improve the performance. The developed technique will faciliate automated processing of large dispersion curve datasets."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    },
+    {
+      "id": "2007.09347v1-Figure14-1",
+      "kind": "ask_fused",
+      "question": "What does the graph show about the effect of different system parameters on the stability of the two-area system?",
+      "document_id": "2007.09347v1-Figure14-1",
+      "image_path": "evaluation/datasets/scigraphqa_easy_50/images/2007.09347v1-Figure14-1.png",
+      "expected_route": "ask_fused",
+      "expected_keywords": [
+        "graph",
+        "shows",
+        "two",
+        "area",
+        "system",
+        "remains",
+        "unstable",
+        "large"
+      ],
+      "min_keyword_recall": 0.5,
+      "grounding_keywords": [
+        "graph",
+        "shows",
+        "two",
+        "area",
+        "system",
+        "remains",
+        "unstable",
+        "large"
+      ],
+      "expected_tool_names": [
+        "ChartAgent.ask_chart"
+      ],
+      "require_evidence": false,
+      "metadata": {
+        "dataset": "SciGraphQA",
+        "dataset_split": "",
+        "source_file": "scigraphqa_test.jsonl",
+        "source_id": "2007.09347v1-Figure14-1",
+        "turn_index": 1,
+        "reference_answer": "The graph shows that the two-area system remains unstable with a large l23 = 50 km and a reduced m1 = 1%, but it stabilizes for a higher l34 = 4 km and a reduced m3 = 1%. This is because the length of the line 2 − 3 has a greater impact on the stability of the system than the length of the line 3 − 4.",
+        "context": {
+          "title": "Identification and Stabilization of Critical Clusters in Inverter-Based Microgrids",
+          "caption": "Fig. 14. Step response of ω3 subjected to a 10% load decrease under different system parameters. The two-area system remains unstable with a large l23 = 50 km and a reduced m1 = 1%, but it stabilizes for a higher l34 = 4 km and a reduced m3 = 1%.",
+          "first_mention": "it is impossible to stabilize the system by varying the length of the line 2 − 3 from its base value. Variation of l34 on the contrary, can stabilise the system, and according to Fig. 10 the value l34 = 3.3 km or greater corresponds to stable system. Time-domain simulations shown in Fig. 14 also justify this observation – the system becomes stable when subjected to a load change for l34 = 4 km and remains unstable with l23 = 50 km.",
+          "abstract": "A new method for stability assessment of inverter-based microgrids is presented in this paper. It leverages the notion of critical clusters -- a localized group of inverters with parameters having the highest impact on the system stability. The spectrum of the weighted network admittance matrix is proposed to decompose a system into clusters and rank them based on their distances from the stability boundary. We show that each distinct eigenvalue of this matrix is associated with one cluster, and its eigenvectors reveal a set of inverters that participate most in the corresponding cluster. The least stable or unstable clusters correspond to higher values of respective eigenvalues of the weighted admittance matrix. We also establish an upper threshold for eigenvalues that determines the stability boundary of the entire system and demonstrate that this value depends only on the grid type (i.e. $R/X$ ratio of the network) and does not depend on the grid topology. Therefore, the proposed method provides the stability certificate based on this upper threshold and identifies the lines or inverter droop settings needed to be adjusted to restore or improve the stability."
+        },
+        "history": []
+      },
+      "skill_name": "chart_qa"
+    }
+  ]
+}

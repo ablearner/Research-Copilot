@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "id": "doc_revenue_q1",
+      "kind": "ask_document",
+      "question": "What happened to revenue in 2025 Q1?",
+      "document_id": "portfolio-doc-001",
+      "expected_route": "ask_document",
+      "expected_keywords": ["18%", "revenue", "2025"],
+      "expected_evidence_ids": ["ev_tb-1"]
+    },
+    {
+      "id": "doc_margin_reason",
+      "kind": "ask_document",
+      "question": "Why did margin improve?",
+      "document_id": "portfolio-doc-001",
+      "expected_route": "ask_document",
+      "expected_keywords": ["cloud", "retention", "margin"],
+      "expected_retrieval_keywords": ["cloud subscriptions", "enterprise retention"],
+      "grounding_keywords": ["cloud", "retention", "margin"]
+    },
+    {
+      "id": "chart_route_fused",
+      "kind": "ask_document",
+      "question": "What does this chart show about revenue growth?",
+      "document_id": "portfolio-doc-001",
+      "expected_route": "ask_fused",
+      "expected_keywords": ["18%", "growth", "revenue"],
+      "expected_tool_names": ["ChartAgent.ask_chart"],
+      "grounding_keywords": ["18%", "growth"]
+    },
+    {
+      "id": "chart_understand_summary",
+      "kind": "chart_understand",
+      "document_id": "portfolio-doc-001",
+      "image_path": "synthetic-chart.png",
+      "page_id": "page-1",
+      "page_number": 1,
+      "chart_id": "chart-portfolio-1",
+      "expected_route": "chart_understand",
+      "expected_keywords": ["18%", "growth", "quarterly"]
+    },
+    {
+      "id": "doc_missing_attrition",
+      "kind": "ask_document",
+      "question": "What happened to employee attrition?",
+      "document_id": "portfolio-doc-001",
+      "expected_route": "ask_document",
+      "require_nonempty_answer": true,
+      "require_evidence": false
+    }
+  ]
+}
+

@@ -1,0 +1,75 @@
+[project]
+name = "research-copilot"
+version = "0.1.0"
+description = "Research-Copilot: a multi-agent research assistant with document, chart, and GraphRAG tooling."
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+    "langchain>=1.2.15",
+    "langchain-core>=1.2.28",
+    "langchain-openai>=0.3.0",
+    "langchain-google-genai>=2.1.0",
+    "langgraph>=1.1.6",
+    "neo4j>=5.20.0",
+    "pymilvus>=2.5.0",
+    "psycopg[binary]>=3.1.18",
+    "PyMySQL>=1.1.0",
+    "pymupdf>=1.27.0",
+    "pypdf>=6.0.0",
+    "qdrant-client>=1.10.1",
+    "pyarrow>=15.0.0",
+    "python-multipart>=0.0.9",
+    "PyYAML>=6.0",
+    "sentence-transformers>=3.0.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.1",
+    "prompt_toolkit>=3.0.52,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+research-copilot = "apps.cli:main"
+kepler = "apps.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".data"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = [
+    "adapters*",
+    "agents*",
+    "apps*",
+    "chains*",
+    "core*",
+    "domain*",
+    "rag_runtime*",
+    "memory*",
+    "mcp*",
+    "planners*",
+    "repositories*",
+    "retrieval*",
+    "sdk*",
+    "skills*",
+    "services*",
+    "tooling*",
+    "tools*",
+]
+exclude = ["prompts*", "tests*"]
