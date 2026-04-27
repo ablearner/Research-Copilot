@@ -4,8 +4,6 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "AutonomousResearchCollectionQARuntime",
-    "AutonomousResearchRuntime",
     "LiteratureResearchService",
     "PaperImportService",
     "PaperSearchService",
@@ -26,8 +24,6 @@ __all__ = [
 ]
 
 _EXPORTS = {
-    "AutonomousResearchCollectionQARuntime": "services.research.autonomous_research_qa_runtime",
-    "AutonomousResearchRuntime": "services.research.autonomous_research_runtime",
     "LiteratureResearchService": "services.research.literature_research_service",
     "PaperImportService": "services.research.paper_import_service",
     "PaperSearchService": "services.research.paper_search_service",

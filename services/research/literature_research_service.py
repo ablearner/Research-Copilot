@@ -7,7 +7,7 @@ import re
 from datetime import UTC, datetime
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 from agents.chart_analysis_agent import ChartAnalysisAgent
@@ -77,10 +77,6 @@ from services.research.research_report_service import ResearchReportService
 from services.research.research_workspace import build_workspace_from_task, build_workspace_state
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget
 
-if TYPE_CHECKING:
-    from services.research.autonomous_research_qa_runtime import AutonomousResearchCollectionQARuntime
-    from services.research.autonomous_research_runtime import AutonomousResearchRuntime
-
 logger = logging.getLogger(__name__)
 
 
@@ -133,8 +129,8 @@ class LiteratureResearchService:
         paper_search_service: PaperSearchService,
         report_service: ResearchReportService,
         paper_import_service: PaperImportService,
-        research_runtime: "AutonomousResearchRuntime" | None = None,
-        research_qa_runtime: "AutonomousResearchCollectionQARuntime" | None = None,
+        research_runtime: Any | None = None,
+        research_qa_runtime: Any | None = None,
         research_context_manager: ResearchContextManager | None = None,
         memory_manager: MemoryManager | None = None,
         paper_selector_service: PaperSelectorService | None = None,
