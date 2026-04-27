@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry, *, approval_gate=None) -> None:
         self.registry = registry
         self._traces: list[ToolCallTrace] = []
+        self.approval_gate = approval_gate
 
     async def execute_tool_call(
         self,
@@ -34,6 +35,23 @@ class ToolExecutor:
         started_at = perf_counter()
         tool_spec = self.registry.get_tool(call.tool_name, include_disabled=True)
         audit_context = self._extract_audit_context(call.arguments)
+
+        if self.approval_gate is not None:
+            try:
+                approved = await self.approval_gate.check(call.tool_name, call.arguments)
+            except Exception:
+                approved = False
+            if not approved:
+                return self._build_result(
+                    tool_name=call.tool_name,
+                    call_id=call.call_id,
+                    tool_input=call.arguments,
+                    status="rejected",
+                    output=None,
+                    error_message=f"Tool execution rejected by approval gate: {call.tool_name}",
+                    started_at=started_at,
+                    audit_context=audit_context,
+                )
 
         if tool_spec is None:
             return self._build_result(

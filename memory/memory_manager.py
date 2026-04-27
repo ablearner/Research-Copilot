@@ -27,6 +27,7 @@ class MemoryManager:
         self.long_term_memory = long_term_memory or LongTermMemory()
         self.user_profile_memory = UserProfileMemory(self.long_term_memory)
         self.paper_knowledge_memory = paper_knowledge_memory
+        self._session_snapshots: dict[str, dict] = {}
 
     def save_context(self, session_id: str, context: ResearchContext) -> SessionMemoryRecord:
         self.working_memory.sync_context(session_id, context)
@@ -66,28 +67,45 @@ class MemoryManager:
         history = self._dedupe_history([*context.session_history, *working_state.recent_history])
         context.session_history = history[-context.user_preferences.max_history_turns :]
 
-        if context.research_topic:
-            recall = self.long_term_memory.search(
-                LongTermMemoryQuery(
-                    query=context.research_topic,
-                    topic=context.research_topic,
-                    keywords=context.research_goals[:5],
-                    top_k=3,
-                )
-            )
+        frozen = self.get_frozen_prompt_block(session_id)
+        if frozen is not None:
             context.metadata = {
                 **context.metadata,
-                "recalled_memory_ids": [record.memory_id for record in recall.records],
-                "recalled_memories": [
-                    {
-                        "memory_id": record.memory_id,
-                        "memory_type": record.memory_type,
-                        "content": record.content,
-                        "score": record.score,
-                    }
-                    for record in recall.records
-                ],
+                "recalled_memories": frozen["recalled_memories"],
+                "recalled_memory_ids": [m["memory_id"] for m in frozen["recalled_memories"]],
             }
+        elif context.research_topic:
+            if session_id not in self._session_snapshots:
+                self.freeze_session_snapshot(session_id, context)
+                frozen = self._session_snapshots.get(session_id)
+            if frozen is not None:
+                context.metadata = {
+                    **context.metadata,
+                    "recalled_memories": frozen["recalled_memories"],
+                    "recalled_memory_ids": [m["memory_id"] for m in frozen["recalled_memories"]],
+                }
+            else:
+                recall = self.long_term_memory.search(
+                    LongTermMemoryQuery(
+                        query=context.research_topic,
+                        topic=context.research_topic,
+                        keywords=context.research_goals[:5],
+                        top_k=3,
+                    )
+                )
+                context.metadata = {
+                    **context.metadata,
+                    "recalled_memory_ids": [record.memory_id for record in recall.records],
+                    "recalled_memories": [
+                        {
+                            "memory_id": record.memory_id,
+                            "memory_type": record.memory_type,
+                            "content": record.content,
+                            "score": record.score,
+                        }
+                        for record in recall.records
+                    ],
+                }
         return context
 
     def record_turn(
@@ -298,6 +316,38 @@ class MemoryManager:
         if self.paper_knowledge_memory is None:
             raise RuntimeError("PaperKnowledgeMemory is not configured")
         return self.paper_knowledge_memory.upsert(record)
+
+    def freeze_session_snapshot(self, session_id: str, context: ResearchContext) -> None:
+        """Capture a frozen memory snapshot for prompt injection.
+
+        Called once at session start.  Subsequent hydrate_context() calls
+        will use this snapshot for the system prompt portion, keeping the
+        prompt prefix stable for Anthropic prompt caching.
+        """
+        recall = self.long_term_memory.search(
+            LongTermMemoryQuery(
+                query=context.research_topic or "",
+                topic=context.research_topic or "",
+                keywords=context.research_goals[:5],
+                top_k=3,
+            )
+        )
+        self._session_snapshots[session_id] = {
+            "recalled_memories": [
+                {
+                    "memory_id": r.memory_id,
+                    "memory_type": r.memory_type,
+                    "content": r.content,
+                    "score": r.score,
+                }
+                for r in recall.records
+            ],
+            "user_profile": self.load_user_profile(),
+        }
+
+    def get_frozen_prompt_block(self, session_id: str) -> dict | None:
+        """Return the frozen snapshot for system prompt injection."""
+        return self._session_snapshots.get(session_id)
 
     def _dedupe_history(self, history: list[QAPair]) -> list[QAPair]:
         deduped: list[QAPair] = []

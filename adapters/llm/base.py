@@ -15,6 +15,10 @@ TModel = TypeVar("TModel", bound=BaseModel)
 class LLMAdapterError(RuntimeError):
     """Raised when an LLM adapter call fails."""
 
+    def __init__(self, message: str = "", *, classified=None):
+        super().__init__(message)
+        self.classified = classified
+
 
 class ImageNotVisibleLLMAdapterError(LLMAdapterError):
     """Raised when the provider accepted a vision request but could not see the image."""
@@ -181,7 +185,12 @@ class BaseLLMAdapter(ABC):
         if isinstance(last_error, LLMAdapterError):
             raise last_error
         error_name = last_error.__class__.__name__ if last_error is not None else "UnknownError"
-        raise LLMAdapterError(f"LLM adapter operation failed: {operation} ({error_name})") from last_error
+        from adapters.llm.error_classifier import classify_llm_error
+        classified = classify_llm_error(last_error) if last_error is not None else None
+        raise LLMAdapterError(
+            f"LLM adapter operation failed: {operation} ({error_name})",
+            classified=classified,
+        ) from last_error
 
     def _should_retry_exception(self, exc: Exception) -> bool:
         if is_expected_provider_error(exc):

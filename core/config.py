@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     google_api_key: str | None = None
     llm_provider: str = "local"
     llm_model: str = "qwen-plus"
+    llm_fallback_providers: str = ""
+    llm_fallback_models: str = ""
+    llm_fallback_api_keys: str = ""
+    llm_fallback_base_urls: str = ""
     embedding_provider: str = "local"
     embedding_model: str = "local-hash-embedding"
     embedding_base_url: str | None = None
@@ -112,6 +116,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("LOCAL_CODE_EXECUTION_ENABLED", "MCP_CODE_EXECUTION_ENABLED"),
     )
+
+    mcp_servers: dict = Field(default_factory=dict)
+    skills_dir: str = ".data/skills"
 
     local_storage_root: str = ".data/storage"
     upload_dir: str = ".data/uploads"

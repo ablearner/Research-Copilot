@@ -19,7 +19,7 @@ const IMAGE_PATH_RE = /图片路径[：:]\s*(\.data\/storage\/[^\s]+)/g;
 const STORAGE_PREFIX_RE = /^\.data\/storage\//;
 
 function storagePathToUrl(p: string): string {
-  return '/files/' + p.replace(STORAGE_PREFIX_RE, '');
+  return '/api/files/' + p.replace(STORAGE_PREFIX_RE, '');
 }
 
 function extractImages(message: ChatMessage): string[] {
@@ -259,9 +259,9 @@ function AssistantBubble({ message }: { message: ChatMessage }) {
           </button>
           {showTrace && (
             <div className="mt-2 space-y-1 animate-fade-in">
-              {message.trace!.map((step) => (
+              {message.trace!.map((step, idx) => (
                 <div
-                  key={step.step_index}
+                  key={`${step.step_index}-${idx}`}
                   className="flex items-start gap-2 text-xs px-3 py-2 bg-paper-100 rounded-lg"
                 >
                   <span className="font-mono text-ink-300 flex-shrink-0 w-5 text-right">

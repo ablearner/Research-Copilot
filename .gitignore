@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 *.tsbuildinfo
+next-env.d.ts
 coverage/
 .turbo/
 .data/

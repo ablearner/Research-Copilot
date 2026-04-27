@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field
+
+from domain.schemas.research import PaperSource
 
 
 ResearchUserIntentName = Literal[
@@ -32,6 +34,8 @@ class ResearchUserIntentResult(BaseModel):
     rationale: str = ""
     markers: list[str] = Field(default_factory=list)
     source: Literal["heuristic", "llm"] = "heuristic"
+    extracted_topic: str = Field(default="", description="Research topic with source/constraint phrases stripped")
+    source_constraints: list[str] = Field(default_factory=list, description="Extracted source constraints, e.g. ['arxiv']")
 
 
 _FIGURE_MARKERS = ("图", "图表", "figure", "fig.", "chart", "plot", "曲线", "横轴", "纵轴")
@@ -67,6 +71,23 @@ _SEARCH_MARKERS = (
     "survey",
     "find papers",
 )
+# Auto-derive canonical source names from the PaperSource Literal,
+# plus common aliases so heuristic matching covers user-facing names.
+_PAPER_SOURCES: tuple[str, ...] = get_args(PaperSource)  # ("arxiv", "openalex", ...)
+_SOURCE_ALIASES: dict[str, str] = {
+    "semantic scholar": "semantic_scholar",
+    "google scholar": "google_scholar",
+}
+_SOURCE_NAMES: dict[str, str] = {
+    **{src: src for src in _PAPER_SOURCES},
+    **{src.replace("_", " "): src for src in _PAPER_SOURCES if "_" in src},
+    **_SOURCE_ALIASES,
+}
+_SOURCE_CONSTRAINT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:在|从|用|通过|去)\s*(?P<src>" + "|".join(re.escape(k) for k in _SOURCE_NAMES) + r")\s*(?:上|中|里|搜索|搜|找|检索|查)", re.IGNORECASE),
+    re.compile(r"(?:on|from|via|using|through)\s+(?P<src>" + "|".join(re.escape(k) for k in _SOURCE_NAMES) + r")\b", re.IGNORECASE),
+    re.compile(r"(?:search|find|look)\s+(?:on|in|from)\s+(?P<src>" + "|".join(re.escape(k) for k in _SOURCE_NAMES) + r")\b", re.IGNORECASE),
+)
 _DOCUMENT_MARKERS = ("文档", "pdf", "文件", "上传", "解析", "document")
 _SINGLE_PAPER_MARKERS = ("这篇", "该论文", "这篇论文", "第一篇", "第二篇", "method", "experiment")
 _AMBIGUOUS_REFERENCES = ("这篇", "这张", "这个", "该论文", "它", "上一个", "上一张", "this paper", "this figure", "it")
@@ -90,6 +111,28 @@ _GENERAL_OPT_OUT_MARKERS = (
     "just say hello",
     "just greet me",
 )
+
+def _extract_source_constraints(message: str) -> tuple[list[str], str]:
+    """Extract source constraints from message, return (constraints, cleaned_message)."""
+    constraints: list[str] = []
+    cleaned = message
+    for pattern in _SOURCE_CONSTRAINT_PATTERNS:
+        new_cleaned = cleaned
+        for match in reversed(list(pattern.finditer(cleaned))):
+            src_key = match.group("src").lower().strip()
+            canonical = _SOURCE_NAMES.get(src_key)
+            if canonical and canonical not in constraints:
+                constraints.append(canonical)
+            new_cleaned = new_cleaned[:match.start()] + " " + new_cleaned[match.end():]
+        cleaned = new_cleaned
+    for name, canonical in _SOURCE_NAMES.items():
+        if name in cleaned.lower() and canonical not in constraints:
+            constraints.append(canonical)
+            cleaned = re.sub(re.escape(name), " ", cleaned, flags=re.IGNORECASE)
+    cleaned = " ".join(cleaned.split()).strip()
+    return constraints, cleaned
+
+
 _ORDINAL_PATTERNS = (
     re.compile(r"\bp(?:aper)?\s*([0-9]{1,2})\b", re.IGNORECASE),
     re.compile(r"第\s*([0-9]{1,2})\s*篇"),
@@ -151,6 +194,9 @@ class ResearchUserIntentResolverSkill:
                     "active_paper_ids、selected_paper_ids 解析出 resolved_paper_ids。"
                     "主路径依赖你的语义理解，不要机械依赖关键词或固定映射。"
                     "关键词和 marker 只能作为弱信号，不能机械匹配；请优先理解用户真实语义。"
+                    "重要：如果用户提到数据源（如 arxiv、ieee、semantic scholar 等），"
+                    "将其放入 source_constraints 列表，并在 extracted_topic 中剥离这些来源名称，"
+                    "只保留纯粹的研究主题。例如“在arxiv上找LLM agent论文”→ extracted_topic='LLM agent', source_constraints=['arxiv']。"
                     "只返回结构化字段，不要执行任务。"
                 ),
                 input_data={
@@ -184,6 +230,7 @@ class ResearchUserIntentResolverSkill:
     ) -> ResearchUserIntentResult:
         normalized = f" {message.strip().lower()} "
         markers: list[str] = []
+        source_constraints, cleaned_message = _extract_source_constraints(message)
         resolved_ordinal_ids = self._resolve_ordinal_references(
             normalized,
             candidate_papers=list(candidate_papers or []),
@@ -297,7 +344,12 @@ class ResearchUserIntentResolverSkill:
                 ),
             )
         if has_any(_SEARCH_MARKERS):
-            return self._result("literature_search", "collection", 0.78, markers, "Question appears to need literature discovery.")
+            return self._result(
+                "literature_search", "collection", 0.78, markers,
+                "Question appears to need literature discovery.",
+                extracted_topic=cleaned_message,
+                source_constraints=source_constraints,
+            )
         if resolved_ordinal_ids or has_any(_SINGLE_PAPER_MARKERS):
             ambiguous = self._has_ambiguous_reference(normalized) and not (active_paper_ids or selected_paper_ids)
             return self._result(
@@ -347,6 +399,8 @@ class ResearchUserIntentResolverSkill:
         reference_type: Literal["none", "deictic", "ordinal", "alias", "title", "mixed"] = "none",
         needs_clarification: bool = False,
         clarification_question: str | None = None,
+        extracted_topic: str = "",
+        source_constraints: list[str] | None = None,
     ) -> ResearchUserIntentResult:
         return ResearchUserIntentResult(
             intent=intent,
@@ -358,6 +412,8 @@ class ResearchUserIntentResolverSkill:
             rationale=rationale,
             needs_clarification=needs_clarification,
             clarification_question=clarification_question,
+            extracted_topic=extracted_topic,
+            source_constraints=list(source_constraints or []),
         )
 
     def _resolve_ordinal_references(

@@ -10,6 +10,7 @@ from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from domain.schemas.research_memory import (
+    # NOTE: memory.security imported lazily below to avoid circular imports
     LongTermMemoryQuery,
     LongTermMemoryRecord,
     LongTermMemorySearchResult,
@@ -266,6 +267,15 @@ class LongTermMemory:
         self.store = store or InMemoryLongTermMemoryStore()
 
     def upsert(self, record: LongTermMemoryRecord) -> LongTermMemoryRecord:
+        from memory.security import scan_memory_content
+
+        threat = scan_memory_content(record.content)
+        if threat is not None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Blocked unsafe memory content (%s): %s", threat, record.memory_id,
+            )
+            raise ValueError(f"Memory content blocked: {threat}")
         return self.store.upsert(record)
 
     def search(self, query: LongTermMemoryQuery) -> LongTermMemorySearchResult:

@@ -38,17 +38,26 @@ def resolve_active_message(decision: Any) -> AgentMessage | None:
 def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLiteratureSearchInput:
     request = context.request
     task_payload = dict(getattr(decision, "action_input", {}) or {})
+    # Prefer extracted_topic from intent (source names already stripped)
+    # over the raw user message which may contain "arxiv", "ieee" etc.
+    user_intent = (request.metadata or {}).get("user_intent") or {}
+    extracted_topic = str(user_intent.get("extracted_topic") or "").strip()
+    source_constraints = list(user_intent.get("source_constraints") or [])
     topic = str(
         task_payload.get("evidence_gap_query")
         or task_payload.get("query")
         or task_payload.get("goal")
+        or extracted_topic
         or request.message
     ).strip()
+    resolved_sources = list(request.sources)
+    if source_constraints and not resolved_sources:
+        resolved_sources = source_constraints
     return UnifiedLiteratureSearchInput(
         topic=topic or request.message.strip(),
         days_back=request.days_back,
         max_papers=request.max_papers,
-        sources=list(request.sources),
+        sources=resolved_sources or list(request.sources),
         run_immediately=True,
         conversation_id=request.conversation_id,
         selected_paper_ids=list(request.selected_paper_ids),
@@ -59,6 +68,7 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
             "agent_runtime": "research_agent",
             "manager_action": "create_research_task",
             "task_payload": task_payload,
+            "source_constraints": source_constraints,
         },
     )
 

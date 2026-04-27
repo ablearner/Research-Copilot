@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +57,9 @@ _SYNONYM_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
         ("detection", "object detection", "perception"),
     ),
 )
+_SOURCE_NAMES_FOR_STRIP = tuple(dict.fromkeys(
+    [*get_args(PaperSource), *(s.replace("_", " ") for s in get_args(PaperSource) if "_" in s), "google scholar"]
+))
 _STRIP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"最近\s*\d+\s*(?:个)?(?:月|周|年)"),
     re.compile(r"(?:近|过去)\s*\d+\s*(?:个)?(?:月|周|年)"),
@@ -69,6 +72,20 @@ _STRIP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"帮我找"),
     re.compile(r"请(?:帮我)?"),
     re.compile(r"(?:这一|这组)?论文"),
+    # Strip source-constraint phrases: "在arxiv上", "从ieee搜索", "on semantic scholar" etc.
+    re.compile(
+        r"(?:在|从|用|通过|去)\s*(?:" + "|".join(re.escape(s) for s in _SOURCE_NAMES_FOR_STRIP) + r")\s*(?:上|中|里|搜索|搜|找|检索|查)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:on|from|via|using|through)\s+(?:" + "|".join(re.escape(s) for s in _SOURCE_NAMES_FOR_STRIP) + r")\b",
+        re.IGNORECASE,
+    ),
+    # Bare source names that survived the above (e.g. standalone "arxiv")
+    re.compile(
+        r"\b(?:" + "|".join(re.escape(s) for s in _SOURCE_NAMES_FOR_STRIP) + r")\b",
+        re.IGNORECASE,
+    ),
 )
 _PUNCTUATION_PATTERN = re.compile(r"[？?！!,，。.;；:：]")
 _CJK_TOKEN_PATTERN = re.compile(r"[\u4e00-\u9fff]{2,}")

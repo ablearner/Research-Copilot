@@ -10,7 +10,7 @@ from adapters.local_runtime import (
 from adapters.embedding.dashscope_adapter import DashScopeEmbeddingAdapter
 from adapters.embedding.openai import OpenAIEmbeddingAdapter
 from adapters.graph_store.neo4j_adapter import Neo4jGraphStore
-from adapters.llm import LangChainLLMAdapter, OpenAIRelayAdapter, build_provider_binding
+from adapters.llm import FallbackLLMAdapter, LangChainLLMAdapter, OpenAIRelayAdapter, build_provider_binding
 from adapters.llm.dashscope_adapter import DashScopeLLMAdapter
 from adapters.vector_store.milvus_adapter import MilvusVectorStore
 from adapters.vector_store.pgvector_adapter import PgVectorStore
@@ -299,6 +299,15 @@ async def close_graph_runtime(graph_runtime: GraphRuntime) -> None:
 
 
 def _build_llm_adapter(settings: Settings):
+    primary = _build_primary_llm_adapter(settings)
+    fallbacks = _build_fallback_adapters(settings)
+    if fallbacks:
+        logger.info("LLM fallback chain configured: %d fallback(s)", len(fallbacks))
+        return FallbackLLMAdapter(primary, fallbacks)
+    return primary
+
+
+def _build_primary_llm_adapter(settings: Settings):
     provider = settings.llm_provider.lower()
     if provider == "dashscope":
         if not settings.dashscope_api_key:
@@ -335,6 +344,46 @@ def _build_llm_adapter(settings: Settings):
     if settings.runtime_backend.lower() == "business":
         raise RuntimeError(f"Unsupported business LLM_PROVIDER: {settings.llm_provider}")
     return LocalLLMAdapter()
+
+
+def _build_fallback_adapters(settings: Settings) -> list:
+    """Build fallback adapters from comma-separated config fields."""
+    providers = [p.strip() for p in settings.llm_fallback_providers.split(",") if p.strip()]
+    if not providers:
+        return []
+    models = [m.strip() for m in settings.llm_fallback_models.split(",")]
+    api_keys = [k.strip() for k in settings.llm_fallback_api_keys.split(",")]
+    base_urls = [u.strip() for u in settings.llm_fallback_base_urls.split(",")]
+    adapters = []
+    for i, prov in enumerate(providers):
+        model = models[i] if i < len(models) and models[i] else settings.llm_model
+        api_key = api_keys[i] if i < len(api_keys) and api_keys[i] else settings.openai_api_key
+        base_url = base_urls[i] if i < len(base_urls) and base_urls[i] else None
+        if not api_key:
+            logger.warning("Skipping fallback provider %s — no API key", prov)
+            continue
+        prov_lower = prov.lower()
+        if prov_lower in _OPENAI_COMPATIBLE_PROVIDERS:
+            adapters.append(OpenAIRelayAdapter(
+                api_key=api_key,
+                model=model,
+                base_url=base_url or "https://api.openai.com/v1/chat/completions",
+                timeout_seconds=settings.openai_timeout_seconds,
+                max_retries=settings.openai_max_retries,
+                retry_delay_seconds=0.5,
+            ))
+        elif prov_lower == "dashscope":
+            adapters.append(DashScopeLLMAdapter(
+                api_key=api_key,
+                model=model,
+                base_url=base_url or settings.dashscope_base_url,
+                timeout_seconds=settings.dashscope_timeout_seconds,
+                max_retries=settings.dashscope_max_retries,
+                retry_delay_seconds=settings.dashscope_retry_delay_seconds,
+            ))
+        else:
+            logger.warning("Unsupported fallback provider: %s", prov)
+    return adapters
 
 
 def _build_provider_binding(settings: Settings):

@@ -13,9 +13,11 @@
 
 当前活跃前端工作区（`web/` 目录）：
 
-- 技术栈：React 18 + Vite + TypeScript + Tailwind CSS
-- 主入口：`web/src/App.tsx`
-- API 封装：`web/src/api.ts`（直连 FastAPI `http://127.0.0.1:8000`）
+- 技术栈：Next.js 15 (App Router) + React 18 + TypeScript + Tailwind CSS
+- 应用入口：`web/app/layout.tsx` + `web/app/page.tsx`
+- 主组件：`web/src/App.tsx`
+- API 封装：`web/src/api.ts`（通过 Next.js rewrites 代理到 FastAPI）
+- 图片服务：`web/app/api/files/[...path]/route.ts`（Next.js Route Handler）
 - 聊天视图：`web/src/components/ChatView.tsx`
 - 消息气泡：`web/src/components/MessageBubble.tsx`（含内联图片渲染）
 
@@ -46,8 +48,9 @@
 
 ```text
 Browser (http://localhost:3000)
--> Vite dev server (web/)
--> FastAPI (http://127.0.0.1:8000)
+-> Next.js (web/, App Router)
+-> /api/backend/* rewrites -> FastAPI (http://127.0.0.1:8000)
+-> /api/files/* -> Route Handler -> .data/storage/
 -> LiteratureResearchService
 -> ResearchSupervisorGraphRuntime
 -> specialist agents / research services
@@ -90,7 +93,7 @@ Browser (http://localhost:3000)
 ## 主要目录
 
 - `web/`
-  当前活跃前端（React + Vite + Tailwind），ChatGPT 风格对话式布局
+  当前活跃前端（Next.js 15 + React 18 + Tailwind），ChatGPT 风格对话式布局
 - `app/`、`components/`、`lib/`
   旧 Next.js 前端（已不活跃）
 - `apps/api/`
@@ -235,9 +238,14 @@ bash scripts/wsl_zotero_bridge.sh start
 
 ```bash
 cd /home/myc/Research-Copilot
-/home/myc/miniconda3/envs/Research-Copilot/bin/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --reload
+/home/myc/miniconda3/envs/Research-Copilot/bin/python -m uvicorn apps.api.main:app \
+  --host 127.0.0.1 --port 8000 --reload \
+  --reload-dir apps --reload-dir services --reload-dir rag_runtime \
+  --reload-dir agents --reload-dir tools --reload-dir adapters \
+  --reload-dir memory --reload-dir retrieval --reload-dir skills --reload-dir domain
 # 等待日志出现 "Application startup complete"
 # 如果卡在 "Waiting for application startup"，说明 Milvus 或 Neo4j 没启动
+# 注意：必须用 --reload-dir 限制监视目录，否则 watchfiles 会因 web/node_modules 文件过多而崩溃
 ```
 
 #### 第三步：前端
@@ -256,7 +264,7 @@ npm run dev
 | Neo4j | 7474/7687 | `/home/myc/neo4j/bin/neo4j start` |
 | Zotero Bridge | 23119 | `bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
-| 前端 (Vite) | 3000 | `cd web && npm run dev` |
+| 前端 (Next.js) | 3000 | `cd web && npm run dev` |
 
 ### WSL 环境注意事项
 

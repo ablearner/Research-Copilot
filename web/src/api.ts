@@ -4,6 +4,7 @@ import type {
   ResearchConversationResponse,
 } from './types';
 
+// Direct connection to FastAPI backend (research tasks can take 60-120s, Next.js proxy may timeout)
 const API_BASE = 'http://127.0.0.1:8000';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -38,9 +39,13 @@ export async function getConversation(
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-  await fetch(`${API_BASE}/research/conversations/${id}`, {
+  const res = await fetch(`${API_BASE}/research/conversations/${id}`, {
     method: 'DELETE',
   });
+  if (!res.ok) {
+    const body = await res.text().catch(() => 'Unknown error');
+    throw new Error(`API ${res.status}: ${body}`);
+  }
 }
 
 export async function renameConversation(

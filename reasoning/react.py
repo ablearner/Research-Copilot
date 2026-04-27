@@ -510,7 +510,16 @@ class ReActReasoningAgent:
                 response_model=ReActDecision,
             )
         except (LLMAdapterError, OSError, ValueError) as exc:
-            logger.exception("Failed to decide next ReAct step")
+            classified = getattr(exc, "classified", None)
+            if classified is not None:
+                logger.warning(
+                    "ReAct decision failed (reason=%s, compress=%s, fallback=%s)",
+                    classified.reason.value,
+                    classified.should_compress,
+                    classified.should_fallback,
+                )
+            else:
+                logger.exception("Failed to decide next ReAct step")
             raise ReActReasoningAgentError("Failed to decide next ReAct step") from exc
 
     async def _synthesize_answer(

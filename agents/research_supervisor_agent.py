@@ -313,10 +313,16 @@ class ResearchSupervisorAgent:
             action_name: ResearchSupervisorActionName = "search_literature"
             rationale = "The parsed user intent indicates literature discovery rather than a direct general answer."
             thought = "The user appears to want paper search or survey workflow, so the manager should start or refresh literature search."
+            extracted_topic = str(state.user_intent.get("extracted_topic") or "").strip()
+            source_constraints = list(state.user_intent.get("source_constraints") or [])
             payload_overrides: dict[str, Any] = {
                 "trigger": "intent_guardrail",
                 "intent": intent_name,
             }
+            if extracted_topic:
+                payload_overrides["query"] = extracted_topic
+            if source_constraints:
+                payload_overrides["source_constraints"] = source_constraints
             if state.has_task:
                 payload_overrides["refresh_reason"] = "user_requested_search"
             return self._guardrail_worker_action(
