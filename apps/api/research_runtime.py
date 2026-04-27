@@ -13,8 +13,6 @@ from skills.research import (
     WritingPolishSkill,
 )
 from services.research.research_function_service import ResearchFunctionService
-from services.research.autonomous_research_qa_runtime import AutonomousResearchCollectionQARuntime
-from services.research.autonomous_research_runtime import AutonomousResearchRuntime
 from services.research.literature_research_service import LiteratureResearchService
 from services.research.paper_import_service import PaperImportService
 from services.research.paper_search_service import PaperSearchService
@@ -197,13 +195,8 @@ def build_literature_research_service(
         paper_search_service=paper_search_service,
         report_service=report_service,
         paper_import_service=paper_import_service,
-        research_runtime=AutonomousResearchRuntime(
-            paper_search_service=paper_search_service,
-            plan_and_solve_reasoning_agent=plan_and_solve_reasoning_agent,
-        ),
-        research_qa_runtime=AutonomousResearchCollectionQARuntime(
-            plan_and_solve_reasoning_agent=plan_and_solve_reasoning_agent,
-        ),
+        research_runtime=None,
+        research_qa_runtime=None,
         paper_reading_skill=paper_reading_skill,
         evaluation_skill=evaluation_skill,
         review_writing_skill=review_writing_skill,
