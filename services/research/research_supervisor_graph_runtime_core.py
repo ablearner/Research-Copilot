@@ -2553,23 +2553,23 @@ class ResearchRuntimeBase:
             return True
         if context.import_attempted and context.import_result is not None and not request.message.strip():
             return True
-        # Fast-finalize: when a specialist produced a user-facing answer, skip
-        # the extra supervisor LLM roundtrip to decide "finalize".
+        # Fast-finalize: when a specialist produced a terminal user-facing
+        # answer, skip the extra supervisor LLM roundtrip to decide "finalize".
+        # Only truly single-shot actions go here; chainable actions
+        # (import_papers, understand_document, understand_chart, compress_context)
+        # must return to supervisor so it can decide the next step.
         _TERMINAL_TASK_TYPES = {
             "general_answer",
             "answer_question",
             "analyze_papers",
             "analyze_paper_figures",
-            "import_papers",
             "sync_to_zotero",
-            "understand_document",
-            "understand_chart",
-            "compress_context",
         }
         if (
             latest_result is not None
             and latest_result.status in {"succeeded", "skipped"}
             and latest_result.task_type in _TERMINAL_TASK_TYPES
+            and not latest_next_actions
         ):
             return True
         return False
