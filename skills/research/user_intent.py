@@ -183,7 +183,7 @@ class ResearchUserIntentResolverSkill:
             has_visual_anchor=has_visual_anchor,
             has_document_input=has_document_input,
         )
-        if self.llm_adapter is None:
+        if self.llm_adapter is None or heuristic_result.confidence >= 0.8:
             return heuristic_result
         try:
             llm_result = await self.llm_adapter.generate_structured(
