@@ -2553,6 +2553,25 @@ class ResearchRuntimeBase:
             return True
         if context.import_attempted and context.import_result is not None and not request.message.strip():
             return True
+        # Fast-finalize: when a specialist produced a user-facing answer, skip
+        # the extra supervisor LLM roundtrip to decide "finalize".
+        _TERMINAL_TASK_TYPES = {
+            "general_answer",
+            "answer_question",
+            "analyze_papers",
+            "analyze_paper_figures",
+            "import_papers",
+            "sync_to_zotero",
+            "understand_document",
+            "understand_chart",
+            "compress_context",
+        }
+        if (
+            latest_result is not None
+            and latest_result.status in {"succeeded", "skipped"}
+            and latest_result.task_type in _TERMINAL_TASK_TYPES
+        ):
+            return True
         return False
 
     def _workspace_has(self, context: ResearchAgentToolContext, key: str) -> bool:
