@@ -1,6 +1,6 @@
-# Kepler
+# Research-Copilot
 
-`Kepler`（原 Research-Copilot）是一个面向科研调研工作区的多智能体系统。它把前端研究工作台、高层 research 编排、底层 RAG 执行、CLI 和本地持久化放在同一个仓库里。
+`Research-Copilot`是一个面向科研调研工作区的多智能体系统。它把前端研究工作台、高层 research 编排、底层 RAG 执行、CLI 和本地持久化放在同一个仓库里。
 
 ## 当前代码主线
 
@@ -248,7 +248,7 @@ bash scripts/wsl_zotero_bridge.sh start
 #### 第二步：后端
 
 ```bash
-cd /home/myc/Kepler
+cd /home/myc/Research-Copilot
 /home/myc/miniconda3/envs/Research-Copilot/bin/python -m uvicorn apps.api.main:app \
   --host 127.0.0.1 --port 8000 --reload \
   --reload-dir apps --reload-dir services --reload-dir rag_runtime \
@@ -262,7 +262,7 @@ cd /home/myc/Kepler
 #### 第三步：前端
 
 ```bash
-cd /home/myc/Kepler/web
+cd /home/myc/Research-Copilot/web
 npm run dev
 # 访问 http://localhost:3000
 ```
