@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from apps.api.middleware.audit import AuditMiddleware
+from apps.api.middleware.rate_limit import RateLimitMiddleware
 from apps.api.runtime import build_graph_runtime, close_graph_runtime, initialize_graph_runtime
 from apps.api.exception_handlers import register_exception_handlers
 from apps.api.routers.ask import router as ask_router
@@ -63,23 +65,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, json_format=settings.json_log_format)
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     register_exception_handlers(app)
     upload_dir = settings.resolve_path(settings.upload_dir)
     Path(upload_dir).mkdir(parents=True, exist_ok=True)
+    cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:3000",
-            "http://localhost:3000",
-            "http://127.0.0.1:3001",
-            "http://localhost:3001",
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        RateLimitMiddleware,
+        max_requests=settings.rate_limit_max_requests,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+    app.add_middleware(AuditMiddleware)
     if str(settings.app_env).strip().lower() == "local":
         app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
     else:

@@ -7,6 +7,10 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from context.token_counter import TokenBudget
+from observability.metrics import metrics as _metrics
+from security.redact import redact_sensitive_text as _redact
+
 logger = logging.getLogger(__name__)
 
 TModel = TypeVar("TModel", bound=BaseModel)
@@ -106,6 +110,14 @@ class BaseLLMAdapter(ABC):
         self.provider_error_cooldown_seconds = max(provider_error_cooldown_seconds, 0.0)
         self._provider_circuit_open_until = 0.0
         self._provider_circuit_error: Exception | None = None
+        self._token_budget: TokenBudget | None = None
+
+    def get_token_budget(self) -> TokenBudget:
+        """Return (lazily created) TokenBudget for the adapter's model."""
+        if self._token_budget is None:
+            model = getattr(self, "model", "unknown")
+            self._token_budget = TokenBudget(model)
+        return self._token_budget
 
     async def generate_structured(
         self,
@@ -157,10 +169,15 @@ class BaseLLMAdapter(ABC):
         call: Callable[[], Awaitable[TModel]],
     ) -> TModel:
         self._raise_if_provider_circuit_open(operation)
+        _labels = {"provider": getattr(self, "provider", "unknown"), "operation": operation}
+        _start = time.monotonic()
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                return await call()
+                result = await call()
+                _metrics.observe("llm_latency_seconds", time.monotonic() - _start, labels=_labels)
+                _metrics.increment("llm_calls_total", labels={**_labels, "status": "success"})
+                return result
             except asyncio.CancelledError:
                 raise
             except (LLMAdapterError, ValidationError, OSError, ValueError, Exception) as exc:
@@ -168,20 +185,32 @@ class BaseLLMAdapter(ABC):
                 if is_expected_provider_error(exc):
                     logger.warning(
                         "LLM adapter operation failed: %s",
-                        format_llm_error(exc),
+                        _redact(format_llm_error(exc)),
                         extra={"operation": operation, "attempt": attempt + 1},
                     )
                 else:
                     logger.warning(
-                        "LLM adapter operation failed",
+                        "LLM adapter operation failed: %s",
+                        _redact(str(exc)),
                         extra={"operation": operation, "attempt": attempt + 1},
-                        exc_info=exc,
                     )
                 if should_open_provider_circuit(exc):
                     self._open_provider_circuit(exc, operation=operation)
+                from adapters.llm.error_classifier import classify_llm_error as _classify
+                _classified = _classify(exc)
+                if _classified.should_compress:
+                    budget = self.get_token_budget()
+                    if budget.handle_context_overflow(str(exc)):
+                        logger.info(
+                            "TokenBudget adjusted after context overflow: available=%d",
+                            budget.available,
+                        )
                 if attempt >= self.max_retries or not self._should_retry_exception(exc):
                     break
                 await asyncio.sleep(self.retry_delay_seconds * (2**attempt))
+        _metrics.observe("llm_latency_seconds", time.monotonic() - _start, labels=_labels)
+        _metrics.increment("llm_calls_total", labels={**_labels, "status": "error"})
+        _metrics.increment("llm_errors_total", labels={"error_type": last_error.__class__.__name__ if last_error else "Unknown", **_labels})
         if isinstance(last_error, LLMAdapterError):
             raise last_error
         error_name = last_error.__class__.__name__ if last_error is not None else "UnknownError"

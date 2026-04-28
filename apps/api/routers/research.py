@@ -1,8 +1,11 @@
+import asyncio
+import json
 import logging
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from apps.api.audit import audit_api_call
 from apps.api.deps import get_graph_runtime, get_literature_research_service
@@ -123,6 +126,75 @@ async def _run_research_agent_impl(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=build_error_detail(http_request, fallback="Failed to run autonomous research agent", exc=exc),
         ) from exc
+
+
+@router.post("/agent/stream")
+async def run_research_agent_stream(
+    request: ResearchAgentRunRequest,
+    http_request: Request,
+    research_service: LiteratureResearchService = Depends(get_literature_research_service),
+    graph_runtime: RagRuntime = Depends(get_graph_runtime),
+    _: None = Depends(require_api_key),
+    quota_context: dict[str, str] = Depends(build_quota_context),
+):
+    """Stream research agent progress via Server-Sent Events."""
+    async def event_stream():
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def on_progress(event: dict) -> None:
+            await progress_queue.put(event)
+
+        trace_id = f"research_agent_{uuid4().hex}"
+        runtime_request = request.model_copy(
+            update={
+                "metadata": {
+                    **request.metadata,
+                    "api_route": "/research/agent/stream",
+                    "trace_id": trace_id,
+                    "quota_context": quota_context,
+                }
+            }
+        )
+        task = asyncio.create_task(
+            research_service.run_agent(
+                runtime_request,
+                graph_runtime=graph_runtime,
+                on_progress=on_progress,
+            )
+        )
+        try:
+            while not task.done():
+                try:
+                    event = await asyncio.wait_for(progress_queue.get(), timeout=2.0)
+                    yield f"event: progress\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"event: heartbeat\ndata: {{}}\n\n"
+            result = task.result()
+            if request.conversation_id:
+                research_service.record_agent_turn(
+                    request.conversation_id,
+                    request=runtime_request,
+                    response=result,
+                )
+            audit_api_call(
+                http_request,
+                route="/research/agent/stream",
+                trace_id=trace_id,
+                task_type="research_agent_stream",
+                status=result.status,
+                metadata={
+                    "mode": request.mode,
+                    "task_id": result.task.task_id if result.task else request.task_id,
+                    "paper_count": len(result.papers),
+                    "quota_context": quota_context,
+                },
+            )
+            yield f"event: complete\ndata: {json.dumps(result.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            logger.exception("Research agent stream failed")
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/agent", response_model=ResearchAgentRunResponse)

@@ -109,6 +109,12 @@ Browser (http://localhost:3000)
   vector / sparse / graph / graph summary 检索与重排
 - `adapters/`
   LLM、embedding、vector store、graph store 等基础设施适配
+- `adapters/storage/`
+  数据持久化后端（JSON 文件 / SQLite），通过 `StorageBackend` 协议抽象
+- `observability/`
+  轻量级进程内指标收集（counters、histograms）、LLM 调用自动埋点
+- `security/`
+  敏感数据脱敏（API key、token、密码、连接串等 11 种模式）
 - `memory/`
   research 侧工作记忆、会话记忆、长期记忆、用户画像记忆和论文知识记忆
 - `skills/`
@@ -120,7 +126,7 @@ Browser (http://localhost:3000)
 - `mcp/`
   MCP（Model Context Protocol）客户端注册和服务端暴露
 - `evaluation/`
-  评测脚本、benchmark 构建、metrics 和数据集管理
+  评测框架（7 种 case 类型）、benchmark 构建、metrics 和数据集管理
 - `scripts/`
   环境检查、Milvus 重置、SciGraphQA 入库、WSL Zotero 桥接等工具脚本
 - `sdk/`
@@ -156,7 +162,8 @@ Browser (http://localhost:3000)
 - `POST /documents/ask/fused`
 - `POST /charts/understand`
 - `POST /charts/ask`
-- `GET /health`
+- `GET /health` — 应用健康检查（含 uptime）
+- `GET /health/metrics` — 运行时指标（LLM 调用延迟/计数/错误分布）
 
 ### CLI
 
@@ -209,6 +216,10 @@ Browser (http://localhost:3000)
 - `GRAPH_STORE_PROVIDER` 默认 `neo4j`
 - `SESSION_MEMORY_PROVIDER` 默认 `auto`
 - `LONG_TERM_MEMORY_PROVIDER` 默认 `json`
+- `STORAGE_PROVIDER` 默认 `json`（可切换为 `sqlite`）
+- `CORS_ALLOW_ORIGINS` 默认允许 localhost:3000/3001
+- `RATE_LIMIT_MAX_REQUESTS` 默认 60 次/分钟/IP
+- `JSON_LOG_FORMAT` 默认 `false`，设为 `true` 启用结构化 JSON 日志
 
 ## 本地启动
 

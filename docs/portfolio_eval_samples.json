@@ -1,0 +1,71 @@
+{
+  "document": {
+    "id": "portfolio-doc-001",
+    "filename": "quarterly_report.pdf",
+    "content_type": "application/pdf",
+    "status": "parsed",
+    "pages": [
+      {
+        "id": "page-1",
+        "document_id": "portfolio-doc-001",
+        "page_number": 1,
+        "image_uri": null,
+        "text_blocks": [
+          {
+            "id": "tb-1",
+            "document_id": "portfolio-doc-001",
+            "page_id": "page-1",
+            "page_number": 1,
+            "text": "In 2025 Q1, revenue increased by 18% year over year while operating margin improved to 24%.",
+            "metadata": {}
+          },
+          {
+            "id": "tb-2",
+            "document_id": "portfolio-doc-001",
+            "page_id": "page-1",
+            "page_number": 1,
+            "text": "Management attributed the improvement to cloud subscriptions and stronger enterprise retention.",
+            "metadata": {}
+          }
+        ],
+        "metadata": {}
+      }
+    ],
+    "metadata": {}
+  },
+  "chart": {
+    "id": "chart-portfolio-1",
+    "document_id": "portfolio-doc-001",
+    "page_id": "page-1",
+    "page_number": 1,
+    "chart_type": "bar",
+    "title": "Quarterly Revenue Growth",
+    "summary": "The chart shows year-over-year revenue growth reaching 18% in 2025 Q1.",
+    "series": [
+      {
+        "name": "Revenue Growth",
+        "points": [
+          {
+            "label": "2025 Q1",
+            "value": 18,
+            "metadata": {}
+          }
+        ],
+        "metadata": {}
+      }
+    ],
+    "metadata": {
+      "image_path": "synthetic-chart.png"
+    }
+  },
+  "qa_cases": [
+    {
+      "question": "What happened to revenue in 2025 Q1?",
+      "expected_keywords": ["18%", "revenue", "2025"]
+    },
+    {
+      "question": "Why did margin improve?",
+      "expected_keywords": ["cloud", "retention", "margin"]
+    }
+  ]
+}

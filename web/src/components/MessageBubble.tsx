@@ -1,6 +1,10 @@
 import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { PaperCard } from './PaperCard';
 import type { ChatMessage } from '../types';
 import {
@@ -13,6 +17,7 @@ import {
   Info,
   ZoomIn,
 } from 'lucide-react';
+import 'katex/dist/katex.min.css';
 
 // Convert .data/storage/... paths to serveable /files/ URLs
 const IMAGE_PATH_RE = /图片路径[：:]\s*(\.data\/storage\/[^\s]+)/g;
@@ -57,7 +62,28 @@ function AssistantContent({ message }: { message: ChatMessage }) {
     <>
       {cleanContent && (
         <div className="markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              code({ className, children, ...props }) {
+                const match = /language-(\w+)/.exec(className || '');
+                const inline = !match;
+                return inline ? (
+                  <code className={className} {...props}>{children}</code>
+                ) : (
+                  <SyntaxHighlighter
+                    style={oneLight}
+                    language={match[1]}
+                    PreTag="div"
+                    customStyle={{ fontSize: '0.8rem', borderRadius: '0.5rem' }}
+                  >
+                    {String(children).replace(/\n$/, '')}
+                  </SyntaxHighlighter>
+                );
+              },
+            }}
+          >
             {cleanContent}
           </ReactMarkdown>
         </div>
@@ -94,13 +120,16 @@ function AssistantContent({ message }: { message: ChatMessage }) {
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  onRetry?: (text: string) => void;
+  selectedPaperIds?: Set<string>;
+  onTogglePaper?: (paperId: string) => void;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onRetry, selectedPaperIds, onTogglePaper }: MessageBubbleProps) {
   if (message.role === 'user') {
     return <UserBubble content={message.content} />;
   }
-  return <AssistantBubble message={message} />;
+  return <AssistantBubble message={message} onRetry={onRetry} selectedPaperIds={selectedPaperIds} onTogglePaper={onTogglePaper} />;
 }
 
 function UserBubble({ content }: { content: string }) {
@@ -113,7 +142,7 @@ function UserBubble({ content }: { content: string }) {
   );
 }
 
-function AssistantBubble({ message }: { message: ChatMessage }) {
+function AssistantBubble({ message, onRetry, selectedPaperIds, onTogglePaper }: { message: ChatMessage; onRetry?: (text: string) => void; selectedPaperIds?: Set<string>; onTogglePaper?: (paperId: string) => void }) {
   const [showPapers, setShowPapers] = useState(false);
   const [showTrace, setShowTrace] = useState(true);
   const [showNotices, setShowNotices] = useState(true);
@@ -136,7 +165,17 @@ function AssistantBubble({ message }: { message: ChatMessage }) {
               size={16}
               className="flex-shrink-0 mt-0.5 text-red-400"
             />
-            <span>{message.content}</span>
+            <div className="flex-1">
+              <span>{message.content}</span>
+              {onRetry && (
+                <button
+                  onClick={() => onRetry(message.content)}
+                  className="block mt-1.5 text-xs text-accent-600 hover:text-accent-800 hover:underline transition-colors"
+                >
+                  重试
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <AssistantContent message={message} />
@@ -179,7 +218,13 @@ function AssistantBubble({ message }: { message: ChatMessage }) {
           {showPapers && (
             <div className="mt-3 space-y-2 animate-fade-in">
               {message.papers!.map((paper) => (
-                <PaperCard key={paper.paper_id} paper={paper} />
+                <PaperCard
+                  key={paper.paper_id}
+                  paper={paper}
+                  selectable={!!onTogglePaper}
+                  selected={selectedPaperIds?.has(paper.paper_id)}
+                  onToggle={onTogglePaper}
+                />
               ))}
             </div>
           )}

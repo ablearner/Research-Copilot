@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
+from core.utils import now_iso as _now_iso
 from pydantic import BaseModel, Field
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class RuntimeModelProfile(BaseModel):

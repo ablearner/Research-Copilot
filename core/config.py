@@ -50,7 +50,13 @@ class Settings(BaseSettings):
     chart_vision_timeout_seconds: float = 180.0
     dashscope_max_retries: int = 2
     dashscope_retry_delay_seconds: float = 2.0
+    cors_allow_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3001,http://localhost:3001"
+    rate_limit_max_requests: int = 60
+    rate_limit_window_seconds: int = 60
+    json_log_format: bool = False
+    storage_provider: str = "json"
     research_storage_root: str = ".data/research"
+    research_sqlite_db_path: str = ".data/research/kepler.db"
     research_reset_on_startup: bool = False
     research_http_timeout_seconds: float = 10.0
     research_import_concurrency: int = 2

@@ -99,17 +99,29 @@ export default function App() {
 
   return (
     <div className="flex h-full bg-paper-50">
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/20 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <div
         className={`${
-          sidebarOpen ? 'w-72' : 'w-0'
-        } flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden`}
+          sidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'
+        } fixed md:relative z-30 md:z-auto h-full flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden`}
       >
         <Sidebar
           conversations={conversations}
           activeConversationId={activeId}
           onNewChat={handleNewChat}
-          onSelectConversation={handleSelect}
+          onSelectConversation={(id) => {
+            handleSelect(id);
+            // Auto-close sidebar on mobile after selection
+            if (window.innerWidth < 768) setSidebarOpen(false);
+          }}
           onDeleteConversation={handleDelete}
           isLoading={loading}
         />

@@ -13,6 +13,7 @@ import httpx
 
 from adapters.llm.base import BaseLLMAdapter, ImageNotVisibleLLMAdapterError, LLMAdapterError, TModel
 from adapters.llm.provider_binding import normalize_openai_base_url
+from context.prompt_caching import apply_anthropic_cache_control
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,11 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
     ) -> TModel:
         return await self._generate_structured(prompt, input_data, response_model)
 
+    def _is_anthropic_provider(self) -> bool:
+        """Detect if the relay target is an Anthropic model."""
+        model_lower = self.model.lower()
+        return any(tag in model_lower for tag in ("claude", "anthropic"))
+
     async def _chat_completion(
         self,
         *,
@@ -191,6 +197,8 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
         messages: list[dict[str, Any]],
         json_mode: bool = False,
     ) -> str:
+        if self._is_anthropic_provider():
+            messages = apply_anthropic_cache_control(messages)
         payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.0 if json_mode else 0.1}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}

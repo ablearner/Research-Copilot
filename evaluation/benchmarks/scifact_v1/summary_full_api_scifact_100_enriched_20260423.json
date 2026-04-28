@@ -1,0 +1,41 @@
+{
+  "runtime_mode": "live",
+  "top_level_metrics": {
+    "total_cases": 100,
+    "task_success_rate": 1.0,
+    "answer_keyword_recall": null,
+    "hit_at_k": 0.8,
+    "recall_at_k": 0.7871666666666667,
+    "hit_at_5": 0.8,
+    "recall_at_5": 0.7871666666666667,
+    "groundedness": 0.5525333933626734,
+    "route_accuracy": 1.0,
+    "tool_call_success_rate": 1.0,
+    "validation_retry_rate": 0.3,
+    "latency_p50_ms": 25896.6,
+    "latency_p95_ms": 58446.44,
+    "average_steps_per_task": 10.8,
+    "reference_answer_precision": null,
+    "reference_answer_recall": null,
+    "reference_answer_f1": null,
+    "answer_polarity_accuracy": null,
+    "insufficient_answer_rate": 0.27,
+    "warning_case_rate": 0.31,
+    "avg_warning_count": 0.57,
+    "error_free_rate": 1.0
+  },
+  "benchmark_slices": {
+    "beir_scifact": {
+      "total_cases": 100,
+      "task_success_rate": 1.0,
+      "recall_at_k": 0.7871666666666667,
+      "groundedness": 0.5525333933626734,
+      "keyword_recall": null,
+      "reference_f1": null,
+      "polarity_accuracy": null,
+      "insufficient_answer_rate": 0.27,
+      "warning_case_rate": 0.31,
+      "latency_ms": 31965.9734
+    }
+  }
+}

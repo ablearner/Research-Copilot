@@ -3,17 +3,28 @@ import { ExternalLink, Calendar, Quote, Users } from 'lucide-react';
 
 interface PaperCardProps {
   paper: PaperCandidate;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggle?: (paperId: string) => void;
 }
 
-export function PaperCard({ paper }: PaperCardProps) {
+export function PaperCard({ paper, selectable, selected, onToggle }: PaperCardProps) {
   const url =
     paper.url ||
     paper.pdf_url ||
     (paper.doi ? `https://doi.org/${paper.doi}` : null);
 
   return (
-    <div className="px-4 py-3 rounded-xl border border-paper-200 bg-white/60 hover:bg-white transition-colors">
+    <div className={`px-4 py-3 rounded-xl border transition-colors ${selected ? 'border-accent-400 bg-accent-50/50' : 'border-paper-200 bg-white/60 hover:bg-white'}`}>
       <div className="flex items-start justify-between gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected || false}
+            onChange={() => onToggle?.(paper.paper_id)}
+            className="mt-1 h-4 w-4 rounded border-paper-300 text-accent-600 focus:ring-accent-500 flex-shrink-0 cursor-pointer"
+          />
+        )}
         <div className="min-w-0 flex-1">
           <h4 className="font-display text-sm font-semibold text-ink-700 leading-snug">
             {url ? (

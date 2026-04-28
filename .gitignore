@@ -16,5 +16,7 @@ coverage/
 dist/
 build/
 *.egg-info/
-docs/
-evaluation/
+evaluation/datasets/pdfqa_benchmark/real-pdfQA/
+evaluation/datasets/scigraphqa_easy_50/images/
+#docs/
+#evaluation/

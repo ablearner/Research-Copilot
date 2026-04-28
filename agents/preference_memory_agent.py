@@ -7,6 +7,7 @@ import re
 from typing import Any
 from uuid import uuid4
 
+from core.utils import now_iso as _now_iso
 from pydantic import BaseModel, Field
 
 from domain.schemas.research import PaperCandidate, PaperSource
@@ -108,10 +109,6 @@ _GENERIC_TOPIC_BLACKLIST = {
 class RecommendationSourceDecision(BaseModel):
     sources: list[PaperSource] = Field(default_factory=list, min_length=1, max_length=3)
     rationale: str = ""
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str | None) -> str:

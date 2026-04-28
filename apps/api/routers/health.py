@@ -1,9 +1,16 @@
+import time
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from observability.metrics import metrics as _metrics
+
+_start_time = time.monotonic()
 
 
 class HealthResponse(BaseModel):
     status: str
+    uptime_seconds: float = 0.0
     app_name: str
     app_env: str
     runtime_backend: str
@@ -38,6 +45,7 @@ async def health_check(request: Request) -> HealthResponse:
 
     return HealthResponse(
         status="ok",
+        uptime_seconds=round(time.monotonic() - _start_time, 1),
         app_name=settings.app_name,
         app_env=settings.app_env,
         runtime_backend=settings.runtime_backend,
@@ -53,3 +61,9 @@ async def health_check(request: Request) -> HealthResponse:
         checkpointer_backend=checkpointer_backend,
         session_memory_backend=session_memory_backend,
     )
+
+
+@router.get("/metrics")
+async def get_metrics() -> dict:
+    """Return in-process metrics snapshot."""
+    return _metrics.snapshot()

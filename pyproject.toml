@@ -71,5 +71,9 @@ include = [
     "services*",
     "tooling*",
     "tools*",
+    "context*",
+    "observability*",
+    "security*",
+    "evaluation*",
 ]
 exclude = ["prompts*", "tests*"]

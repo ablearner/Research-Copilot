@@ -7,7 +7,8 @@ import type {
   ResearchMessage,
   ResearchAgentRunResponse,
 } from '../types';
-import { getConversation, sendMessage } from '../api';
+import { getConversation, sendMessageStream, uploadDocument } from '../api';
+import type { SSEProgressEvent } from '../api';
 
 interface ChatViewProps {
   conversationId: string;
@@ -182,8 +183,11 @@ export function ChatView({
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [progressEvent, setProgressEvent] = useState<SSEProgressEvent | null>(null);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingConsumed = useRef(false);
+  const lastUserText = useRef<string>('');
 
   // Load conversation history
   useEffect(() => {
@@ -229,10 +233,50 @@ export function ChatView({
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, progressEvent]);
+
+  const handleTogglePaper = useCallback((paperId: string) => {
+    setSelectedPaperIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId);
+      else next.add(paperId);
+      return next;
+    });
+  }, []);
+
+  const handleRetry = useCallback(
+    (_errorContent: string) => {
+      if (lastUserText.current) {
+        handleSend(lastUserText.current);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, file?: File) => {
+      lastUserText.current = text;
+
+      // Handle file upload first
+      let documentId: string | undefined;
+      if (file) {
+        try {
+          const uploadResult = await uploadDocument(file);
+          documentId = uploadResult.document_id;
+        } catch (err) {
+          const errorMsg: ChatMessage = {
+            id: `error-${Date.now()}`,
+            role: 'assistant',
+            content: `文件上传失败: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+            isError: true,
+          };
+          setMessages((prev) => [...prev, errorMsg]);
+          return;
+        }
+      }
+
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -243,11 +287,18 @@ export function ChatView({
       setIsLoading(true);
 
       try {
-        const response = await sendMessage({
-          message: text,
-          conversationId,
-          taskId: taskId || undefined,
-        });
+        setProgressEvent(null);
+        const selectedIds = Array.from(selectedPaperIds);
+        const response = await sendMessageStream(
+          {
+            message: text,
+            conversationId,
+            taskId: taskId || undefined,
+            selectedPaperIds: selectedIds.length > 0 ? selectedIds : undefined,
+            documentId: documentId || undefined,
+          },
+          (event) => setProgressEvent(event),
+        );
 
         const notices = extractNotices(response);
         const assistantMsg: ChatMessage = {
@@ -304,7 +355,7 @@ export function ChatView({
         setIsLoading(false);
       }
     },
-    [conversationId, taskId, onConversationUpdated],
+    [conversationId, taskId, selectedPaperIds, onConversationUpdated],
   );
 
   return (
@@ -323,13 +374,32 @@ export function ChatView({
           ) : (
             <div className="space-y-6">
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onRetry={handleRetry}
+                  selectedPaperIds={selectedPaperIds}
+                  onTogglePaper={handleTogglePaper}
+                />
               ))}
-              {isLoading && <TypingIndicator />}
+              {isLoading && <ProgressIndicator event={progressEvent} />}
             </div>
           )}
         </div>
       </div>
+
+      {/* Selected papers indicator */}
+      {selectedPaperIds.size > 0 && (
+        <div className="px-4 py-1.5 bg-accent-50 border-t border-accent-100 text-xs text-accent-700 flex items-center justify-between">
+          <span>{selectedPaperIds.size} paper{selectedPaperIds.size > 1 ? 's' : ''} selected</span>
+          <button
+            onClick={() => setSelectedPaperIds(new Set())}
+            className="text-accent-500 hover:text-accent-700 hover:underline"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <InputBar onSend={handleSend} isLoading={isLoading} />
@@ -337,15 +407,26 @@ export function ChatView({
   );
 }
 
-function TypingIndicator() {
+function ProgressIndicator({ event }: { event: SSEProgressEvent | null }) {
+  if (!event || !event.summary) {
+    return (
+      <div className="flex items-center gap-3 animate-fade-in py-2">
+        <div className="flex gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
+          <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
+          <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
+        </div>
+        <span className="text-xs text-ink-300">Thinking…</span>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-3 animate-fade-in py-2">
-      <div className="flex gap-1.5">
-        <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
-        <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
-        <div className="w-2 h-2 rounded-full bg-accent-400 typing-dot" />
+      <div className="w-2 h-2 rounded-full bg-accent-400 animate-pulse" />
+      <div className="flex flex-col">
+        <span className="text-xs font-medium text-ink-400">{event.stage}</span>
+        <span className="text-xs text-ink-300">{event.summary}</span>
       </div>
-      <span className="text-xs text-ink-300">Thinking…</span>
     </div>
   );
 }

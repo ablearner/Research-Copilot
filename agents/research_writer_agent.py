@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from core.utils import now_iso as _now_iso
 from domain.schemas.api import QAResponse
 from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
@@ -14,10 +14,6 @@ from skills.research import PaperAnalysisSkill
 
 if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _preferred_answer_language_from_question(question: str) -> str:
