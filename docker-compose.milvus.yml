@@ -9,6 +9,9 @@ services:
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
       ETCD_QUOTA_BACKEND_BYTES: "4294967296"
       ETCD_SNAPSHOT_COUNT: "50000"
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     command: >
       etcd
       --advertise-client-urls=http://127.0.0.1:2379
@@ -28,6 +31,9 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     command: server /minio_data --console-address ":9001"
     ports:
       - "9000:9000"
@@ -49,6 +55,12 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      no_proxy: "*"
+      NO_PROXY: "*"
     ports:
       - "19530:19530"
       - "9091:9091"
