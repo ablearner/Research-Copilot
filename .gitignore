@@ -18,5 +18,5 @@ build/
 *.egg-info/
 evaluation/datasets/pdfqa_benchmark/real-pdfQA/
 evaluation/datasets/scigraphqa_easy_50/images/
-#docs/
-#evaluation/
+docs/
+evaluation/
