@@ -123,6 +123,13 @@ class ResearchQARoutingSkill:
         document_ids: list[str],
         has_visual_anchor: bool,
     ) -> ResearchQARouteSkillResult | None:
+        if has_visual_anchor:
+            return ResearchQARouteSkillResult(
+                route="chart_drilldown",
+                confidence=0.95,
+                rationale="A structured visual anchor was already resolved, so chart drilldown is the correct route.",
+                source="heuristic",
+            )
         return None
 
     def _heuristic_classify(

@@ -17,6 +17,7 @@ from services.research.literature_research_service import LiteratureResearchServ
 from services.research.paper_import_service import PaperImportService
 from services.research.paper_search_service import PaperSearchService
 from services.research.academic_search_mcp import AcademicSearchMCPDependencies
+from adapters.storage.factory import create_store
 from services.research.research_report_service import ResearchReportService
 from tooling.research_function_registry import ResearchFunctionRegistry
 from tooling.research_runtime_tool_specs import build_research_runtime_tool_spec
@@ -184,9 +185,15 @@ def build_literature_research_service(
         code_linking_skill=CodeLinkingSkill(enable_remote_lookup=False),
         llm_adapter=llm_adapter,
     )
-    report_service = ResearchReportService(
-        settings.resolve_path(settings.research_storage_root),
-    )
+    if getattr(settings, "storage_provider", "json") == "sqlite":
+        report_service = create_store(
+            "sqlite",
+            db_path=settings.resolve_path(settings.research_sqlite_db_path),
+        )
+    else:
+        report_service = ResearchReportService(
+            settings.resolve_path(settings.research_storage_root),
+        )
     paper_import_service = PaperImportService(
         upload_dir=settings.resolve_path(settings.upload_dir),
         timeout_seconds=max(settings.research_http_timeout_seconds, 30.0),

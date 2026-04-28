@@ -612,7 +612,7 @@ class ResearchSupervisorAgent:
         payload: dict[str, Any],
         state: ResearchSupervisorState,
     ) -> dict[str, Any]:
-        if action_name not in {"answer_question", "analyze_papers", "import_papers", "sync_to_zotero", "compress_context"}:
+        if action_name not in {"answer_question", "analyze_papers", "analyze_paper_figures", "import_papers", "sync_to_zotero", "compress_context"}:
             return payload
         intent_resolved_paper_ids = [
             str(item).strip()

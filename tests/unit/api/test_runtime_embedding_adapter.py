@@ -40,6 +40,7 @@ def test_build_embedding_adapter_uses_openai_relay_for_openai_provider() -> None
 
 def test_build_embedding_adapter_openai_provider_can_fallback_to_dashscope_relay_credentials() -> None:
     settings = Settings(
+        _env_file=None,
         embedding_provider="openai",
         embedding_model="text-embedding-3-small",
         openai_api_key="",

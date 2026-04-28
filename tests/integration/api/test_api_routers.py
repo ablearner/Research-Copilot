@@ -492,6 +492,10 @@ def make_upload_settings(tmp_path, **overrides):
         "upload_max_bytes": 25 * 1024 * 1024,
         "api_key_enabled": False,
         "api_key": None,
+        "cors_allow_origins": "http://localhost:3000",
+        "rate_limit_max_requests": 60,
+        "rate_limit_window_seconds": 60,
+        "json_log_format": False,
     }
     values.update(overrides)
     settings = SimpleNamespace(**values)

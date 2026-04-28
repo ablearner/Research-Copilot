@@ -277,6 +277,7 @@ async def test_research_supervisor_agent_guardrail_routes_figure_question_to_cha
             goal="第二篇论文的系统框图",
             mode="auto",
             has_task=True,
+            imported_document_count=2,
             candidate_papers=[
                 {"index": 1, "paper_id": "paper-1", "title": "Paper One"},
                 {"index": 2, "paper_id": "paper-2", "title": "Paper Two"},
@@ -285,11 +286,9 @@ async def test_research_supervisor_agent_guardrail_routes_figure_question_to_cha
         )
     )
 
-    assert decision.action_name == "answer_question"
+    assert decision.action_name == "analyze_paper_figures"
     assert decision.metadata["decision_source"] == "manager_guardrail"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-2"]
-    assert decision.metadata["active_message"].payload["qa_route"] == "chart_drilldown"
-    assert decision.metadata["active_message"].payload["preferred_qa_route"] == "chart_drilldown"
 
 
 @pytest.mark.asyncio
@@ -313,6 +312,7 @@ async def test_research_supervisor_agent_guardrail_keeps_explicit_figure_scope_w
             goal="第二篇论文的系统框图",
             mode="auto",
             has_task=True,
+            imported_document_count=2,
             active_paper_ids=["paper-legacy-1", "paper-legacy-2"],
             candidate_papers=[
                 {"index": 1, "paper_id": "paper-1", "title": "Paper One"},
@@ -322,10 +322,9 @@ async def test_research_supervisor_agent_guardrail_keeps_explicit_figure_scope_w
         )
     )
 
-    assert decision.action_name == "answer_question"
+    assert decision.action_name == "analyze_paper_figures"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-2"]
     assert decision.metadata["active_message"].payload["paper_scope_source"] == "user_intent_resolver"
-    assert decision.metadata["active_message"].payload["qa_route"] == "chart_drilldown"
 
 
 def test_research_supervisor_agent_stops_without_llm_instead_of_using_legacy_rule_fallback() -> None:
