@@ -228,10 +228,11 @@ Browser (http://localhost:3000)
 #### 第一步：基础设施
 
 ```bash
-# 1. 启动 Milvus（Docker）
-docker start research-copilot-milvus
-# 等待端口 19530 就绪（约 10-15 秒）
-# 检查：ss -tlnp | grep 19530
+# 1. 启动 Milvus（Docker Compose，含 etcd + minio + milvus）
+cd /home/myc/Research-Copilot
+docker-compose -f docker-compose.milvus.yml up -d
+# 等待端口 19530 就绪（约 15-30 秒）
+# 检查：curl -s http://localhost:9091/healthz  →  应返回 "OK"
 
 # 2. 启动 Neo4j
 export JAVA_HOME=/home/myc/miniconda3/envs/Research-Copilot/lib/jvm
@@ -270,7 +271,7 @@ npm run dev
 
 | 服务 | 端口 | 启动方式 |
 |------|------|------|
-| Milvus | 19530 | `docker start research-copilot-milvus` |
+| Milvus | 19530 | `docker-compose -f docker-compose.milvus.yml up -d`（在 Research-Copilot 目录下） |
 | Neo4j | 7474/7687 | `/home/myc/neo4j/bin/neo4j start` |
 | Zotero Bridge | 23119 | `bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
@@ -280,7 +281,8 @@ npm run dev
 
 - WSL 默认只分配宿主机一半内存，建议在 `C:\Users\<用户名>\.wslconfig` 中配置 `memory=24GB`
 - `wsl --shutdown` 后所有服务需要重新启动
-- Milvus 在内存不足时会因 etcd 连接丢失反复崩溃
+- 如果 Docker daemon 配置了 HTTP 代理（如 `systemd` proxy），容器会继承代理设置，导致 Milvus 内部组件（etcd、minio）之间通信失败（502 Bad Gateway）。`docker-compose.milvus.yml` 中已为所有服务设置 `no_proxy="*"` 解决此问题
+- Milvus v2.5.4 在某些 WSL2 内核版本下可能出现 SIGABRT 崩溃，确保使用 `docker-compose` 方式启动（含 `security_opt: seccomp:unconfined`）
 
 ### CLI
 
