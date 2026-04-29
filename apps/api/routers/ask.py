@@ -61,7 +61,6 @@ class AskDocumentRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100)
     session_id: str | None = None
     task_intent: str | None = None
-    skill_name: str | None = None
     reasoning_style: str | None = "cot"
     filters: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -77,7 +76,6 @@ class AskFusedRequest(BaseModel):
     chart_id: str | None = None
     session_id: str | None = None
     top_k: int = Field(default=10, ge=1, le=100)
-    skill_name: str | None = None
     reasoning_style: str | None = "cot"
     filters: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -105,7 +103,6 @@ async def handle_ask_document_request(
             filters=request.filters,
             session_id=request.session_id,
             task_intent=request.task_intent or "ask_document",
-            skill_name=request.skill_name,
             reasoning_style=request.reasoning_style,
             metadata={
                 "api_route": route_path,
@@ -159,7 +156,6 @@ async def handle_ask_fused_request(
             session_id=request.session_id,
             top_k=request.top_k,
             filters=request.filters,
-            skill_name=request.skill_name,
             reasoning_style=request.reasoning_style,
             metadata={
                 "api_route": route_path,

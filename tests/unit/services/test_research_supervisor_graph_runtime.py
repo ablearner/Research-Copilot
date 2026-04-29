@@ -306,8 +306,6 @@ class GraphRuntimeStub:
         )
         return type("FusedAskResult", (), {"qa": qa})()
 
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 class AdvancedArxivToolStub:

@@ -37,9 +37,9 @@ from services.research.research_supervisor_graph_runtime_core import ResearchSup
 from services.research.research_workspace import build_workspace_state
 from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
 from domain.schemas.agent_message import AgentResultMessage
-from skills.research.qa_routing import ResearchQARoutingSkill
-from skills.research.user_intent import ResearchUserIntentResolverSkill
-from skills.research.visual_anchor import ResearchVisualAnchorSkill
+from services.research.capabilities.qa_routing import ResearchQARouter
+from services.research.capabilities.user_intent import ResearchIntentResolver
+from services.research.capabilities.visual_anchor import VisualAnchor
 from tooling.schemas import GraphSummaryToolOutput
 from tools.retrieval_toolkit import RetrievalAgentResult
 
@@ -167,7 +167,7 @@ class UserIntentLLMStub:
 
 @pytest.mark.asyncio
 async def test_visual_anchor_prefers_explicit_figure_number_before_llm() -> None:
-    skill = ResearchVisualAnchorSkill(llm_adapter=FigureSelectionLLMStub(selected_figure_id="paper-b:chart-1"))
+    skill = VisualAnchor(llm_adapter=FigureSelectionLLMStub(selected_figure_id="paper-b:chart-1"))
     paper = PaperCandidate(
         paper_id="paper-b",
         title="Paper B",
@@ -236,7 +236,7 @@ async def test_user_intent_prefers_llm_over_marker_hint_when_available() -> None
             "source": "llm",
         }
     )
-    skill = ResearchUserIntentResolverSkill(llm_adapter=llm)
+    skill = ResearchIntentResolver(llm_adapter=llm)
 
     result = await skill.resolve_async(
         message="什么是 Python 生成器？",
@@ -255,7 +255,7 @@ async def test_user_intent_prefers_llm_over_marker_hint_when_available() -> None
 
 
 def test_user_intent_resolves_p1_style_reference_from_candidate_pool() -> None:
-    skill = ResearchUserIntentResolverSkill()
+    skill = ResearchIntentResolver()
 
     result = skill.resolve(
         message="导入 p1 到 zotero",
@@ -276,7 +276,7 @@ def test_user_intent_resolves_p1_style_reference_from_candidate_pool() -> None:
 
 
 def test_user_intent_recognizes_zotero_sync_request_from_candidate_scope() -> None:
-    skill = ResearchUserIntentResolverSkill()
+    skill = ResearchIntentResolver()
 
     result = skill.resolve(
         message="导入第一篇论文到 Zotero",
@@ -298,7 +298,7 @@ def test_user_intent_recognizes_zotero_sync_request_from_candidate_scope() -> No
 
 
 def test_user_intent_recognizes_workspace_import_request_for_grounded_follow_up() -> None:
-    skill = ResearchUserIntentResolverSkill()
+    skill = ResearchIntentResolver()
 
     result = skill.resolve(
         message="把第一篇导入工作区供后续问答",
@@ -320,7 +320,7 @@ def test_user_intent_recognizes_workspace_import_request_for_grounded_follow_up(
 
 
 def test_user_intent_keeps_resolved_paper_scope_for_figure_question() -> None:
-    skill = ResearchUserIntentResolverSkill()
+    skill = ResearchIntentResolver()
 
     result = skill.resolve(
         message="第二篇论文的系统框图",
@@ -344,7 +344,7 @@ def test_user_intent_keeps_resolved_paper_scope_for_figure_question() -> None:
 
 @pytest.mark.asyncio
 async def test_qa_routing_prefers_structured_visual_anchor_over_marker_logic() -> None:
-    skill = ResearchQARoutingSkill(llm_adapter=QARoutingLLMStub(route="collection_qa"))
+    skill = ResearchQARouter(llm_adapter=QARoutingLLMStub(route="collection_qa"))
 
     result = await skill.classify_async(
         question="请解释这张图表达了什么。",
@@ -492,8 +492,6 @@ class GraphRuntimeSuccessStub:
             metadata={"mode": "graph_summary"},
         )
 
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 def test_create_conversation_initializes_context_summary_and_runtime_event(tmp_path) -> None:
@@ -938,8 +936,6 @@ class GraphRuntimeInsufficientStub:
     async def query_graph_summary(self, **kwargs):
         return GraphSummaryToolOutput(hits=[], metadata={"mode": "graph_summary"})
 
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 class GraphRuntimeScopedSelectionStub:
@@ -953,8 +949,6 @@ class GraphRuntimeScopedSelectionStub:
     async def query_graph_summary(self, **kwargs):
         return GraphSummaryToolOutput(hits=[], metadata={"mode": "graph_summary"})
 
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 class GraphRuntimeDocumentDrilldownStub:
@@ -1049,8 +1043,6 @@ class ResearchQARuntimeLowConfidenceStub:
 
         return _Result()
 
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 class GraphRuntimeImportStub:

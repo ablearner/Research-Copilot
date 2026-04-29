@@ -3,7 +3,7 @@ from memory.long_term_memory import (
     JsonLongTermMemoryStore,
     LongTermMemory,
     LongTermMemoryStore,
-    QdrantLongTermMemoryStore,
+    SQLiteLongTermMemoryStore,
 )
 from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import (
@@ -30,7 +30,7 @@ __all__ = [
     "MemoryManager",
     "PaperKnowledgeMemory",
     "PaperKnowledgeStore",
-    "QdrantLongTermMemoryStore",
+    "SQLiteLongTermMemoryStore",
     "SessionMemory",
     "SessionMemoryStore",
     "WorkingMemory",

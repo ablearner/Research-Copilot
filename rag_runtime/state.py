@@ -64,16 +64,6 @@ class ToolTrace(TypedDict, total=False):
     metadata: dict[str, Any]
 
 
-class SelectedSkill(TypedDict, total=False):
-    name: str
-    description: str
-    prompt_set: dict[str, Any]
-    retrieval_policy: dict[str, Any]
-    tool_policy: dict[str, Any]
-    memory_policy: dict[str, Any]
-    metadata: dict[str, Any]
-
-
 class ChartResult(TypedDict, total=False):
     chart: ChartSchema
     graph_text: str
@@ -142,7 +132,6 @@ class ChartDocRAGState(TypedDict, total=False):
     # Tool/runtime interaction context
     messages: list[Any]
     tool_traces: list[ToolTrace]
-    selected_skill: SelectedSkill | None
 
     # Shared execution context
     retrieval_mode: RetrievalMode

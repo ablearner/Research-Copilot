@@ -25,7 +25,7 @@ UnifiedExecutionMode = Literal["tool_native", "service_native", "hybrid"]
 UNIFIED_ACTION_OUTPUT_METADATA_KEY = "unified_action_output"
 
 
-class UnifiedSkillBinding(BaseModel):
+class UnifiedCapabilityBinding(BaseModel):
     profile_name: str | None = None
     service_names: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -37,7 +37,7 @@ class UnifiedAgentDescriptor(BaseModel):
     kind: UnifiedAgentKind = "specialist"
     execution_mode: UnifiedExecutionMode = "hybrid"
     supported_task_types: list[str] = Field(default_factory=list)
-    skill_binding: UnifiedSkillBinding = Field(default_factory=UnifiedSkillBinding)
+    capability_binding: UnifiedCapabilityBinding = Field(default_factory=UnifiedCapabilityBinding)
     preferred_tool_names: list[str] = Field(default_factory=list)
     available_tool_names: list[str] = Field(default_factory=list)
     legacy_boundaries: list[str] = Field(default_factory=list)
@@ -190,7 +190,7 @@ class UnifiedRuntimeBlueprint(BaseModel):
     )
     agent_descriptors: list[UnifiedAgentDescriptor] = Field(default_factory=list)
     tool_names: list[str] = Field(default_factory=list)
-    skill_profile_names: list[str] = Field(default_factory=list)
+    capability_profile_names: list[str] = Field(default_factory=list)
     unresolved_boundaries: list[str] = Field(default_factory=list)
     migration_stages: list[str] = Field(default_factory=list)
 

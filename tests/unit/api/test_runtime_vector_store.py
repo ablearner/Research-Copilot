@@ -7,7 +7,7 @@ from core.config import Settings
 
 
 def test_build_vector_store_uses_milvus_defaults() -> None:
-    settings = Settings(vector_store_provider="milvus")
+    settings = Settings(vector_store_provider="milvus", milvus_uri="http://localhost:19530")
 
     store = _build_vector_store(settings, LocalHashEmbeddingAdapter())
 

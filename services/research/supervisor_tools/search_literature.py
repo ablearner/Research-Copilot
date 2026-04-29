@@ -25,7 +25,7 @@ from services.research.unified_action_adapters import (
     build_literature_search_output,
 )
 from services.research.research_workspace import build_workspace_state
-from skills.research.paper_curation import PaperCurationSkill
+from services.research.capabilities import PaperCurator
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class CreateResearchTaskTool:
         *,
         literature_scout_agent: LiteratureScoutAgent,
         research_writer_agent: ResearchWriterAgent,
-        curation_skill: PaperCurationSkill,
+        curation_skill: PaperCurator,
     ) -> None:
         self.literature_scout_agent = literature_scout_agent
         self.research_writer_agent = research_writer_agent

@@ -67,7 +67,6 @@ class HybridRetriever:
 
     async def retrieve(self, query: RetrievalQuery | str) -> HybridRetrievalResult:
         retrieval_query = self._coerce_query(query)
-        retrieval_query = self._apply_skill_policy(retrieval_query)
         requested_mode = self._requested_retrieval_mode(retrieval_query)
         session_id = retrieval_query.filters.get("session_id")
         cache_key = self._cache_key(retrieval_query, session_id)
@@ -175,7 +174,6 @@ class HybridRetriever:
                     "graph_summary_enabled": any(source_name == "summary" for source_name, _task in task_specs),
                     "partial_failure": bool(failed_sources),
                     "failed_sources": failed_sources,
-                    "skill_name": retrieval_query.filters.get("skill_name"),
                     "sparse_hits": [hit.model_dump(mode="json") for hit in sparse_hits],
                     "vector_hits": [hit.model_dump(mode="json") for hit in vector_hits],
                     "graph_hits": [hit.model_dump(mode="json") for hit in graph_hits],
@@ -211,29 +209,6 @@ class HybridRetriever:
     def build_evidence_bundle(self, hits: list[RetrievalHit]) -> EvidenceBundle:
         return build_evidence_bundle(hits)
 
-    def _apply_skill_policy(self, query: RetrievalQuery) -> RetrievalQuery:
-        skill_context = query.filters.get("skill_context")
-        if not isinstance(skill_context, dict):
-            return query
-        policy = skill_context.get("retrieval_policy")
-        if not isinstance(policy, dict):
-            return query
-
-        updated_filters = {**query.filters}
-        policy_filters = policy.get("filters")
-        if isinstance(policy_filters, dict):
-            updated_filters.update(policy_filters)
-        if policy.get("enable_graph_summary") is not None and "enable_graph_summary" not in updated_filters:
-            updated_filters["enable_graph_summary"] = bool(policy.get("enable_graph_summary"))
-        if isinstance(skill_context.get("name"), str):
-            updated_filters["skill_name"] = skill_context["name"]
-
-        updates: dict[str, object] = {"filters": updated_filters}
-        if isinstance(policy.get("top_k"), int):
-            updates["top_k"] = policy["top_k"]
-        if policy.get("graph_query_mode") in {"entity", "subgraph", "summary", "auto"}:
-            updates["graph_query_mode"] = policy["graph_query_mode"]
-        return query.model_copy(update=updates)
 
     def _summary_enabled(self, query: RetrievalQuery) -> bool:
         if query.graph_query_mode == "summary":

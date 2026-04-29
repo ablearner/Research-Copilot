@@ -24,8 +24,6 @@ from rag_runtime.state import ChartDocRAGState
 from planners.function_calling import AnswerValidationPlanner, RetrievalPlan, RetrievalPlanner
 from reasoning.strategies import ReasoningStrategySet
 from retrieval.evidence_builder import build_evidence_bundle
-from skills.base import SkillSpec
-from skills.registry import SkillRegistry
 from mcp.client.registry import MCPClientRegistry
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
@@ -59,7 +57,6 @@ class RagRuntime:
         checkpointer: Any | None = None,
         session_memory: GraphSessionMemory | None = None,
         prompt_resolver: PromptResolver | None = None,
-        skill_registry: SkillRegistry | None = None,
         tool_registry: ToolRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         mcp_client_registry: MCPClientRegistry | None = None,
@@ -99,7 +96,6 @@ class RagRuntime:
         self.prompt_resolver = (
             prompt_resolver or getattr(answer_tools, "prompt_resolver", None) or PromptResolver()
         )
-        self.skill_registry = skill_registry or SkillRegistry()
         self.tool_registry = tool_registry or ToolRegistry()
         self.tool_executor = tool_executor or ToolExecutor(self.tool_registry)
         self.external_tool_registry = mcp_client_registry or MCPClientRegistry()
@@ -256,7 +252,6 @@ class RagRuntime:
                 top_k=params.get("top_k", 10),
                 filters=params.get("filters"),
                 metadata=params.get("metadata") or params.get("context"),
-                skill_name=params.get("skill_name"),
                 reasoning_style=params.get("reasoning_style"),
             )
             return GraphTaskResult(
@@ -283,13 +278,8 @@ class RagRuntime:
         document_id: str | None = None,
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-        skill_name: str | None = None,
         **_: Any,
     ) -> ParsedDocument:
-        skill_context = self.resolve_skill_context(
-            task_type="parse",
-            preferred_skill_name=skill_name,
-        )
         state = await self.invoke(
             {
                 "task_type": "parse",
@@ -298,11 +288,7 @@ class RagRuntime:
                 "session_id": session_id,
                 "user_input": file_path,
                 "document_ids": [document_id] if document_id else [],
-                "metadata": {
-                    **(metadata or {}),
-                    **({"skill_name": skill_name} if skill_name else {}),
-                },
-                "selected_skill": skill_context,
+                "metadata": metadata or {},
             }
         )
         return state["parsed_document"]
@@ -315,19 +301,13 @@ class RagRuntime:
         include_embeddings: bool = True,
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-        skill_name: str | None = None,
         **_: Any,
     ) -> DocumentIndexResult:
-        skill_context = self.resolve_skill_context(
-            task_type="index",
-            preferred_skill_name=skill_name,
-        )
         metadata = {
             **(metadata or {}),
             "charts": charts or [],
             "include_graph": include_graph,
             "include_embeddings": include_embeddings,
-            **({"skill_name": skill_name} if skill_name else {}),
         }
         state = await self.invoke(
             {
@@ -341,7 +321,6 @@ class RagRuntime:
                 "include_embeddings": include_embeddings,
                 "user_input": parsed_document.filename,
                 "metadata": metadata,
-                "selected_skill": skill_context,
             }
         )
         graph_index_payload = state.get("metadata", {}).get("graph_index")
@@ -409,15 +388,10 @@ class RagRuntime:
         session_id: str | None = None,
         task_intent: str | None = None,
         metadata: dict[str, Any] | None = None,
-        skill_name: str | None = None,
         reasoning_style: str | None = None,
         **_: Any,
     ) -> QAResponse:
         resolved_document_ids = document_ids or ([doc_id] if doc_id else [])
-        skill_context = self.resolve_skill_context(
-            task_type=task_intent or "ask_document",
-            preferred_skill_name=skill_name,
-        )
         if self._is_chart_like_question(question):
             visual_anchor = await self._resolve_visual_anchor(
                 question=question,
@@ -426,7 +400,6 @@ class RagRuntime:
                 top_k=top_k,
                 filters=filters or {},
                 session_id=session_id,
-                skill_context=skill_context,
             )
             if visual_anchor is not None:
                 fused_result = await self.handle_ask_fused(
@@ -446,7 +419,6 @@ class RagRuntime:
                         "auto_fused_reason": "chart_like_question",
                         "visual_anchor": visual_anchor,
                     },
-                    skill_name=skill_name,
                     reasoning_style=reasoning_style,
                 )
                 return fused_result.qa
@@ -467,7 +439,6 @@ class RagRuntime:
                 },
                 "retrieval_mode": "hybrid",
                 "max_retrieval_attempts": 1,
-                "selected_skill": skill_context,
             }
         )
         answer = state["final_answer"]
@@ -542,7 +513,6 @@ class RagRuntime:
         top_k: int,
         filters: dict[str, Any],
         session_id: str | None,
-        skill_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         candidates: list[dict[str, Any]] = []
         for retrieval_filters in (
@@ -559,7 +529,6 @@ class RagRuntime:
                     session_id=session_id,
                     task_id=f"visual_anchor_{uuid4().hex}",
                     memory_hints={},
-                    skill_context=skill_context,
                 )
             except Exception:
                 logger.exception("Failed to resolve visual anchor for chart-like question")
@@ -692,15 +661,10 @@ class RagRuntime:
         top_k: int = 10,
         filters: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
-        skill_name: str | None = None,
         reasoning_style: str | None = None,
         **_: Any,
     ) -> FusedAskResult:
         resolved_document_ids = document_ids or ([doc_id] if doc_id else [])
-        skill_context = self.resolve_skill_context(
-            task_type="ask_document",
-            preferred_skill_name=skill_name,
-        )
         state = await self.invoke(
             {
                 "task_type": "ask",
@@ -721,7 +685,6 @@ class RagRuntime:
                 },
                 "retrieval_mode": "hybrid",
                 "max_retrieval_attempts": 1,
-                "selected_skill": skill_context,
             }
         )
         answer = state["final_answer"]
@@ -808,13 +771,8 @@ class RagRuntime:
         chart_id: str,
         session_id: str | None = None,
         context: dict[str, Any] | None = None,
-        skill_name: str | None = None,
         **_: Any,
     ) -> ChartUnderstandingResult:
-        skill_context = self.resolve_skill_context(
-            task_type="understand_chart",
-            preferred_skill_name=skill_name,
-        )
         state = await self.invoke(
             {
                 "task_type": "chart_understand",
@@ -827,7 +785,6 @@ class RagRuntime:
                 "page_number": page_number,
                 "chart_id": chart_id,
                 "metadata": context or {},
-                "selected_skill": skill_context,
             }
         )
         chart_result = state["chart_result"]
@@ -837,7 +794,6 @@ class RagRuntime:
             metadata={
                 "runtime_engine": "tool_runtime",
                 **chart_result.get("metadata", {}),
-                **({"skill_name": skill_name} if skill_name else {}),
             },
         )
 
@@ -850,7 +806,6 @@ class RagRuntime:
         session_id: str | None = None,
         task_id: str | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
         **_: Any,
     ) -> GraphSummaryToolOutput:
         retrieval = await self.retrieval_tools.retrieve(
@@ -861,7 +816,6 @@ class RagRuntime:
             session_id=session_id,
             task_id=task_id,
             memory_hints=memory_hints or {},
-            skill_context=skill_context,
         )
         return GraphSummaryToolOutput(
             hits=retrieval.retrieval_result.hits,
@@ -913,7 +867,6 @@ class RagRuntime:
     def list_function_tools(
         self,
         *,
-        skill_context: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         names: list[str] | None = None,
         include_disabled: bool = False,
@@ -924,7 +877,6 @@ class RagRuntime:
             tags=tags,
             enabled_only=not include_disabled,
             names=names,
-            skill_context=skill_context,
         )
         return [
             {
@@ -941,29 +893,15 @@ class RagRuntime:
     async def list_external_function_tools(
         self,
         *,
-        task_type: str = "function_call",
-        preferred_skill_name: str | None = None,
-        skill_context: dict[str, Any] | None = None,
         include_disabled: bool = False,
     ) -> list[dict[str, Any]]:
-        if self.skill_registry is None or self.external_tool_registry is None:
-            return []
-        resolved_skill_name = preferred_skill_name
-        if resolved_skill_name is None and isinstance(skill_context, dict):
-            candidate = skill_context.get("name")
-            if isinstance(candidate, str) and candidate.strip():
-                resolved_skill_name = candidate
-        allowed_names = self.skill_registry.allowed_external_mcp_tools(
-            task_type=task_type,
-            preferred_skill_name=resolved_skill_name,
-        )
-        if not allowed_names:
+        if self.external_tool_registry is None:
             return []
         tools = await self.external_tool_registry.discover_tools()
         filtered_tools = [
             tool
             for tool in tools
-            if tool.name in allowed_names and (include_disabled or tool.enabled)
+            if include_disabled or tool.enabled
         ]
         return [
             {
@@ -981,41 +919,6 @@ class RagRuntime:
             }
             for tool in filtered_tools
         ]
-
-    def resolve_skill_context(
-        self,
-        *,
-        task_type: str,
-        preferred_skill_name: str | None = None,
-    ) -> dict[str, Any] | None:
-        if self.skill_registry is None:
-            return None
-        try:
-            skill = self.skill_registry.select_skill_for_task(
-                task_type=task_type,
-                preferred_skill_name=preferred_skill_name,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to resolve skill context",
-                extra={"task_type": task_type, "preferred_skill_name": preferred_skill_name},
-            )
-            return None
-        return self._skill_to_context(skill, task_type=task_type)
-
-    def _skill_to_context(self, skill: SkillSpec, *, task_type: str) -> dict[str, Any]:
-        return {
-            "name": skill.name,
-            "description": skill.description,
-            "task_type": task_type,
-            "prompt_set": skill.prompt_set.model_dump(mode="json"),
-            "preferred_tools": list(skill.preferred_tools),
-            "retrieval_policy": skill.retrieval_policy.model_dump(mode="json"),
-            "memory_policy": skill.memory_policy.model_dump(mode="json"),
-            "output_style": skill.output_style.model_dump(mode="json"),
-            "enabled": skill.enabled,
-            "metadata": dict(skill.metadata),
-        }
 
     def _map_mcp_status_to_tool_status(self, status: str) -> str:
         if status == "invalid_input":
@@ -1056,14 +959,6 @@ class RagRuntime:
             "understand_chart": "chart_understand",
         }
         task_type = task_map.get(request.task_type, request.task_type)
-        selected_skill = (
-            params.get("selected_skill")
-            or params.get("skill_context")
-            or self.resolve_skill_context(
-                task_type=request.task_type,
-                preferred_skill_name=params.get("skill_name"),
-            )
-        )
         return {
             "request_id": request.trace_id or f"req_{uuid4().hex}",
             "task_type": task_type,
@@ -1097,7 +992,6 @@ class RagRuntime:
             "retrieval_mode": params.get("retrieval_mode", "hybrid"),
             "retrieval_attempt": 0,
             "max_retrieval_attempts": params.get("max_retrieval_attempts", 1),
-            "selected_skill": selected_skill,
         }
 
     def _state_output(self, state: ChartDocRAGState) -> Any:
@@ -1299,7 +1193,6 @@ class RagRuntime:
                 "graph_text": self.chart_tools.to_graph_text(chart),
                 "metadata": {
                     "image_path": state.get("image_path"),
-                    **({"skill_name": (state.get("selected_skill") or {}).get("name")} if state.get("selected_skill") else {}),
                 },
             }
             return self._merge_state(
@@ -1518,7 +1411,6 @@ class RagRuntime:
                 session_id=state.get("session_id"),
                 task_id=state.get("request_id"),
                 memory_hints=state.get("session_memory") or {},
-                skill_context=state.get("selected_skill"),
             )
             retrieval_result = result.retrieval_result
             metadata = retrieval_result.metadata or {}
@@ -1610,7 +1502,6 @@ class RagRuntime:
             task_context=task_context,
             preference_context={"reasoning_style": (state.get("metadata") or {}).get("reasoning_style")},
             memory_hints=state.get("session_memory") or {},
-            skill_context=state.get("selected_skill") or {},
         )
 
     async def _run_chart_grounding(

@@ -1,19 +1,17 @@
 import pytest
 
 from domain.schemas.research import PaperCandidate
-from skills.loader import SkillLoader
-from skills.registry import SkillRegistry
-from skills.research import (
-    PaperAnalysisSkill,
-    PaperReadingSkill,
-    ResearchEvaluationSkill,
-    ReviewWritingSkill,
-    WritingPolishSkill,
+from services.research.capabilities import (
+    PaperAnalyzer,
+    PaperReader,
+    ResearchEvaluator,
+    ReviewWriter,
+    WritingPolisher,
 )
 
 
 def test_paper_reading_skill_extracts_structured_card() -> None:
-    skill = PaperReadingSkill()
+    skill = PaperReader()
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -60,7 +58,7 @@ async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata()
             )
 
     llm = LLMStub()
-    skill = PaperReadingSkill(llm_adapter=llm)
+    skill = PaperReader(llm_adapter=llm)
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -79,7 +77,7 @@ async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata()
 
 @pytest.mark.asyncio
 async def test_paper_analysis_skill_heuristic_follows_question_language() -> None:
-    skill = PaperAnalysisSkill()
+    skill = PaperAnalyzer()
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -102,7 +100,7 @@ async def test_paper_analysis_skill_heuristic_follows_question_language() -> Non
 
 
 def test_research_evaluation_skill_flags_low_quality_review() -> None:
-    skill = ResearchEvaluationSkill()
+    skill = ResearchEvaluator()
 
     evaluation = skill.evaluate_result(
         task_type="write_review",
@@ -129,7 +127,7 @@ def test_research_evaluation_skill_flags_low_quality_review() -> None:
 
 
 def test_review_writing_skill_polishes_for_target_journal() -> None:
-    skill = ReviewWritingSkill(polish_skill=WritingPolishSkill())
+    skill = ReviewWriter(polish_skill=WritingPolisher())
     papers = [
         PaperCandidate(
             paper_id="paper-1",
@@ -151,34 +149,4 @@ def test_review_writing_skill_polishes_for_target_journal() -> None:
     )
 
     assert "ACL" in report.markdown
-    assert report.metadata["writer"] == "ReviewWritingSkill"
-
-
-def test_skill_loader_registers_research_external_tool_policies() -> None:
-    loader = SkillLoader(specs_dir="/home/myc/Research-Copilot/skills/specs")
-    registry = SkillRegistry()
-    registry.register_many(loader.load_from_directory(), replace=True)
-
-    research_report = registry.get_skill("research_report")
-    research_supervisor = registry.get_skill("research_supervisor")
-
-    assert research_report is not None
-    assert research_supervisor is not None
-    assert "zotero_attach_pdf_to_item" in registry.allowed_external_mcp_tools(
-        task_type="function_call",
-        preferred_skill_name="research_report",
-    )
-    assert "academic_search" not in registry.allowed_external_mcp_tools(
-        task_type="function_call",
-        preferred_skill_name="research_report",
-    )
-    assert "search_or_import_paper" not in registry.allowed_external_mcp_tools(
-        task_type="function_call",
-        preferred_skill_name="research_report",
-    )
-    assert "notification" not in registry.allowed_external_mcp_tools(
-        task_type="function_call",
-        preferred_skill_name="research_supervisor",
-    )
-    assert "search_or_import_paper" in research_report.preferred_tools
-    assert "search_or_import_paper" in research_supervisor.preferred_tools
+    assert report.metadata["writer"] == "ReviewWriter"

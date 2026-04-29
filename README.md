@@ -93,14 +93,12 @@ Browser (http://localhost:3000)
 
 - `web/`
   当前活跃前端（Next.js 15 + React 18 + Tailwind），ChatGPT 风格对话式布局
-- `app/`、`components/`、`lib/`
-  旧 Next.js 前端（已不活跃）
 - `apps/api/`
   FastAPI 入口、依赖注入、runtime 装配和 HTTP 路由
 - `services/research/`
   research 主业务、workspace 持久化和 supervisor orchestration
 - `agents/`
-  高层 specialist agents（8 个：Supervisor、Writer、PreferenceMemory、Knowledge、Scout、ChartAnalysis、GeneralAnswer、PaperAnalysis）
+  高层 specialist agents（9 个：Supervisor、Writer、PreferenceMemory、Knowledge、LiteratureScout、ChartAnalysis、GeneralAnswer、PaperAnalysis、ResearchKnowledge）
 - `rag_runtime/`
   底层 RAG runtime
 - `tools/`
@@ -117,8 +115,6 @@ Browser (http://localhost:3000)
   敏感数据脱敏（API key、token、密码、连接串等 11 种模式）
 - `memory/`
   research 侧工作记忆、会话记忆、长期记忆、用户画像记忆和论文知识记忆
-- `skills/`
-  skill spec 定义、加载、注册和 research 领域技能扩展（含 16+ 研究技能类）
 - `reasoning/`
   可复用推理策略层（CoT / PlanAndSolve / ReAct）
 - `tooling/`
@@ -213,7 +209,7 @@ Browser (http://localhost:3000)
 - `APP_ENV=local` 时会暴露 `/uploads/*`
 - `UPLOAD_MAX_BYTES` 默认 `25 MiB`
 - `VECTOR_STORE_PROVIDER` 默认 `milvus`
-- `GRAPH_STORE_PROVIDER` 默认 `neo4j`
+- `GRAPH_STORE_PROVIDER` 代码默认 `memory`，`.env` 中配置为 `neo4j`
 - `SESSION_MEMORY_PROVIDER` 默认 `auto`
 - `LONG_TERM_MEMORY_PROVIDER` 默认 `json`
 - `STORAGE_PROVIDER` 默认 `json`（可切换为 `sqlite`）
@@ -253,7 +249,7 @@ cd /home/myc/Research-Copilot
   --host 127.0.0.1 --port 8000 --reload \
   --reload-dir apps --reload-dir services --reload-dir rag_runtime \
   --reload-dir agents --reload-dir tools --reload-dir adapters \
-  --reload-dir memory --reload-dir retrieval --reload-dir skills --reload-dir domain
+  --reload-dir memory --reload-dir retrieval --reload-dir domain
 # 等待日志出现 "Application startup complete"
 # 如果卡在 "Waiting for application startup"，说明 Milvus 或 Neo4j 没启动
 # 注意：必须用 --reload-dir 限制监视目录，否则 watchfiles 会因 web/node_modules 文件过多而崩溃
@@ -312,15 +308,14 @@ npm run dev
 11. [rag_runtime/runtime.py](rag_runtime/runtime.py)
 12. [memory/memory_manager.py](memory/memory_manager.py)
 13. [retrieval/hybrid_retriever.py](retrieval/hybrid_retriever.py)
-14. [skills/research/__init__.py](skills/research/__init__.py)
 
 ## 相关文档
 
-- [系统运行指南.md](系统运行指南.md)
-- [系统完整运行流程说明.md](系统完整运行流程说明.md)
-- [项目学习和使用文档.md](项目学习和使用文档.md)
-- [系统学习与面试指南.md](系统学习与面试指南.md)
-- [Milvus学习文档.md](Milvus学习文档.md)
-- [MySQL数据库使用说明.md](MySQL数据库使用说明.md)
+- [docs/系统运行指南.md](docs/系统运行指南.md)
+- [docs/系统完整运行流程说明.md](docs/系统完整运行流程说明.md)
+- [docs/项目学习和使用文档.md](docs/项目学习和使用文档.md)
+- [docs/系统学习与面试指南.md](docs/系统学习与面试指南.md)
+- [docs/Milvus学习文档.md](docs/Milvus学习文档.md)
+- [docs/MySQL数据库使用说明.md](docs/MySQL数据库使用说明.md)
 - [docs/当前项目结构图.md](docs/当前项目结构图.md)
 - [docs/CLI终端使用文档.md](docs/CLI终端使用文档.md)

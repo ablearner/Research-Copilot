@@ -93,7 +93,6 @@ class ParseDocumentToolInput(BaseModel):
     document_id: str | None = None
     session_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    skill_name: str | None = None
 
 
 class IndexDocumentToolInput(BaseModel):
@@ -103,7 +102,6 @@ class IndexDocumentToolInput(BaseModel):
     include_embeddings: bool = True
     session_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    skill_name: str | None = None
 
 
 class UnderstandChartToolInput(BaseModel):
@@ -113,7 +111,6 @@ class UnderstandChartToolInput(BaseModel):
     page_number: int = Field(..., ge=1)
     chart_id: str = Field(..., min_length=1)
     context: dict[str, Any] = Field(default_factory=dict)
-    skill_name: str | None = None
 
 
 class HybridRetrieveToolInput(BaseModel):
@@ -125,7 +122,6 @@ class HybridRetrieveToolInput(BaseModel):
     session_id: str | None = None
     task_id: str | None = None
     memory_hints: dict[str, Any] = Field(default_factory=dict)
-    skill_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryGraphSummaryToolInput(BaseModel):
@@ -133,7 +129,6 @@ class QueryGraphSummaryToolInput(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     top_k: int = Field(default=5, ge=1, le=50)
     filters: dict[str, Any] = Field(default_factory=dict)
-    skill_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class AnswerWithEvidenceToolInput(BaseModel):
@@ -146,7 +141,6 @@ class AnswerWithEvidenceToolInput(BaseModel):
     preference_context: dict[str, Any] = Field(default_factory=dict)
     retrieval_cache_summary: str | None = None
     memory_hints: dict[str, Any] = Field(default_factory=dict)
-    skill_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class UnderstandChartToolOutput(BaseModel):

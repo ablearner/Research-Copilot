@@ -16,19 +16,13 @@ class RuntimeModelProfile(BaseModel):
     chart_vision_model: str | None = None
 
 
-class SkillProfileState(BaseModel):
-    enabled: bool = True
-
-
 class PluginProfileState(BaseModel):
     enabled: bool = True
 
 
 class RuntimeProfile(BaseModel):
     models: RuntimeModelProfile = Field(default_factory=RuntimeModelProfile)
-    skills: dict[str, SkillProfileState] = Field(default_factory=dict)
     plugins: dict[str, PluginProfileState] = Field(default_factory=dict)
-    default_skill: str | None = None
     updated_at: str | None = None
 
 
@@ -59,18 +53,9 @@ class RuntimeProfileStore:
         profile = self.load()
         return self.save(profile.model_copy(update={"models": RuntimeModelProfile()}))
 
-    def set_skill_enabled(self, name: str, enabled: bool) -> RuntimeProfile:
-        profile = self.load()
-        next_skills = dict(profile.skills)
-        next_skills[name] = SkillProfileState(enabled=enabled)
-        return self.save(profile.model_copy(update={"skills": next_skills}))
-
     def set_plugin_enabled(self, name: str, enabled: bool) -> RuntimeProfile:
         profile = self.load()
         next_plugins = dict(profile.plugins)
         next_plugins[name] = PluginProfileState(enabled=enabled)
         return self.save(profile.model_copy(update={"plugins": next_plugins}))
 
-    def set_default_skill(self, name: str | None) -> RuntimeProfile:
-        profile = self.load()
-        return self.save(profile.model_copy(update={"default_skill": name}))

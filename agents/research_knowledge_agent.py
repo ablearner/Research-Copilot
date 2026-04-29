@@ -169,7 +169,6 @@ class ResearchKnowledgeAgent:
             session_id=getattr(execution_context, "session_id", None),
             task_id=state.task.task_id,
             memory_hints=getattr(execution_context, "memory_hints", None) or {},
-            skill_context=state.skill_context,
         )
         return result.retrieval_result.hits
 
@@ -191,7 +190,6 @@ class ResearchKnowledgeAgent:
             session_id=getattr(execution_context, "session_id", None),
             task_id=state.task.task_id,
             memory_hints=getattr(execution_context, "memory_hints", None) or {},
-            skill_context=state.skill_context,
         )
         return list(getattr(summary_output, "hits", []) or [])
 

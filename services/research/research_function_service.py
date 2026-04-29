@@ -36,11 +36,11 @@ from domain.schemas.research_functions import (
     SearchPapersFunctionOutput,
 )
 from domain.schemas.sub_manager import TaskEvaluation, TaskStep
-from skills.research import (
-    PaperAnalysisSkill,
-    PaperReadingSkill,
-    ResearchEvaluationSkill,
-    ReviewWritingSkill,
+from services.research.capabilities import (
+    PaperAnalyzer,
+    PaperReader,
+    ResearchEvaluator,
+    ReviewWriter,
 )
 from agents.research_knowledge_agent import merge_retrieval_hits
 from tooling.research_runtime_schemas import (
@@ -76,16 +76,16 @@ class ResearchFunctionService:
         self.paper_search_service = research_service.paper_search_service
         self.report_service = research_service.report_service
         self.memory_manager = research_service.memory_manager
-        self.paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReadingSkill()
-        self.paper_analysis_skill = PaperAnalysisSkill(
+        self.paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReader()
+        self.paper_analysis_skill = PaperAnalyzer(
             paper_reading_skill=self.paper_reading_skill,
             llm_adapter=self._get_llm_adapter() if graph_runtime is not None else None,
         )
         self.paper_analysis_agent = PaperAnalysisAgent(
             paper_analysis_skill=self.paper_analysis_skill,
         )
-        self.review_writing_skill = getattr(research_service, "review_writing_skill", None) or ReviewWritingSkill()
-        self.evaluation_skill = getattr(research_service, "evaluation_skill", None) or ResearchEvaluationSkill()
+        self.review_writing_skill = getattr(research_service, "review_writing_skill", None) or ReviewWriter()
+        self.evaluation_skill = getattr(research_service, "evaluation_skill", None) or ResearchEvaluator()
         _llm = None
         if graph_runtime is not None:
             _agent = getattr(graph_runtime, "plan_and_solve_reasoning_agent", None)
@@ -1185,11 +1185,6 @@ class ResearchFunctionService:
         )
         if not document_ids:
             return []
-        skill_context = (
-            self.graph_runtime.resolve_skill_context(task_type="analyze_papers")
-            if hasattr(self.graph_runtime, "resolve_skill_context")
-            else None
-        )
         retrieval_output = await retrieval_tools.retrieve(
             question=question,
             document_ids=document_ids,
@@ -1202,7 +1197,6 @@ class ResearchFunctionService:
             session_id=None,
             task_id=None,
             memory_hints={},
-            skill_context=skill_context,
         )
         retrieval_hits = [
             self._attach_paper_id_to_hit(hit=hit, papers=papers)
@@ -1222,7 +1216,6 @@ class ResearchFunctionService:
                 session_id=None,
                 task_id=None,
                 memory_hints={},
-                skill_context=skill_context,
             )
             summary_hits = [
                 self._attach_paper_id_to_hit(hit=hit, papers=papers)

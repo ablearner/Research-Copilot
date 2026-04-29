@@ -10,8 +10,8 @@ from domain.schemas.research import (
     ResearchPaperFigureListResponse,
     ResearchPaperFigurePreview,
 )
-from skills.research.paper_chart_analysis import PaperChartAnalysisSkill
-from skills.research.visual_anchor import ResearchVisualAnchorSkill
+from services.research.capabilities.paper_chart_analysis import PaperChartAnalyzer
+from services.research.capabilities.visual_anchor import VisualAnchor
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget, PaperFigureTools
 
 
@@ -22,8 +22,8 @@ class ChartAnalysisAgent:
 
     def __init__(self, *, llm_adapter: Any | None = None, storage_root: str | Path | None = None) -> None:
         self.llm_adapter = llm_adapter
-        self.visual_anchor_skill = ResearchVisualAnchorSkill(llm_adapter=llm_adapter)
-        self.paper_chart_analysis_skill = PaperChartAnalysisSkill(llm_adapter=llm_adapter)
+        self.visual_anchor_skill = VisualAnchor(llm_adapter=llm_adapter)
+        self.paper_chart_analysis_skill = PaperChartAnalyzer(llm_adapter=llm_adapter)
         self.paper_figure_tools = (
             PaperFigureTools(storage_root=storage_root) if storage_root is not None else None
         )

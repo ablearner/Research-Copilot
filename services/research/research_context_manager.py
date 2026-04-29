@@ -85,9 +85,9 @@ class ResearchContextManager:
         if not papers:
             return []
         if paper_reading_skill is None:
-            from skills.research import PaperReadingSkill
+            from services.research.capabilities import PaperReader
 
-            paper_reading_skill = PaperReadingSkill()
+            paper_reading_skill = PaperReader()
         selected = set(selected_paper_ids or [])
         ranked_papers = list(papers)
         ranked_papers.sort(

@@ -114,16 +114,6 @@ def build_parser() -> argparse.ArgumentParser:
     models_set.add_argument("--chart-vision-provider")
     models_set.add_argument("--chart-vision-model")
 
-    skills = subparsers.add_parser("skills", help="Inspect or configure runtime skills.")
-    skills_subparsers = skills.add_subparsers(dest="skills_command", required=True)
-    skills_subparsers.add_parser("list", help="List available skills.")
-    skill_enable = skills_subparsers.add_parser("enable", help="Enable a skill.")
-    skill_enable.add_argument("name")
-    skill_disable = skills_subparsers.add_parser("disable", help="Disable a skill.")
-    skill_disable.add_argument("name")
-    skill_default = skills_subparsers.add_parser("default", help="Set the default skill.")
-    skill_default.add_argument("name")
-
     plugins = subparsers.add_parser("plugins", help="Inspect or configure optional runtime plugins.")
     plugins_subparsers = plugins.add_subparsers(dest="plugins_command", required=True)
     plugins_subparsers.add_parser("list", help="List plugins.")
@@ -616,7 +606,6 @@ def _print_status_panel(sdk: Any, *, conversation_id: str | None = None, termina
     print("Research-Copilot Runtime")
     print(f"llm: {runtime['llm']['provider']} / {runtime['llm']['model']}")
     print(f"embedding: {runtime['embedding']['provider']} / {runtime['embedding']['model']}")
-    print(f"default skill: {runtime['default_skill']}")
     enabled_plugins = [item["name"] for item in runtime["plugins"] if item["enabled"]]
     print(f"plugins: {', '.join(enabled_plugins) if enabled_plugins else 'none'}")
     if conversation_id:
@@ -1638,20 +1627,6 @@ def main() -> int:
                 chart_vision_model=args.chart_vision_model,
             )
             _print_json(payload)
-            return 0
-
-    if args.command == "skills":
-        if args.skills_command == "list":
-            _print_json(sdk.list_skills())
-            return 0
-        if args.skills_command == "enable":
-            _print_json(sdk.set_skill_enabled(args.name, True))
-            return 0
-        if args.skills_command == "disable":
-            _print_json(sdk.set_skill_enabled(args.name, False))
-            return 0
-        if args.skills_command == "default":
-            _print_json(sdk.set_default_skill(args.name))
             return 0
 
     if args.command == "plugins":

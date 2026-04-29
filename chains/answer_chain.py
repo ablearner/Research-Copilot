@@ -36,13 +36,9 @@ class AnswerChain:
         preference_context: dict[str, Any] | None = None,
         retrieval_cache_summary: str | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
     ) -> QAResponse:
-        prompt_text = self._resolve_prompt(skill_context)
-        skill_style = skill_context.get("output_style") if isinstance(skill_context, dict) else {}
-        if not isinstance(skill_style, dict):
-            skill_style = {}
-        resolved_output_style = {**skill_style, **(preference_context or {})}
+        prompt_text = self._resolve_prompt()
+        resolved_output_style = dict(preference_context or {})
         answer_metadata = {
             **(metadata or {}),
             "session_context": session_context or {},
@@ -50,7 +46,6 @@ class AnswerChain:
             "preference_context": preference_context or {},
             "retrieval_cache_summary": retrieval_cache_summary,
             "memory_hints": memory_hints or {},
-            "skill_context": skill_context or {},
             "output_style": resolved_output_style,
         }
         compact_evidence_bundle = self._compact_evidence_bundle(evidence_bundle)
@@ -72,7 +67,6 @@ class AnswerChain:
                 "retrieval_cache_summary": retrieval_cache_summary,
                 "memory_hints": memory_hints or {},
             },
-            "skill_context": skill_context or {},
             "output_style": resolved_output_style,
             "metadata": answer_metadata,
         }
@@ -192,13 +186,9 @@ class AnswerChain:
             },
         }
 
-    def _resolve_prompt(self, skill_context: dict[str, Any] | None) -> str:
-        prompt_set = skill_context.get("prompt_set") if isinstance(skill_context, dict) else {}
-        explicit = prompt_set.get("answer_prompt_path") if isinstance(prompt_set, dict) else None
-        skill_name = skill_context.get("name") if isinstance(skill_context, dict) else None
+    def _resolve_prompt(self) -> str:
         resolved_prompt_path = self.prompt_resolver.resolve_prompt_path(
             prompt_key="answer_prompt_path",
-            skill_name=skill_name if isinstance(skill_name, str) else None,
-            explicit_prompt_path=explicit if isinstance(explicit, str) else str(self.prompt_path),
+            explicit_prompt_path=str(self.prompt_path),
         )
         return resolved_prompt_path.read_text(encoding="utf-8")

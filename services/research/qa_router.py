@@ -670,7 +670,6 @@ class QARoutingMixin:
                             "autonomy_mode": "task_scoped_drilldown",
                             "agent_architecture": "research_service_to_graph_runtime",
                             "primary_agents": ["RagRuntime"],
-                            "selected_skill": request.skill_name,
                             "memory_enabled": execution_context.memory_enabled,
                             "session_id": execution_context.session_id,
                             "drilldown_runtime": "fused_chart",
@@ -718,7 +717,6 @@ class QARoutingMixin:
                             "autonomy_mode": "task_scoped_drilldown",
                             "agent_architecture": "research_service_to_graph_runtime",
                             "primary_agents": ["RagRuntime"],
-                            "selected_skill": request.skill_name,
                             "memory_enabled": execution_context.memory_enabled,
                             "session_id": execution_context.session_id,
                             "drilldown_runtime": "document",
@@ -771,15 +769,6 @@ class QARoutingMixin:
                 }
             )
 
-        resolver = getattr(graph_runtime, "resolve_skill_context", None)
-        skill_context = (
-            resolver(
-                task_type="ask_document",
-                preferred_skill_name=request.skill_name or "research_report",
-            )
-            if callable(resolver)
-            else None
-        )
         resolved_question = self._rewrite_collection_question(
             question=request.question,
             task=task,
@@ -801,7 +790,6 @@ class QARoutingMixin:
             papers=papers,
             document_ids=document_ids,
             execution_context=execution_context,
-            skill_context=skill_context,
             queries=[],
             completed_queries=set(),
             refinement_used=False,

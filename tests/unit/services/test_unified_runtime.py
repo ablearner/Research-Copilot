@@ -33,8 +33,6 @@ from services.research.unified_runtime import (
     serialize_unified_agent_results,
     serialize_unified_delegation_plan,
 )
-from skills.base import SkillSpec
-from skills.registry import SkillRegistry
 from tooling.registry import ToolRegistry
 from tooling.schemas import ToolSpec
 
@@ -113,28 +111,7 @@ def _build_runtime_stub():
             ),
         ]
     )
-    skill_registry = SkillRegistry()
-    skill_registry.register_many(
-        [
-            SkillSpec(
-                name="research_supervisor",
-                description="Supervisor profile",
-                applicable_tasks=["function_call"],
-            ),
-            SkillSpec(
-                name="research_report",
-                description="Research report profile",
-                applicable_tasks=["ask_document", "function_call"],
-            ),
-            SkillSpec(
-                name="financial_report",
-                description="Financial report profile",
-                applicable_tasks=["understand_chart", "function_call"],
-            ),
-        ],
-        replace=True,
-    )
-    return SimpleNamespace(tool_registry=tool_registry, skill_registry=skill_registry)
+    return SimpleNamespace(tool_registry=tool_registry)
 
 
 def test_unified_agent_task_roundtrip_to_legacy_result():
@@ -188,7 +165,7 @@ def test_build_phase1_blueprint_for_current_repo_shape():
     assert "hybrid_retrieve" in blueprint.tool_names
     assert "parse_document" in blueprint.tool_names
     assert "index_document" in blueprint.tool_names
-    assert "research_report" in blueprint.skill_profile_names
+    assert blueprint.capability_profile_names == []
     assert blueprint.unresolved_boundaries
     knowledge_descriptor = next(
         item for item in blueprint.agent_descriptors if item.name == "ResearchKnowledgeAgent"

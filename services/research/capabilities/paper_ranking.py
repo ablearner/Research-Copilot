@@ -148,7 +148,7 @@ def _source_quality_adjustment(paper: PaperCandidate) -> float:
     return adjustment
 
 
-class PaperRankingSkill:
+class PaperRanker:
     """Rank paper candidates using LLM relevance assessment with deterministic fallback.
     
     When llm_adapter is provided, uses LLM for intelligent relevance scoring.
@@ -292,4 +292,4 @@ class PaperRankingSkill:
 
 
 # Compatibility alias for the previous agent-like name.
-PaperRankerAgent = PaperRankingSkill
+PaperRankerAgent = PaperRanker

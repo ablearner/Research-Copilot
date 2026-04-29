@@ -134,14 +134,14 @@ class ResearchQueryRewriteResult:
         return _dedupe_queries([*self.local_queries, *self.english_queries, *self.expanded_queries])
 
 
-class ResearchQueryRewriteSkill:
+class ResearchQueryRewriter:
     """Skill used by LiteratureScoutAgent to build provider-ready search queries.
     
     When llm_adapter is provided, uses LLM for intelligent query rewriting.
     Falls back to heuristic rewriting when LLM is unavailable.
     """
 
-    name = "ResearchQueryRewriteSkill"
+    name = "ResearchQueryRewriter"
 
     def __init__(
         self,
@@ -220,7 +220,7 @@ class ResearchQueryRewriteSkill:
         return selected[:limit]
 
 
-class TopicPlanningSkill:
+class TopicPlanner:
     """Skill for creating query plans; used by LiteratureScoutAgent/PaperSearchService.
     
     When llm_adapter is provided, uses LLM for intelligent query planning.
@@ -230,11 +230,11 @@ class TopicPlanningSkill:
     def __init__(
         self,
         *,
-        query_rewrite_skill: ResearchQueryRewriteSkill | None = None,
+        query_rewrite_skill: ResearchQueryRewriter | None = None,
         llm_adapter: Any | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.query_rewrite_skill = query_rewrite_skill or ResearchQueryRewriteSkill(llm_adapter=llm_adapter)
+        self.query_rewrite_skill = query_rewrite_skill or ResearchQueryRewriter(llm_adapter=llm_adapter)
 
     def plan(
         self,
@@ -423,5 +423,5 @@ def extract_core_terms(topic: str) -> list[str]:
 
 
 # Compatibility aliases for older imports or tests that still use the old names.
-ResearchQueryRewriteAgent = ResearchQueryRewriteSkill
-TopicPlannerAgent = TopicPlanningSkill
+ResearchQueryRewriteAgent = ResearchQueryRewriter
+TopicPlannerAgent = TopicPlanner

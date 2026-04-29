@@ -14,7 +14,7 @@ from retrieval.evidence_builder import build_evidence_bundle
 from services.research.paper_search_service import SearchResultBundle
 from services.research.research_function_service import ResearchFunctionService
 from services.research.research_report_service import ResearchReportService
-from skills.research import PaperReadingSkill, ResearchEvaluationSkill, ReviewWritingSkill
+from services.research.capabilities import PaperReader, ResearchEvaluator, ReviewWriter
 from tools.retrieval_toolkit import RetrievalAgentResult
 
 
@@ -184,9 +184,9 @@ def _build_service(tmp_path, *, code_execution_enabled: bool = False):
                 JsonPaperKnowledgeStore(tmp_path / "paper_knowledge")
             )
         ),
-        paper_reading_skill=PaperReadingSkill(),
-        review_writing_skill=ReviewWritingSkill(),
-        evaluation_skill=ResearchEvaluationSkill(),
+        paper_reading_skill=PaperReader(),
+        review_writing_skill=ReviewWriter(),
+        evaluation_skill=ResearchEvaluator(),
     )
     return ResearchFunctionService(
         research_service=research_service,
@@ -194,7 +194,6 @@ def _build_service(tmp_path, *, code_execution_enabled: bool = False):
             plan_and_solve_reasoning_agent=SimpleNamespace(llm_adapter=ManagerDecisionLLMStub()),
             retrieval_tools=RetrievalToolsStub(),
             query_graph_summary=GraphSummaryStub(),
-            resolve_skill_context=lambda **kwargs: {"task_type": kwargs.get("task_type", "analyze_papers")},
         ),
         allowed_file_roots=[report_service.storage_root],
         code_execution_enabled=code_execution_enabled,

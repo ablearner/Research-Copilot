@@ -74,8 +74,8 @@ def _keyword_terms(text: str) -> list[str]:
     return [term for term in terms if len(term) >= 2 or re.search(r"[\u4e00-\u9fff]", term)]
 
 
-class ResearchVisualAnchorSkill:
-    name = "ResearchVisualAnchorSkill"
+class VisualAnchor:
+    name = "VisualAnchor"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter

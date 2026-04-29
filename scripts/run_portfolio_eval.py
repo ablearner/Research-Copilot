@@ -70,7 +70,6 @@ class EvalRetrievalAgent:
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ):
         snippets = [block.text for page in self.parsed_document.pages for block in page.text_blocks]
         hits: list[RetrievalHit] = []

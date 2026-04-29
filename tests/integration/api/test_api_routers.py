@@ -13,7 +13,7 @@ from apps.api.routers.ask import AskDocumentRequest, AskFusedRequest, ask_docume
 from apps.api.routers.charts import AskChartRequest, UnderstandChartRequest, ask_chart, understand_chart
 from apps.api.routers.health import health_check
 from apps.api.routers.index import IndexDocumentRequest, index_document
-from apps.api.routers.mcp import MCPToolCallRequest, call_tool as call_mcp_tool, list_tools as list_mcp_tools
+from apps.api.routers.mcp import MCPToolCallRequest, call_tool as call_mcp_tool
 from apps.api.routers.parse import ParseDocumentRequest, parse_document
 from apps.api.routers.research import (
     create_task,
@@ -74,10 +74,9 @@ class GraphRuntimeStub:
         self.last_invoke_state: dict | None = None
         self.tool_registry = SimpleNamespace(
             get_tool=lambda name, include_disabled=False: SimpleNamespace(
-                input_schema=SimpleNamespace(model_fields={"skill_context": object(), "skill_name": object()})
+                input_schema=SimpleNamespace(model_fields={})
             )
         )
-        self.skill_registry = None
 
     async def _ask_chart(self, **kwargs):
         return "chart answer"
@@ -147,12 +146,6 @@ class GraphRuntimeStub:
 
     def _model_from_payload(self, payload):
         return payload
-
-    def resolve_skill_context(self, *, task_type: str, preferred_skill_name: str | None = None):
-        if not preferred_skill_name:
-            return None
-        return {"name": preferred_skill_name, "task_type": task_type, "preferred_tools": ["hybrid_retrieve"]}
-
 
 class MCPServerStub:
     def __init__(self) -> None:
@@ -579,7 +572,7 @@ def test_upload_routes_require_api_key_dependencies() -> None:
 async def test_parse_router_handler() -> None:
     runtime = GraphRuntimeStub()
     response = await parse_document(
-        ParseDocumentRequest(file_path="sample.pdf", document_id="doc1", skill_name="document_qa"),
+        ParseDocumentRequest(file_path="sample.pdf", document_id="doc1"),
         http_request=make_request(),
         graph_runtime=runtime,
         quota_context={},
@@ -587,7 +580,6 @@ async def test_parse_router_handler() -> None:
 
     assert response.parsed_document.id == "doc1"
     assert runtime.last_invoke_state is not None
-    assert runtime.last_invoke_state["selected_skill"]["name"] == "document_qa"
 
 
 @pytest.mark.asyncio
@@ -640,7 +632,7 @@ async def test_index_router_handler() -> None:
         pages=[],
     )
     response = await index_document(
-        IndexDocumentRequest(parsed_document=parsed, skill_name="financial_report"),
+        IndexDocumentRequest(parsed_document=parsed),
         http_request=make_request(),
         graph_runtime=runtime,
         quota_context={},
@@ -648,7 +640,6 @@ async def test_index_router_handler() -> None:
 
     assert response.result.document_id == "doc1"
     assert runtime.last_invoke_state is not None
-    assert runtime.last_invoke_state["selected_skill"]["name"] == "financial_report"
 
 
 @pytest.mark.asyncio
@@ -661,7 +652,6 @@ async def test_charts_router_handler() -> None:
             page_id="p1",
             page_number=1,
             chart_id="chart1",
-            skill_name="document_qa",
         ),
         http_request=make_request(),
         graph_runtime=runtime,
@@ -670,7 +660,6 @@ async def test_charts_router_handler() -> None:
 
     assert response.result.chart.id == "chart1"
     assert runtime.last_invoke_state is not None
-    assert runtime.last_invoke_state["selected_skill"]["name"] == "document_qa"
 
 
 @pytest.mark.asyncio
@@ -702,7 +691,6 @@ async def test_ask_router_handler() -> None:
         AskDocumentRequest(
             question="What happened?",
             doc_id="doc1",
-            skill_name="research_report",
             reasoning_style="react",
         ),
         http_request=make_request(),
@@ -712,7 +700,6 @@ async def test_ask_router_handler() -> None:
 
     assert response.qa.answer == "证据不足"
     assert runtime.last_ask_document_kwargs is not None
-    assert runtime.last_ask_document_kwargs["skill_name"] == "research_report"
     assert runtime.last_ask_document_kwargs["reasoning_style"] == "react"
 
 
@@ -728,7 +715,6 @@ async def test_ask_fused_router_handler() -> None:
             page_id="p1",
             chart_id="chart1",
             session_id="fused1",
-            skill_name="financial_report",
             reasoning_style="react",
         ),
         http_request=make_request(),
@@ -739,7 +725,6 @@ async def test_ask_fused_router_handler() -> None:
     assert response.chart_answer == "chart answer"
     assert response.qa.answer == "fused answer"
     assert runtime.last_ask_fused_kwargs is not None
-    assert runtime.last_ask_fused_kwargs["skill_name"] == "financial_report"
     assert runtime.last_ask_fused_kwargs["reasoning_style"] == "react"
 
 
@@ -924,22 +909,6 @@ async def test_research_todo_import_router_handler() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mcp_tools_route_resolves_skill_context() -> None:
-    runtime = GraphRuntimeStub()
-    mcp_server = MCPServerStub()
-
-    response = await list_mcp_tools(
-        skill_name="document_qa",
-        mcp_server=mcp_server,
-        graph_runtime=runtime,
-    )
-
-    assert response[0].name == "hybrid_retrieve"
-    assert mcp_server.list_tools_kwargs is not None
-    assert mcp_server.list_tools_kwargs["skill_context"]["name"] == "document_qa"
-
-
-@pytest.mark.asyncio
 async def test_mcp_call_tool_route_forwards_arguments() -> None:
     runtime = GraphRuntimeStub()
     mcp_server = MCPServerStub()
@@ -949,7 +918,6 @@ async def test_mcp_call_tool_route_forwards_arguments() -> None:
             tool_name="hybrid_retrieve",
             arguments={"question": "What happened?"},
             call_id="call-x",
-            skill_name="document_qa",
         ),
         graph_runtime=runtime,
         mcp_server=mcp_server,
@@ -960,8 +928,6 @@ async def test_mcp_call_tool_route_forwards_arguments() -> None:
         "tool_name": "hybrid_retrieve",
         "arguments": {
             "question": "What happened?",
-            "skill_context": {"name": "document_qa", "task_type": "function_call", "preferred_tools": ["hybrid_retrieve"]},
-            "skill_name": "document_qa",
         },
         "call_id": "call-x",
     }
@@ -972,12 +938,12 @@ async def test_health_router_exposes_effective_model_configuration() -> None:
     class MemorySaver:
         pass
 
-    class MySQLSessionMemoryStore:
+    class SQLiteSessionMemoryStore:
         pass
 
     graph_runtime = SimpleNamespace(
         checkpointer=MemorySaver(),
-        session_memory=SimpleNamespace(store=MySQLSessionMemoryStore()),
+        session_memory=SimpleNamespace(store=SQLiteSessionMemoryStore()),
     )
     app = SimpleNamespace(
         state=SimpleNamespace(

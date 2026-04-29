@@ -38,15 +38,15 @@ from memory.memory_manager import MemoryManager
 from memory.long_term_memory import JsonLongTermMemoryStore, LongTermMemory
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from memory.session_memory import JsonSessionMemoryStore, SessionMemory
-from skills.research import (
-    PaperReadingSkill,
-    ResearchQARoutingSkill,
-    ResearchEvaluationSkill,
-    ResearchUserIntentResolverSkill,
-    ReviewWritingSkill,
-    WritingPolishSkill,
+from services.research.capabilities import (
+    PaperReader,
+    ResearchQARouter,
+    ResearchEvaluator,
+    ResearchIntentResolver,
+    ReviewWriter,
+    WritingPolisher,
+    PaperCurator,
 )
-from skills.research.paper_curation import PaperCurationSkill
 from services.research.research_context import ResearchExecutionContext
 from services.research.research_context_manager import ResearchContextManager
 from services.research.paper_selector_service import PaperSelectionScope, PaperSelectorService
@@ -87,10 +87,10 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         research_context_manager: ResearchContextManager | None = None,
         memory_manager: MemoryManager | None = None,
         paper_selector_service: PaperSelectorService | None = None,
-        paper_reading_skill: PaperReadingSkill | None = None,
-        evaluation_skill: ResearchEvaluationSkill | None = None,
-        review_writing_skill: ReviewWritingSkill | None = None,
-        writing_polish_skill: WritingPolishSkill | None = None,
+        paper_reading_skill: PaperReader | None = None,
+        evaluation_skill: ResearchEvaluator | None = None,
+        review_writing_skill: ReviewWriter | None = None,
+        writing_polish_skill: WritingPolisher | None = None,
         import_concurrency: int = 2,
     ) -> None:
         self.paper_search_service = paper_search_service
@@ -114,20 +114,20 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             ),
         )
         self.paper_selector_service = paper_selector_service or PaperSelectorService()
-        self.paper_reading_skill = paper_reading_skill or PaperReadingSkill()
+        self.paper_reading_skill = paper_reading_skill or PaperReader()
         llm_adapter = getattr(paper_search_service, "llm_adapter", None)
         self.llm_adapter = llm_adapter
         self.literature_scout_agent = LiteratureScoutAgent(
             paper_search_service,
         )
-        self.paper_curation_skill = PaperCurationSkill(paper_search_service)
+        self.paper_curation_skill = PaperCurator(paper_search_service)
         self.research_knowledge_agent = ResearchKnowledgeAgent()
         self.research_writer_agent = ResearchWriterAgent(
             paper_search_service,
             llm_adapter=llm_adapter,
         )
-        self.qa_routing_skill = ResearchQARoutingSkill(llm_adapter=llm_adapter)
-        self.user_intent_resolver = ResearchUserIntentResolverSkill(llm_adapter=llm_adapter)
+        self.qa_routing_skill = ResearchQARouter(llm_adapter=llm_adapter)
+        self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
         self.chart_analysis_agent = ChartAnalysisAgent(
             llm_adapter=llm_adapter,
             storage_root=report_service.storage_root / "assets",
@@ -137,9 +137,9 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             paper_search_service=self.paper_search_service,
             storage_root=report_service.storage_root,
         )
-        self.evaluation_skill = evaluation_skill or ResearchEvaluationSkill()
-        self.review_writing_skill = review_writing_skill or ReviewWritingSkill()
-        self.writing_polish_skill = writing_polish_skill or WritingPolishSkill()
+        self.evaluation_skill = evaluation_skill or ResearchEvaluator()
+        self.review_writing_skill = review_writing_skill or ReviewWriter()
+        self.writing_polish_skill = writing_polish_skill or WritingPolisher()
         self.import_concurrency = max(1, import_concurrency)
         self._job_tasks: dict[str, asyncio.Task[None]] = {}
         self.observability_service = ResearchObservabilityService(

@@ -53,15 +53,15 @@ _QA_ROUTING_PROMPT = (
 )
 
 
-class ResearchQARouteSkillResult(BaseModel):
+class ResearchQARouteResult(BaseModel):
     route: Literal["collection_qa", "document_drilldown", "chart_drilldown"]
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     rationale: str = ""
     source: Literal["llm", "heuristic"] = "heuristic"
 
 
-class ResearchQARoutingSkill:
-    name = "ResearchQARoutingSkill"
+class ResearchQARouter:
+    name = "ResearchQARouter"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter
@@ -74,7 +74,7 @@ class ResearchQARoutingSkill:
         paper_ids: list[str],
         document_ids: list[str],
         has_visual_anchor: bool,
-    ) -> ResearchQARouteSkillResult:
+    ) -> ResearchQARouteResult:
         normalized = " ".join(question.strip().lower().split())
         structured_override = self._structured_override(
             scope_mode=scope_mode,
@@ -102,7 +102,7 @@ class ResearchQARoutingSkill:
                             has_visual_anchor=False,
                         ).model_dump(mode="json"),
                     },
-                    response_model=ResearchQARouteSkillResult,
+                    response_model=ResearchQARouteResult,
                 )
                 return result.model_copy(update={"source": "llm"})
             except Exception as exc:  # noqa: BLE001
@@ -122,9 +122,9 @@ class ResearchQARoutingSkill:
         paper_ids: list[str],
         document_ids: list[str],
         has_visual_anchor: bool,
-    ) -> ResearchQARouteSkillResult | None:
+    ) -> ResearchQARouteResult | None:
         if has_visual_anchor:
-            return ResearchQARouteSkillResult(
+            return ResearchQARouteResult(
                 route="chart_drilldown",
                 confidence=0.95,
                 rationale="A structured visual anchor was already resolved, so chart drilldown is the correct route.",
@@ -140,23 +140,23 @@ class ResearchQARoutingSkill:
         paper_ids: list[str],
         document_ids: list[str],
         has_visual_anchor: bool,
-    ) -> ResearchQARouteSkillResult:
+    ) -> ResearchQARouteResult:
         if not normalized:
-            return ResearchQARouteSkillResult(
+            return ResearchQARouteResult(
                 route="collection_qa",
                 confidence=0.35,
                 rationale="Question text is empty after normalization, so default to collection QA.",
                 source="heuristic",
             )
         if _looks_like_collection_question(normalized):
-            return ResearchQARouteSkillResult(
+            return ResearchQARouteResult(
                 route="collection_qa",
                 confidence=0.9,
                 rationale="Question contains collection-level comparison or synthesis markers.",
                 source="heuristic",
             )
         if _looks_like_recommendation_question(normalized):
-            return ResearchQARouteSkillResult(
+            return ResearchQARouteResult(
                 route="collection_qa",
                 confidence=0.86,
                 rationale="Question asks for paper selection or reading priority, which is still a collection-level judgment even under a narrowed scope.",
@@ -164,27 +164,27 @@ class ResearchQARoutingSkill:
             )
         if len(document_ids) == 1 or len(paper_ids) == 1 or scope_mode in {"selected_documents", "selected_papers"}:
             if _looks_like_chart_question(normalized):
-                return ResearchQARouteSkillResult(
+                return ResearchQARouteResult(
                     route="chart_drilldown",
                     confidence=0.87,
                     rationale="Question targets a single scoped paper/document and contains chart-oriented markers.",
                     source="heuristic",
                 )
             if _looks_like_document_drilldown(normalized):
-                return ResearchQARouteSkillResult(
+                return ResearchQARouteResult(
                     route="document_drilldown",
                     confidence=0.82,
                     rationale="Question targets a single scoped paper/document and contains document detail markers.",
                     source="heuristic",
                 )
             if scope_mode in {"selected_documents", "selected_papers"}:
-                return ResearchQARouteSkillResult(
+                return ResearchQARouteResult(
                     route="document_drilldown",
                     confidence=0.6,
                     rationale="QA scope is narrowed, so document drilldown is a reasonable fallback when no stronger semantic signal is available.",
                     source="heuristic",
                 )
-        return ResearchQARouteSkillResult(
+        return ResearchQARouteResult(
             route="collection_qa",
             confidence=0.62,
             rationale="No strong single-document or chart signals were detected, so collection QA remains the default route.",

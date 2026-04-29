@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
 from domain.schemas.research_functions import AnalyzePapersFunctionOutput, PaperAnalysisNote
-from skills.research.paper_reading import PaperReadingSkill, resolve_answer_language
+from services.research.capabilities.paper_reading import PaperReader, resolve_answer_language
 
 logger = logging.getLogger(__name__)
 
@@ -69,19 +69,19 @@ class _PaperAnalysisLLMResponse(BaseModel):
     paper_notes: list[_PaperAnalysisNoteLLM] = Field(default_factory=list)
 
 
-class PaperAnalysisSkill:
+class PaperAnalyzer:
     """Unified selected-paper analysis capability for comparison, recommendation, and explanation."""
 
-    name = "PaperAnalysisSkill"
+    name = "PaperAnalyzer"
 
     def __init__(
         self,
         *,
-        paper_reading_skill: PaperReadingSkill | None = None,
+        paper_reading_skill: PaperReader | None = None,
         llm_adapter: Any | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.paper_reading_skill = paper_reading_skill or PaperReadingSkill(llm_adapter=llm_adapter)
+        self.paper_reading_skill = paper_reading_skill or PaperReader(llm_adapter=llm_adapter)
 
     async def analyze_async(
         self,

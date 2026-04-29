@@ -12,7 +12,7 @@ from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
 from domain.schemas.research_context import ResearchContextSlice
 from domain.schemas.sub_manager import TaskEvaluation
-from skills.research import ResearchEvaluationSkill
+from services.research.capabilities import ResearchEvaluator
 
 
 logger = logging.getLogger(__name__)
@@ -129,10 +129,10 @@ class ResearchSupervisorAgent:
     def __init__(
         self,
         *,
-        evaluation_skill: ResearchEvaluationSkill | None = None,
+        evaluation_skill: ResearchEvaluator | None = None,
         llm_adapter: BaseLLMAdapter | None = None,
     ) -> None:
-        self.evaluation_skill = evaluation_skill or ResearchEvaluationSkill()
+        self.evaluation_skill = evaluation_skill or ResearchEvaluator()
         self.llm_adapter = llm_adapter
 
     async def decide_next_action_async(

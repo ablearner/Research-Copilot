@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from skills.research import PaperAnalysisSkill
+from services.research.capabilities import PaperAnalyzer
 
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
@@ -12,7 +12,7 @@ class PaperAnalysisAgent:
 
     name = "PaperAnalysisAgent"
 
-    def __init__(self, *, paper_analysis_skill: PaperAnalysisSkill) -> None:
+    def __init__(self, *, paper_analysis_skill: PaperAnalyzer) -> None:
         self.paper_analysis_skill = paper_analysis_skill
 
     async def analyze(

@@ -19,13 +19,11 @@ class MCPToolAdapter:
         tags: list[str] | None = None,
         names: list[str] | None = None,
         include_disabled: bool = False,
-        skill_context: dict[str, Any] | None = None,
     ) -> list[MCPToolSpec]:
         tool_specs = self.registry.filter_tools(
             tags=tags,
             enabled_only=not include_disabled,
             names=names,
-            skill_context=skill_context,
         )
         return map_tool_specs_to_mcp_tools(
             tool_specs,

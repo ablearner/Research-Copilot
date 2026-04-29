@@ -51,96 +51,64 @@ class InMemorySessionMemoryStore:
         self._snapshots.pop(session_id, None)
 
 
-class MySQLSessionMemoryStore:
-    def __init__(
-        self,
-        *,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-        database: str,
-        charset: str = "utf8mb4",
-        table_name: str = "session_memory",
-    ) -> None:
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
-        self.database = database
-        self.charset = "utf8mb4" if charset.lower() in {"utf8", "utf8mb3"} else charset
-        self.table_name = table_name
-        self.connection: Any | None = None
+class SQLiteSessionMemoryStore:
+    def __init__(self, db_path: str | None = None, *, connection: Any | None = None) -> None:
+        import sqlite3 as _sqlite3
 
-    def _ensure_connection(self) -> None:
-        if self.connection is not None:
-            return
-        import pymysql
+        if connection is not None:
+            self._conn = connection
+            self._owns_conn = False
+        else:
+            path = db_path or ".data/research/kepler.db"
+            import pathlib
+            pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = _sqlite3.connect(path, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._owns_conn = True
+        self._ensure_schema()
 
-        self.connection = pymysql.connect(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            database=self.database,
-            charset=self.charset,
-            autocommit=False,
-            cursorclass=pymysql.cursors.DictCursor,
+    def _ensure_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS session_memory (
+                session_id TEXT PRIMARY KEY,
+                current_document_id TEXT,
+                last_retrieval_summary TEXT,
+                last_answer_summary TEXT,
+                current_task_intent TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL
+            );
+            """
         )
-        self.ensure_schema()
-
-    def ensure_schema(self) -> None:
-        self._ensure_connection()
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.table_name} (
-                    session_id VARCHAR(191) PRIMARY KEY,
-                    current_document_id VARCHAR(191) NULL,
-                    last_retrieval_summary LONGTEXT NULL,
-                    last_answer_summary LONGTEXT NULL,
-                    current_task_intent LONGTEXT NULL,
-                    metadata_json LONGTEXT NOT NULL,
-                    updated_at DATETIME NOT NULL
-                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-                """
-            )
-        self.connection.commit()
 
     def get(self, session_id: str) -> SessionMemorySnapshot | None:
-        self._ensure_connection()
-        with self.connection.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM {self.table_name} WHERE session_id = %s", (session_id,))
-            row = cursor.fetchone()
+        row = self._conn.execute(
+            "SELECT session_id, current_document_id, last_retrieval_summary, "
+            "last_answer_summary, current_task_intent, metadata_json, updated_at "
+            "FROM session_memory WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
         if row is None:
             return None
         return SessionMemorySnapshot(
-            session_id=row["session_id"],
-            current_document_id=row.get("current_document_id"),
-            last_retrieval_summary=row.get("last_retrieval_summary"),
-            last_answer_summary=row.get("last_answer_summary"),
-            current_task_intent=row.get("current_task_intent"),
-            updated_at=row.get("updated_at") or utc_now(),
-            metadata=json.loads(row.get("metadata_json") or "{}"),
+            session_id=row[0],
+            current_document_id=row[1],
+            last_retrieval_summary=row[2],
+            last_answer_summary=row[3],
+            current_task_intent=row[4],
+            updated_at=datetime.fromisoformat(row[6]) if row[6] else utc_now(),
+            metadata=json.loads(row[5] or "{}"),
         )
 
     def put(self, snapshot: SessionMemorySnapshot) -> SessionMemorySnapshot:
-        self._ensure_connection()
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                INSERT INTO {self.table_name} (
-                    session_id, current_document_id, last_retrieval_summary, last_answer_summary,
-                    current_task_intent, metadata_json, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    current_document_id = VALUES(current_document_id),
-                    last_retrieval_summary = VALUES(last_retrieval_summary),
-                    last_answer_summary = VALUES(last_answer_summary),
-                    current_task_intent = VALUES(current_task_intent),
-                    metadata_json = VALUES(metadata_json),
-                    updated_at = VALUES(updated_at)
-                """,
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO session_memory "
+                "(session_id, current_document_id, last_retrieval_summary, "
+                "last_answer_summary, current_task_intent, metadata_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     snapshot.session_id,
                     snapshot.current_document_id,
@@ -148,17 +116,16 @@ class MySQLSessionMemoryStore:
                     snapshot.last_answer_summary,
                     snapshot.current_task_intent,
                     json.dumps(snapshot.metadata, ensure_ascii=False),
-                    snapshot.updated_at.replace(tzinfo=None),
+                    snapshot.updated_at.isoformat(),
                 ),
             )
-        self.connection.commit()
         return snapshot
 
     def delete(self, session_id: str) -> None:
-        self._ensure_connection()
-        with self.connection.cursor() as cursor:
-            cursor.execute(f"DELETE FROM {self.table_name} WHERE session_id = %s", (session_id,))
-        self.connection.commit()
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM session_memory WHERE session_id = ?", (session_id,)
+            )
 
 
 class GraphSessionMemory:

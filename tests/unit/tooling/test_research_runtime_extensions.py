@@ -5,7 +5,7 @@ from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from services.research.research_function_service import ResearchFunctionService
 from services.research.research_report_service import ResearchReportService
-from skills.research import PaperReadingSkill, ResearchEvaluationSkill, ReviewWritingSkill
+from services.research.capabilities import PaperReader, ResearchEvaluator, ReviewWriter
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 
@@ -28,9 +28,9 @@ def test_register_research_runtime_extensions_registers_functions_and_local_runt
                 JsonPaperKnowledgeStore(tmp_path / "paper_knowledge")
             )
         ),
-        paper_reading_skill=PaperReadingSkill(),
-        review_writing_skill=ReviewWritingSkill(),
-        evaluation_skill=ResearchEvaluationSkill(),
+        paper_reading_skill=PaperReader(),
+        review_writing_skill=ReviewWriter(),
+        evaluation_skill=ResearchEvaluator(),
     )
     graph_runtime = SimpleNamespace(
         tool_registry=ToolRegistry(),
@@ -64,9 +64,9 @@ def test_register_research_runtime_extensions_registers_code_execution_when_enab
                 JsonPaperKnowledgeStore(tmp_path / "paper_knowledge")
             )
         ),
-        paper_reading_skill=PaperReadingSkill(),
-        review_writing_skill=ReviewWritingSkill(),
-        evaluation_skill=ResearchEvaluationSkill(),
+        paper_reading_skill=PaperReader(),
+        review_writing_skill=ReviewWriter(),
+        evaluation_skill=ResearchEvaluator(),
     )
     graph_runtime = SimpleNamespace(
         tool_registry=ToolRegistry(),

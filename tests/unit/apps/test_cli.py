@@ -29,10 +29,6 @@ def test_cli_parser_supports_agent_and_management_commands() -> None:
     assert models_args.models_command == "set"
     assert models_args.llm_provider == "openai"
 
-    skills_args = parser.parse_args(["skills", "disable", "research_report"])
-    assert skills_args.command == "skills"
-    assert skills_args.skills_command == "disable"
-
     plugins_args = parser.parse_args(["plugins", "enable", "zotero_local_mcp"])
     assert plugins_args.command == "plugins"
     assert plugins_args.plugins_command == "enable"

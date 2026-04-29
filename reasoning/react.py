@@ -69,14 +69,12 @@ class ReActReasoningAgent:
         session_context: dict[str, Any] | None = None,
         task_context: dict[str, Any] | None = None,
         preference_context: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
         initial_retrieval_result: HybridRetrievalResult | None = None,
         initial_evidence_bundle: EvidenceBundle | None = None,
     ) -> QAResponse:
         tool_specs = self.tool_registry.filter_tools(
             enabled_only=True,
             names=available_tool_names,
-            skill_context=skill_context,
         )
         tool_names = [tool.name for tool in tool_specs]
         tool_desc = [
@@ -99,7 +97,6 @@ class ReActReasoningAgent:
                     session_context=session_context,
                     task_context=task_context,
                     preference_context=preference_context,
-                    skill_context=skill_context,
                     retrieval_result=initial_retrieval_result,
                     evidence_bundle=initial_evidence_bundle,
                 )
@@ -147,7 +144,6 @@ class ReActReasoningAgent:
                 session_context=session_context,
                 task_context=task_context,
                 preference_context=preference_context,
-                skill_context=skill_context,
             )
             return QAResponse(
                 answer=final.answer,
@@ -185,7 +181,6 @@ class ReActReasoningAgent:
                     session_context=session_context,
                     task_context=task_context,
                     preference_context=preference_context,
-                    skill_context=skill_context,
                 )
             except ReActReasoningAgentError:
                 decision = self._fallback_decide_next_step(
@@ -194,7 +189,6 @@ class ReActReasoningAgent:
                     session_context=session_context,
                     task_context=task_context,
                     preference_context=preference_context,
-                    skill_context=skill_context,
                     initial_retrieval_result=seeded_retrieval_result,
                     initial_evidence_bundle=seeded_evidence_bundle,
                 )
@@ -237,7 +231,6 @@ class ReActReasoningAgent:
                     session_context=session_context,
                     task_context=task_context,
                     preference_context=preference_context,
-                    skill_context=skill_context,
                     retrieval_result=seeded_retrieval_result,
                     evidence_bundle=seeded_evidence_bundle,
                 )
@@ -247,7 +240,6 @@ class ReActReasoningAgent:
                     tool_input=decision.tool_input,
                     session_context=session_context,
                     task_context=task_context,
-                    skill_context=skill_context,
                 )
 
             tool_result = await self.tool_executor.execute_tool_call(
@@ -315,7 +307,6 @@ class ReActReasoningAgent:
                 session_context=session_context,
                 task_context=task_context,
                 preference_context=preference_context,
-                skill_context=skill_context,
             )
             final_answer = final.answer
             final_confidence = final.confidence
@@ -354,7 +345,6 @@ class ReActReasoningAgent:
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
         preference_context: dict[str, Any] | None,
-        skill_context: dict[str, Any] | None,
         initial_retrieval_result: HybridRetrievalResult | None,
         initial_evidence_bundle: EvidenceBundle | None,
     ) -> ReActDecision:
@@ -372,7 +362,6 @@ class ReActReasoningAgent:
                         session_context=session_context,
                         task_context=task_context,
                         preference_context=preference_context,
-                        skill_context=skill_context,
                         retrieval_result=initial_retrieval_result,
                         evidence_bundle=initial_evidence_bundle or EvidenceBundle(),
                     ),
@@ -387,7 +376,6 @@ class ReActReasoningAgent:
                     tool_input={},
                     session_context=session_context,
                     task_context=task_context,
-                    skill_context=skill_context,
                 ),
                 confidence=0.4,
             )
@@ -405,7 +393,6 @@ class ReActReasoningAgent:
                     session_context=session_context,
                     task_context=task_context,
                     preference_context=preference_context,
-                    skill_context=skill_context,
                     retrieval_result=initial_retrieval_result,
                     evidence_bundle=initial_evidence_bundle or EvidenceBundle(),
                 ),
@@ -438,7 +425,6 @@ class ReActReasoningAgent:
         tool_input: dict[str, Any],
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
-        skill_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         normalized = dict(tool_input)
         normalized.setdefault("question", question)
@@ -451,8 +437,6 @@ class ReActReasoningAgent:
                 normalized["session_id"] = session_id
         if task_context and task_context.get("task_id") and not normalized.get("task_id"):
             normalized["task_id"] = task_context.get("task_id")
-        if skill_context and not normalized.get("skill_context"):
-            normalized["skill_context"] = skill_context
         return normalized
 
     def _normalize_answer_tool_input(
@@ -464,7 +448,6 @@ class ReActReasoningAgent:
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
         preference_context: dict[str, Any] | None,
-        skill_context: dict[str, Any] | None,
         retrieval_result: HybridRetrievalResult | None,
         evidence_bundle: EvidenceBundle,
     ) -> dict[str, Any]:
@@ -478,7 +461,6 @@ class ReActReasoningAgent:
         normalized.setdefault("session_context", session_context or {})
         normalized.setdefault("task_context", task_context or {})
         normalized.setdefault("preference_context", preference_context or {})
-        normalized.setdefault("skill_context", skill_context or {})
         return normalized
 
     async def _decide_next_step(
@@ -490,7 +472,6 @@ class ReActReasoningAgent:
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
         preference_context: dict[str, Any] | None,
-        skill_context: dict[str, Any] | None,
     ) -> ReActDecision:
         prompt = self._load_prompt(self.decision_prompt_path, "ReAct decision")
         try:
@@ -505,7 +486,6 @@ class ReActReasoningAgent:
                         "task_context": task_context or {},
                         "preference_context": preference_context or {},
                     },
-                    "skill_context": skill_context or {},
                 },
                 response_model=ReActDecision,
             )
@@ -532,7 +512,6 @@ class ReActReasoningAgent:
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
         preference_context: dict[str, Any] | None,
-        skill_context: dict[str, Any] | None,
     ) -> ReActFinalDraft:
         if not evidence_bundle.evidences:
             return ReActFinalDraft(answer="证据不足", confidence=0.0, warnings=["empty_evidence_bundle"])
@@ -551,7 +530,6 @@ class ReActReasoningAgent:
                         "task_context": task_context or {},
                         "preference_context": preference_context or {},
                     },
-                    "skill_context": skill_context or {},
                 },
                 response_model=ReActFinalDraft,
             )

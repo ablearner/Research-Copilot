@@ -903,7 +903,7 @@ class PaperOperationsMixin:
                         "ResearchWriterAgent",
                     ],
                     "primary_skills": [
-                        "PaperCurationSkill",
+                        "PaperCurator",
                     ],
                     "supervisor_agent_architecture": "supervisor_direct_execution",
                     "supervisor_decision_model": "supervisor_direct_execution",

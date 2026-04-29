@@ -4,13 +4,13 @@ from core.config import Settings
 from domain.schemas.research import PaperCandidate
 from mcp.client.registry import MCPClientRegistry
 from rag_runtime.runtime import RagRuntime
-from skills.research import (
-    CodeLinkingSkill,
-    PaperReadingSkill,
-    ResearchEvaluationSkill,
-    ReviewWritingSkill,
-    SurveyWritingSkill,
-    WritingPolishSkill,
+from services.research.capabilities import (
+    CodeLinker,
+    PaperReader,
+    ResearchEvaluator,
+    ReviewWriter,
+    SurveyWriter,
+    WritingPolisher,
 )
 from services.research.research_function_service import ResearchFunctionService
 from services.research.literature_research_service import LiteratureResearchService
@@ -167,13 +167,13 @@ def build_literature_research_service(
         getattr(reasoning_strategies, "llm_adapter", None)
         or getattr(plan_and_solve_reasoning_agent, "llm_adapter", None)
     )
-    writing_polish_skill = WritingPolishSkill(llm_adapter=llm_adapter)
-    review_writing_skill = ReviewWritingSkill(
-        survey_writer=SurveyWritingSkill(llm_adapter=llm_adapter),
+    writing_polish_skill = WritingPolisher(llm_adapter=llm_adapter)
+    review_writing_skill = ReviewWriter(
+        survey_writer=SurveyWriter(llm_adapter=llm_adapter),
         polish_skill=writing_polish_skill,
     )
-    paper_reading_skill = PaperReadingSkill(llm_adapter=llm_adapter)
-    evaluation_skill = ResearchEvaluationSkill()
+    paper_reading_skill = PaperReader(llm_adapter=llm_adapter)
+    evaluation_skill = ResearchEvaluator()
     paper_search_service = PaperSearchService(
         arxiv_tool=academic_search_dependencies.arxiv_tool,
         openalex_tool=academic_search_dependencies.openalex_tool,
@@ -182,7 +182,7 @@ def build_literature_research_service(
         zotero_tool=ZoteroSearchTool(graph_runtime=graph_runtime),
         external_tool_registry=external_tool_registry,
         survey_writer=review_writing_skill,
-        code_linking_skill=CodeLinkingSkill(enable_remote_lookup=False),
+        code_linking_skill=CodeLinker(enable_remote_lookup=False),
         llm_adapter=llm_adapter,
     )
     if getattr(settings, "storage_provider", "json") == "sqlite":

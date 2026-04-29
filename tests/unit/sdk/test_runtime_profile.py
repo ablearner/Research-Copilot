@@ -17,14 +17,8 @@ def test_runtime_profile_store_round_trip(tmp_path: Path) -> None:
     assert profile.models.llm_provider == "openai"
     assert profile.models.llm_model == "gpt-test"
 
-    profile = store.set_skill_enabled("research_report", False)
-    assert profile.skills["research_report"].enabled is False
-
     profile = store.set_plugin_enabled("zotero_local_mcp", True)
     assert profile.plugins["zotero_local_mcp"].enabled is True
-
-    profile = store.set_default_skill("literature_review")
-    assert profile.default_skill == "literature_review"
 
 
 def test_sdk_applies_profile_to_runtime_and_catalogs(tmp_path: Path) -> None:
@@ -33,19 +27,14 @@ def test_sdk_applies_profile_to_runtime_and_catalogs(tmp_path: Path) -> None:
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
     sdk.update_model_profile(llm_provider="openai", llm_model="gpt-5.4-mini")
-    sdk.set_skill_enabled("research_report", False)
     sdk.set_plugin_enabled("zotero_local_mcp", True)
 
     runtime = sdk.describe_runtime()
     assert runtime["llm"]["provider"] == "openai"
     assert runtime["llm"]["model"] == "gpt-5.4-mini"
-
-    skills = {item["name"]: item for item in sdk.list_skills()}
-    assert skills["research_report"]["enabled"] is False
 
     plugins = {item["name"]: item for item in sdk.list_plugins()}
     assert plugins["zotero_local_mcp"]["enabled"] is True
@@ -57,7 +46,6 @@ def test_sdk_registers_zotero_local_mcp_server_when_plugin_enabled(tmp_path: Pat
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
     sdk.set_plugin_enabled("zotero_local_mcp", True)
@@ -74,7 +62,6 @@ def test_sdk_clear_conversation_memory_invalidates_cached_state(tmp_path: Path) 
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
     conversation = sdk.create_conversation(topic="GraphRAG")
@@ -101,7 +88,6 @@ async def test_sdk_run_agent_message_does_not_store_raw_user_message_as_topic(tm
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
     conversation = sdk.create_conversation(topic="GraphRAG")
@@ -151,7 +137,6 @@ async def test_sdk_import_papers_for_conversation_records_import_turn_and_invali
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
     conversation = sdk.create_conversation(topic="GraphRAG")
@@ -221,7 +206,6 @@ def test_sdk_profile_management_methods_round_trip(tmp_path: Path) -> None:
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
-        qdrant_path=str(tmp_path / "qdrant"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
 

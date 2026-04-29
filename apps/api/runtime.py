@@ -13,11 +13,10 @@ from adapters.graph_store.neo4j_adapter import Neo4jGraphStore
 from adapters.llm import FallbackLLMAdapter, LangChainLLMAdapter, OpenAIRelayAdapter, build_provider_binding
 from adapters.llm.dashscope_adapter import DashScopeLLMAdapter
 from adapters.vector_store.milvus_adapter import MilvusVectorStore
-from adapters.vector_store.pgvector_adapter import PgVectorStore
 from core.config import Settings
 from core.prompt_resolver import PromptResolver
 from rag_runtime.checkpoint import build_checkpointer
-from rag_runtime.memory import GraphSessionMemory, MySQLSessionMemoryStore
+from rag_runtime.memory import GraphSessionMemory, SQLiteSessionMemoryStore
 from rag_runtime.runtime import GraphRuntime, RagRuntime
 from reasoning import CoTReasoningAgent, PlanAndSolveReasoningAgent, ReActReasoningAgent, ReasoningStrategySet
 from retrieval.graph_retriever import GraphRetriever
@@ -29,9 +28,6 @@ from retrieval.sparse_retriever import SparseRetriever
 from retrieval.vector_retriever import VectorRetriever
 from rag_runtime.services.embedding_index_service import EmbeddingIndexService
 from rag_runtime.services.graph_index_service import GraphIndexService
-from skills.loader import SkillLoader
-from skills.research import build_core_research_skill_profiles
-from skills.registry import SkillRegistry
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import (
@@ -77,7 +73,6 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
 
     session_memory = _build_session_memory(settings)
     prompt_resolver = _build_prompt_resolver(settings)
-    skill_registry = _build_skill_registry(settings)
     tool_registry = ToolRegistry()
     tool_executor = ToolExecutor(tool_registry)
     reasoning_strategies = ReasoningStrategySet(
@@ -113,7 +108,6 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
         session_memory=session_memory,
         llm_adapter=llm_adapter,
         prompt_resolver=prompt_resolver,
-        skill_registry=skill_registry,
         tool_registry=tool_registry,
         tool_executor=tool_executor,
         reasoning_strategies=reasoning_strategies,
@@ -182,15 +176,7 @@ def _build_reranker(settings: Settings):
 
 
 def _build_prompt_resolver(settings: Settings) -> PromptResolver:
-    return PromptResolver(mapping_path=settings.resolve_path("prompts/skill_prompt_mapping.yaml"))
-
-
-def _build_skill_registry(settings: Settings) -> SkillRegistry:
-    registry = SkillRegistry()
-    loader = SkillLoader(specs_dir=settings.resolve_path("skills/specs"))
-    registry.register_many(loader.load_from_directory(), replace=True)
-    registry.register_many(build_core_research_skill_profiles(), replace=True)
-    return registry
+    return PromptResolver()
 
 
 def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
@@ -253,21 +239,15 @@ def _build_session_memory(settings: Settings) -> GraphSessionMemory:
     provider = settings.session_memory_provider.lower()
     if provider in {"memory", "local", "inmemory"}:
         return GraphSessionMemory()
-    if provider not in {"auto", "mysql"}:
-        raise RuntimeError(f"Unsupported SESSION_MEMORY_PROVIDER: {settings.session_memory_provider}")
-    if all([settings.mysql_host, settings.mysql_user, settings.mysql_database]):
+    if provider == "sqlite":
         return GraphSessionMemory(
-            MySQLSessionMemoryStore(
-                host=settings.mysql_host or "localhost",
-                port=settings.mysql_port,
-                user=settings.mysql_user or "root",
-                password=settings.mysql_password or "",
-                database=settings.mysql_database or "ecs",
-                charset=settings.mysql_charset,
-                table_name=settings.mysql_session_memory_table,
-            )
+            SQLiteSessionMemoryStore(db_path=settings.research_sqlite_db_path)
         )
-    return GraphSessionMemory()
+    if provider == "auto":
+        return GraphSessionMemory(
+            SQLiteSessionMemoryStore(db_path=settings.research_sqlite_db_path)
+        )
+    raise RuntimeError(f"Unsupported SESSION_MEMORY_PROVIDER: {settings.session_memory_provider}")
 
 
 async def initialize_rag_runtime(graph_runtime: RagRuntime) -> None:
@@ -463,14 +443,6 @@ def _build_vector_store(settings: Settings, embedding_adapter):
             dimension=settings.milvus_dimension,
             metric_type=settings.milvus_metric_type,
             index_type=settings.milvus_index_type,
-            embedding_adapter=embedding_adapter,
-        )
-    if provider == "pgvector":
-        if not settings.postgres_dsn:
-            raise RuntimeError("POSTGRES_DSN is required when VECTOR_STORE_PROVIDER=pgvector")
-        return PgVectorStore(
-            dsn=settings.postgres_dsn,
-            table_name=settings.pgvector_table,
             embedding_adapter=embedding_adapter,
         )
     if provider in {"memory", "local"} and settings.runtime_backend.lower() != "business":

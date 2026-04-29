@@ -1,9 +1,9 @@
-from skills.research import PaperRankingSkill
+from services.research.capabilities import PaperRanker
 from domain.schemas.research import PaperCandidate
 
 
 def test_paper_ranker_filters_off_topic_openalex_noise_for_chinese_llm_topic() -> None:
-    ranker = PaperRankingSkill()
+    ranker = PaperRanker()
     relevant = PaperCandidate(
         paper_id="arxiv:2601.00001",
         title="Efficient Reasoning for Large Language Models",

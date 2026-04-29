@@ -55,17 +55,13 @@ class ToolRegistry:
         tags: list[str] | None = None,
         enabled_only: bool = True,
         names: list[str] | None = None,
-        skill_context: dict[str, Any] | Any | None = None,
     ) -> list[ToolSpec]:
         normalized_tags = set(tags or [])
         normalized_names = set(names or [])
-        preferred_tools = set(self._preferred_tools_from_skill_context(skill_context))
         tools = self.list_tools(include_disabled=not enabled_only)
         filtered: list[ToolSpec] = []
         for tool_spec in tools:
             if normalized_names and tool_spec.name not in normalized_names:
-                continue
-            if preferred_tools and tool_spec.name not in preferred_tools:
                 continue
             if normalized_tags and not (normalized_tags & set(tool_spec.tags)):
                 continue
@@ -77,13 +73,11 @@ class ToolRegistry:
         tags: list[str] | None = None,
         enabled_only: bool = True,
         names: list[str] | None = None,
-        skill_context: dict[str, Any] | Any | None = None,
     ) -> list[dict]:
         tool_specs = self.filter_tools(
             tags=tags,
             enabled_only=enabled_only,
             names=names,
-            skill_context=skill_context,
         )
         return tool_specs_to_openai_functions(tool_specs)
 
@@ -92,7 +86,6 @@ class ToolRegistry:
         tags: list[str] | None = None,
         enabled_only: bool = True,
         names: list[str] | None = None,
-        skill_context: dict[str, Any] | Any | None = None,
         source: str = "local",
         server_name: str | None = None,
     ):
@@ -100,7 +93,6 @@ class ToolRegistry:
             tags=tags,
             enabled_only=enabled_only,
             names=names,
-            skill_context=skill_context,
         )
         return map_tool_specs_to_mcp_tools(
             tool_specs,
@@ -108,14 +100,3 @@ class ToolRegistry:
             server_name=server_name,
         )
 
-    def _preferred_tools_from_skill_context(
-        self,
-        skill_context: dict[str, Any] | Any | None,
-    ) -> list[str]:
-        if skill_context is None:
-            return []
-        if isinstance(skill_context, dict):
-            preferred = skill_context.get("preferred_tools")
-            return preferred if isinstance(preferred, list) else []
-        preferred = getattr(skill_context, "preferred_tools", None)
-        return preferred if isinstance(preferred, list) else []

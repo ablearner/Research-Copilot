@@ -18,7 +18,7 @@ class CodeRepositoryCandidate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CodeLinkingSkill:
+class CodeLinker:
     """Resolve likely code repositories for a paper using metadata or optional GitHub search."""
 
     def __init__(

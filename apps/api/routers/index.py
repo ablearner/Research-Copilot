@@ -25,7 +25,6 @@ class IndexDocumentRequest(BaseModel):
     charts: list[ChartSchema] = Field(default_factory=list)
     include_graph: bool = True
     include_embeddings: bool = True
-    skill_name: str | None = None
 
 
 class IndexDocumentApiResponse(BaseModel):
@@ -44,10 +43,6 @@ async def handle_index_document_request(
 ) -> IndexDocumentApiResponse:
     try:
         trace_id = f"index_{uuid4().hex}"
-        skill_context = graph_runtime.resolve_skill_context(
-            task_type="index",
-            preferred_skill_name=request.skill_name,
-        ) if request.skill_name else None
         state = await graph_runtime.invoke(
             {
                 "request_id": trace_id,
@@ -74,12 +69,10 @@ async def handle_index_document_request(
                     "api_route": route_path,
                     "trace_id": trace_id,
                     "quota_context": quota_context,
-                    **({"skill_name": request.skill_name} if request.skill_name else {}),
                 },
                 "retrieval_mode": "hybrid",
                 "top_k": 10,
                 "filters": {},
-                "selected_skill": skill_context,
             }
         )
         result = DocumentIndexResult(

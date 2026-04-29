@@ -1,8 +1,8 @@
-from skills.research import TopicPlanningSkill
+from services.research.capabilities import TopicPlanner
 
 
 def test_topic_planner_agent_simplifies_natural_language_research_request() -> None:
-    planner = TopicPlanningSkill()
+    planner = TopicPlanner()
 
     plan = planner.plan(
         topic="最近 6 个月无人机路径规划方向有哪些值得关注的论文？",
@@ -17,7 +17,7 @@ def test_topic_planner_agent_simplifies_natural_language_research_request() -> N
 
 
 def test_topic_planner_agent_expands_chinese_llm_topic_to_english_queries() -> None:
-    planner = TopicPlanningSkill()
+    planner = TopicPlanner()
 
     plan = planner.plan(
         topic="最近 6 个月大模型方向有哪些值得关注的论文？",
@@ -33,7 +33,7 @@ def test_topic_planner_agent_expands_chinese_llm_topic_to_english_queries() -> N
 
 
 def test_topic_planner_agent_uses_english_queries_for_english_literature_sources() -> None:
-    planner = TopicPlanningSkill()
+    planner = TopicPlanner()
     plan = planner.plan(
         topic="最近 6 个月大模型方向有哪些值得关注的论文？",
         days_back=180,

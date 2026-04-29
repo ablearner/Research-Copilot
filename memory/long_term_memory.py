@@ -7,7 +7,6 @@ import math
 from pathlib import Path
 import re
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
 
 from domain.schemas.research_memory import (
     # NOTE: memory.security imported lazily below to avoid circular imports
@@ -138,128 +137,167 @@ class JsonLongTermMemoryStore:
         return LongTermMemorySearchResult(query=query, records=ranked[: query.top_k])
 
 
-class QdrantLongTermMemoryStore:
-    def __init__(
-        self,
-        *,
-        path: str,
-        collection_name: str,
-        vector_size: int = 128,
-        max_records: int = 5000,
-    ) -> None:
-        try:
-            from qdrant_client import QdrantClient
-            from qdrant_client.http import models as rest
-        except ImportError as exc:  # pragma: no cover - import guard
-            raise RuntimeError("qdrant-client is required for QdrantLongTermMemoryStore") from exc
+class SQLiteLongTermMemoryStore:
+    """SQLite + FTS5 backed long-term memory store.
 
-        self._rest = rest
-        self.client = QdrantClient(path=path)
-        self.collection_name = collection_name
-        self.vector_size = vector_size
+    Shares the same kepler.db used by research data and session memory.
+    """
+
+    def __init__(self, db_path: str | Path, *, max_records: int = 5000) -> None:
+        import sqlite3
+
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_records = max(1, max_records)
-        collections = {item.name for item in self.client.get_collections().collections}
-        if collection_name not in collections:
-            self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config=rest.VectorParams(size=vector_size, distance=rest.Distance.COSINE),
-            )
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS long_term_memory (
+                memory_id TEXT PRIMARY KEY,
+                memory_type TEXT NOT NULL DEFAULT 'topic',
+                topic TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL,
+                keywords TEXT NOT NULL DEFAULT '',
+                related_paper_ids TEXT NOT NULL DEFAULT '',
+                source_session_id TEXT,
+                context_snapshot TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS long_term_memory_fts USING fts5(
+                topic, content, keywords,
+                content=long_term_memory,
+                content_rowid=rowid,
+                tokenize='unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS ltm_ai AFTER INSERT ON long_term_memory BEGIN
+                INSERT INTO long_term_memory_fts(rowid, topic, content, keywords)
+                VALUES (new.rowid, new.topic, new.content, new.keywords);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS ltm_ad AFTER DELETE ON long_term_memory BEGIN
+                INSERT INTO long_term_memory_fts(long_term_memory_fts, rowid, topic, content, keywords)
+                VALUES ('delete', old.rowid, old.topic, old.content, old.keywords);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS ltm_au AFTER UPDATE ON long_term_memory BEGIN
+                INSERT INTO long_term_memory_fts(long_term_memory_fts, rowid, topic, content, keywords)
+                VALUES ('delete', old.rowid, old.topic, old.content, old.keywords);
+                INSERT INTO long_term_memory_fts(rowid, topic, content, keywords)
+                VALUES (new.rowid, new.topic, new.content, new.keywords);
+            END;
+            """
+        )
 
     def upsert(self, record: LongTermMemoryRecord) -> LongTermMemoryRecord:
-        vector = record.vector or deterministic_memory_vector(record, size=self.vector_size)
-        if len(vector) != self.vector_size:
-            raise ValueError(
-                f"QdrantLongTermMemoryStore vector size mismatch: expected {self.vector_size}, got {len(vector)}"
+        import json
+
+        updated = record.model_copy(update={"updated_at": utc_now()})
+        keywords_str = " ".join(updated.keywords)
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO long_term_memory "
+                "(memory_id, memory_type, topic, content, keywords, related_paper_ids, "
+                "source_session_id, context_snapshot, created_at, updated_at, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    updated.memory_id,
+                    updated.memory_type,
+                    updated.topic,
+                    updated.content,
+                    keywords_str,
+                    " ".join(updated.related_paper_ids),
+                    updated.source_session_id,
+                    json.dumps(updated.context_snapshot, ensure_ascii=False),
+                    updated.created_at.isoformat(),
+                    updated.updated_at.isoformat(),
+                    json.dumps(updated.metadata, ensure_ascii=False),
+                ),
             )
-        updated = record.model_copy(update={"vector": vector, "updated_at": utc_now()})
-        point = self._rest.PointStruct(
-            id=self._point_id(updated.memory_id),
-            vector=vector,
-            payload=updated.model_dump(mode="json"),
-        )
-        self.client.upsert(collection_name=self.collection_name, points=[point])
         self._enforce_record_limit()
         return updated
 
     def search(self, query: LongTermMemoryQuery) -> LongTermMemorySearchResult:
-        query_vector = query.vector or deterministic_memory_vector(query.query, size=self.vector_size)
-        if query_vector:
-            points = self._query_points(
-                query_vector,
-                limit=query.top_k,
-            )
-            records = [
-                LongTermMemoryRecord.model_validate(point.payload).model_copy(
-                    update={"score": float(point.score or 0)}
-                )
-                for point in points
-                if point.payload
-            ]
-            return LongTermMemorySearchResult(query=query, records=records)
+        import json
 
-        scrolled, _ = self.client.scroll(
-            collection_name=self.collection_name,
-            limit=max(query.top_k * 5, 20),
-            with_payload=True,
-            with_vectors=False,
+        search_terms = " ".join(query.keywords) + " " + query.query if query.keywords else query.query
+        fts_query = " OR ".join(
+            f'"{term}"' for term in _tokenize(search_terms) if term
         )
-        query_terms = _tokenize(query.query)
-        ranked: list[LongTermMemoryRecord] = []
-        for point in scrolled:
-            if not point.payload:
-                continue
-            record = LongTermMemoryRecord.model_validate(point.payload)
-            score = _lexical_score(record, query_terms, query.keywords, query.topic)
-            if score < query.min_score:
-                continue
-            ranked.append(record.model_copy(update={"score": score}))
-        ranked.sort(key=lambda item: item.score or 0, reverse=True)
-        return LongTermMemorySearchResult(query=query, records=ranked[: query.top_k])
+        records: list[LongTermMemoryRecord] = []
+        if fts_query:
+            rows = self._conn.execute(
+                "SELECT m.*, rank FROM long_term_memory m "
+                "JOIN long_term_memory_fts fts ON m.rowid = fts.rowid "
+                "WHERE long_term_memory_fts MATCH ? "
+                "ORDER BY rank "
+                "LIMIT ?",
+                (fts_query, query.top_k * 3),
+            ).fetchall()
+            for row in rows:
+                record = self._row_to_record(row)
+                score = _lexical_score(record, _tokenize(query.query), query.keywords, query.topic)
+                if score < query.min_score:
+                    continue
+                records.append(record.model_copy(update={"score": score}))
+
+        if len(records) < query.top_k:
+            all_rows = self._conn.execute(
+                "SELECT * FROM long_term_memory ORDER BY updated_at DESC LIMIT ?",
+                (query.top_k * 5,),
+            ).fetchall()
+            seen = {r.memory_id for r in records}
+            for row in all_rows:
+                record = self._row_to_record(row)
+                if record.memory_id in seen:
+                    continue
+                score = _lexical_score(record, _tokenize(query.query), query.keywords, query.topic)
+                if score < query.min_score:
+                    continue
+                records.append(record.model_copy(update={"score": score}))
+
+        records.sort(key=lambda item: (item.score or 0, item.updated_at), reverse=True)
+        return LongTermMemorySearchResult(query=query, records=records[: query.top_k])
 
     def _enforce_record_limit(self) -> None:
-        scrolled, _ = self.client.scroll(
-            collection_name=self.collection_name,
-            limit=self.max_records + 100,
-            with_payload=True,
-            with_vectors=False,
-        )
-        overflow = len(scrolled) - self.max_records
+        count = self._conn.execute("SELECT COUNT(*) FROM long_term_memory").fetchone()[0]
+        overflow = count - self.max_records
         if overflow <= 0:
             return
-        sortable: list[tuple[datetime, str]] = []
-        for point in scrolled:
-            if not point.payload:
-                continue
-            try:
-                record = LongTermMemoryRecord.model_validate(point.payload)
-            except Exception:
-                continue
-            sortable.append((record.updated_at, str(point.id)))
-        sortable.sort(key=lambda item: item[0])
-        delete_ids = [point_id for _, point_id in sortable[:overflow]]
-        if delete_ids:
-            self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=self._rest.PointIdsList(points=delete_ids),
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM long_term_memory WHERE memory_id IN ("
+                "  SELECT memory_id FROM long_term_memory ORDER BY updated_at ASC LIMIT ?"
+                ")",
+                (overflow,),
             )
 
-    def _point_id(self, memory_id: str) -> str:
-        return str(uuid5(NAMESPACE_URL, f"{self.collection_name}:{memory_id}"))
+    def _row_to_record(self, row) -> LongTermMemoryRecord:
+        import json
 
-    def _query_points(self, query_vector: list[float], *, limit: int):
-        if hasattr(self.client, "search"):
-            return self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=limit,
-            )
-        response = self.client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            limit=limit,
-            with_payload=True,
+        cols = [desc[0] for desc in self._conn.execute("SELECT * FROM long_term_memory LIMIT 0").description]
+        data = dict(zip(cols, row[: len(cols)]))
+        return LongTermMemoryRecord(
+            memory_id=data["memory_id"],
+            memory_type=data["memory_type"],
+            topic=data["topic"],
+            content=data["content"],
+            keywords=[k for k in data["keywords"].split() if k],
+            related_paper_ids=[p for p in data["related_paper_ids"].split() if p],
+            source_session_id=data["source_session_id"],
+            context_snapshot=json.loads(data["context_snapshot"] or "{}"),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            metadata=json.loads(data["metadata_json"] or "{}"),
         )
-        return list(getattr(response, "points", []) or [])
 
 
 class LongTermMemory:

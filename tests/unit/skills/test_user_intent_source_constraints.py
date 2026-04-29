@@ -1,8 +1,8 @@
 """Tests for source constraint extraction in user intent resolution."""
 import pytest
 
-from skills.research.user_intent import (
-    ResearchUserIntentResolverSkill,
+from services.research.capabilities.user_intent import (
+    ResearchIntentResolver,
     _extract_source_constraints,
 )
 
@@ -77,7 +77,7 @@ class TestExtractSourceConstraints:
 
 class TestIntentResolverSourceConstraints:
     def test_literature_search_intent_includes_source_constraints(self) -> None:
-        resolver = ResearchUserIntentResolverSkill(llm_adapter=None)
+        resolver = ResearchIntentResolver(llm_adapter=None)
         result = resolver.resolve(
             message="帮我在arxiv上找LLM agent相关的论文",
             has_task=False,
@@ -92,7 +92,7 @@ class TestIntentResolverSourceConstraints:
         assert "LLM agent" in result.extracted_topic
 
     def test_no_source_constraint_when_no_source_mentioned(self) -> None:
-        resolver = ResearchUserIntentResolverSkill(llm_adapter=None)
+        resolver = ResearchIntentResolver(llm_adapter=None)
         result = resolver.resolve(
             message="帮我找一下最新的VLN论文",
             has_task=False,

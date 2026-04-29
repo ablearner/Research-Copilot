@@ -8,10 +8,10 @@ if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
 
 
-class PaperCurationSkill:
+class PaperCurator:
     """Turn raw paper hits into a ranked, ingest-ready candidate set."""
 
-    name = "PaperCurationSkill"
+    name = "PaperCurator"
 
     def __init__(self, paper_search_service: PaperSearchService) -> None:
         self.paper_search_service = paper_search_service
@@ -57,4 +57,4 @@ class PaperCurationSkill:
 
 
 # Compatibility alias for older imports/tests that still use the previous name.
-PaperCuratorAgent = PaperCurationSkill
+PaperCuratorAgent = PaperCurator

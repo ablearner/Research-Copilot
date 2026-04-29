@@ -55,7 +55,6 @@ class CoTReasoningAgent:
         task_context: dict[str, Any] | None = None,
         preference_context: dict[str, Any] | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
     ) -> QAResponse:
         answer_metadata = {
             **(metadata or {}),
@@ -109,7 +108,6 @@ class CoTReasoningAgent:
             "task_context": task_context or {},
             "preference_context": preference_context or {},
             "memory_hints": memory_hints or {},
-            "skill_context": skill_context or {},
         }
         try:
             messages = await self.prompt.ainvoke(

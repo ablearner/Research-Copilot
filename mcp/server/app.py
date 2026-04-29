@@ -76,24 +76,16 @@ class MCPServerApp:
         prompt_mapping = graph_runtime.prompt_resolver.load_mapping()
         resource_adapter.set_config_info("prompt_mapping", prompt_mapping)
 
-        skill_payload = [
-            skill.model_dump(mode="json", exclude_none=True)
-            for skill in graph_runtime.skill_registry.list_skills(include_disabled=True)
-        ]
-        resource_adapter.set_config_info("skill_specs", {"skills": skill_payload})
-
     def list_tools(
         self,
         tags: list[str] | None = None,
         names: list[str] | None = None,
         include_disabled: bool = False,
-        skill_context: dict[str, Any] | None = None,
     ) -> list[MCPToolSpec]:
         return self.tool_adapter.list_tools(
             tags=tags,
             names=names,
             include_disabled=include_disabled,
-            skill_context=skill_context,
         )
 
     async def call_tool(
@@ -104,21 +96,19 @@ class MCPServerApp:
     ) -> MCPToolCallResult:
         return await self.tool_adapter.call_tool(tool_name=tool_name, arguments=arguments, call_id=call_id)
 
-    def list_prompts(self, skill_name: str | None = None) -> list[MCPPromptSpec]:
-        return self.prompt_adapter.list_prompts(skill_name=skill_name)
+    def list_prompts(self) -> list[MCPPromptSpec]:
+        return self.prompt_adapter.list_prompts()
 
     def get_prompt(
         self,
         *,
         prompt_name: str | None = None,
         prompt_key: str | None = None,
-        skill_name: str | None = None,
         prompt_path: str | None = None,
     ) -> MCPPromptContent:
         return self.prompt_adapter.get_prompt(
             prompt_name=prompt_name,
             prompt_key=prompt_key,
-            skill_name=skill_name,
             prompt_path=prompt_path,
         )
 

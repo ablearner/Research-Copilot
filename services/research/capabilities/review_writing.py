@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from domain.schemas.research import PaperCandidate, ResearchReport
-from skills.research.survey_writing import SurveyWritingSkill
-from skills.research.writing_polish import WritingPolishSkill
+from services.research.capabilities.survey_writing import SurveyWriter
+from services.research.capabilities.writing_polish import WritingPolisher
 
 
-class ReviewWritingSkill:
+class ReviewWriter:
     """Wrapper around survey writing with an optional polishing stage.
     
     Supports both sync and async generation. When LLM adapters are configured
@@ -15,11 +15,11 @@ class ReviewWritingSkill:
     def __init__(
         self,
         *,
-        survey_writer: SurveyWritingSkill | None = None,
-        polish_skill: WritingPolishSkill | None = None,
+        survey_writer: SurveyWriter | None = None,
+        polish_skill: WritingPolisher | None = None,
     ) -> None:
-        self.survey_writer = survey_writer or SurveyWritingSkill()
-        self.polish_skill = polish_skill or WritingPolishSkill()
+        self.survey_writer = survey_writer or SurveyWriter()
+        self.polish_skill = polish_skill or WritingPolisher()
 
     def generate(
         self,
@@ -55,7 +55,7 @@ class ReviewWritingSkill:
                 "markdown": polished_markdown,
                 "metadata": {
                     **report.metadata,
-                    "writer": "ReviewWritingSkill",
+                    "writer": "ReviewWriter",
                     "target_journal": target_journal,
                 },
             }
@@ -95,7 +95,7 @@ class ReviewWritingSkill:
                 "markdown": polished_markdown,
                 "metadata": {
                     **report.metadata,
-                    "writer": "ReviewWritingSkill+LLM",
+                    "writer": "ReviewWriter+LLM",
                     "target_journal": target_journal,
                 },
             }

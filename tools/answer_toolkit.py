@@ -102,7 +102,6 @@ class AnswerInput(BaseModel):
     preference_context: dict[str, Any] = Field(default_factory=dict)
     retrieval_cache_summary: str | None = None
     memory_hints: dict[str, Any] = Field(default_factory=dict)
-    skill_context: dict[str, Any] = Field(default_factory=dict)
 
 
 def looks_insufficient(answer: str) -> bool:
@@ -477,12 +476,8 @@ class AnswerAgent:
         preference_context: dict[str, Any] | None = None,
         retrieval_cache_summary: str | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
     ) -> QAResponse:
-        skill_style = skill_context.get("output_style") if isinstance(skill_context, dict) else {}
-        if not isinstance(skill_style, dict):
-            skill_style = {}
-        resolved_output_style = {**skill_style, **(preference_context or {})}
+        resolved_output_style = dict(preference_context or {})
         reasoning_style = normalize_reasoning_style(
             resolved_output_style.get("reasoning_style") or (metadata or {}).get("reasoning_style")
         )
@@ -493,7 +488,6 @@ class AnswerAgent:
             "preference_context": preference_context or {},
             "retrieval_cache_summary": retrieval_cache_summary,
             "memory_hints": memory_hints or {},
-            "skill_context": skill_context or {},
             "output_style": resolved_output_style,
         }
         cot_strategy = self.reasoning_strategies.answer_synthesis or self.cot_reasoning_agent
@@ -526,7 +520,6 @@ class AnswerAgent:
                 task_context=task_context,
                 preference_context=preference_context,
                 memory_hints=memory_hints,
-                skill_context=skill_context,
             )
 
         try:
@@ -540,7 +533,6 @@ class AnswerAgent:
                 preference_context=preference_context,
                 retrieval_cache_summary=retrieval_cache_summary,
                 memory_hints=memory_hints,
-                skill_context=skill_context,
             )
             return normalize_answer_response(
                 response=response,
@@ -576,7 +568,6 @@ class AnswerAgent:
         preference_context: dict[str, Any] | None = None,
         retrieval_cache_summary: str | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
     ) -> QAResponse:
         return await self.answer(
             question=question,
@@ -588,7 +579,6 @@ class AnswerAgent:
             preference_context=preference_context,
             retrieval_cache_summary=retrieval_cache_summary,
             memory_hints=memory_hints,
-            skill_context=skill_context,
         )
 
 

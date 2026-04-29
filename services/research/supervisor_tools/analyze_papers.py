@@ -125,14 +125,6 @@ class AnalyzePapersTool(_WorkspacePersistenceMixin, _PlannerMessageTool):
             session_id=getattr(execution_context, "session_id", None),
             task_id=context.task.task_id if context.task is not None else None,
             memory_hints=getattr(execution_context, "memory_hints", None) or {},
-            skill_context=(
-                context.graph_runtime.resolve_skill_context(
-                    task_type="analyze_papers",
-                    preferred_skill_name=context.request.skill_name,
-                )
-                if hasattr(context.graph_runtime, "resolve_skill_context")
-                else None
-            ),
         )
         retrieval_hits = [
             self._attach_paper_id_to_hit(hit=hit, papers=papers)
@@ -152,14 +144,6 @@ class AnalyzePapersTool(_WorkspacePersistenceMixin, _PlannerMessageTool):
                 session_id=getattr(execution_context, "session_id", None),
                 task_id=context.task.task_id if context.task is not None else None,
                 memory_hints=getattr(execution_context, "memory_hints", None) or {},
-                skill_context=(
-                    context.graph_runtime.resolve_skill_context(
-                        task_type="analyze_papers",
-                        preferred_skill_name=context.request.skill_name,
-                    )
-                    if hasattr(context.graph_runtime, "resolve_skill_context")
-                    else None
-                ),
             )
             summary_hits = [
                 self._attach_paper_id_to_hit(hit=hit, papers=papers)

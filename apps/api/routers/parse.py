@@ -20,7 +20,6 @@ LEGACY_PARSE_ROUTE = "/parse/documents"
 class ParseDocumentRequest(BaseModel):
     file_path: str
     document_id: str | None = None
-    skill_name: str | None = None
 
 
 async def handle_parse_document_request(
@@ -34,10 +33,6 @@ async def handle_parse_document_request(
 ) -> ParseDocumentResponse:
     try:
         trace_id = f"parse_{uuid4().hex}"
-        skill_context = graph_runtime.resolve_skill_context(
-            task_type="parse",
-            preferred_skill_name=request.skill_name,
-        ) if request.skill_name else None
         state = await graph_runtime.invoke(
             {
                 "request_id": trace_id,
@@ -61,12 +56,10 @@ async def handle_parse_document_request(
                     "api_route": route_path,
                     "trace_id": trace_id,
                     "quota_context": quota_context,
-                    **({"skill_name": request.skill_name} if request.skill_name else {}),
                 },
                 "retrieval_mode": "hybrid",
                 "top_k": 10,
                 "filters": {},
-                "selected_skill": skill_context,
             }
         )
         parsed_document = state.get("parsed_document")

@@ -10,7 +10,7 @@ from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
 from reasoning.strategies import ReasoningStrategySet
 from retrieval.evidence_builder import build_evidence_bundle
-from skills.research import PaperAnalysisSkill
+from services.research.capabilities import PaperAnalyzer
 
 if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
@@ -31,12 +31,12 @@ class ResearchWriterAgent:
         *,
         llm_adapter: Any | None = None,
         reasoning_strategies: ReasoningStrategySet | None = None,
-        paper_analysis_skill: PaperAnalysisSkill | None = None,
+        paper_analysis_skill: PaperAnalyzer | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.reasoning_strategies = reasoning_strategies or ReasoningStrategySet()
         self.llm_adapter = llm_adapter or self.reasoning_strategies.llm_adapter
-        self.paper_analysis_skill = paper_analysis_skill or PaperAnalysisSkill(llm_adapter=self.llm_adapter)
+        self.paper_analysis_skill = paper_analysis_skill or PaperAnalyzer(llm_adapter=self.llm_adapter)
 
     def synthesize(self, state: Any) -> ResearchReport:
         paper_search_service = self._require_search_service()
@@ -322,11 +322,6 @@ class ResearchWriterAgent:
             **preference_context,
         }
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
-        skill_context = self._enhance_skill_context(
-            skill_context=state.skill_context,
-            min_length=getattr(state.request, "min_length", 400),
-            return_citations=getattr(state.request, "return_citations", True),
-        )
         selected_paper_analysis = await self._analyze_selected_papers(state)
         runtime_reasoning = getattr(graph_runtime, "reasoning_strategies", None)
         react_reasoning_agent = (
@@ -342,7 +337,6 @@ class ResearchWriterAgent:
                 session_context=session_context,
                 task_context=task_context,
                 preference_context=preference_context,
-                skill_context=skill_context,
                 initial_retrieval_result=retrieval_result,
                 initial_evidence_bundle=evidence_bundle,
             )
@@ -359,7 +353,6 @@ class ResearchWriterAgent:
                 task_context=task_context,
                 preference_context=preference_context,
                 memory_hints=memory_hints,
-                skill_context=skill_context,
             )
         citations = self._build_citations(state=state, retrieval_result=retrieval_result)
         extended_analysis = await self._build_extended_analysis_async(
@@ -456,27 +449,6 @@ class ResearchWriterAgent:
             task_topic=getattr(state.task, "topic", ""),
             report_highlights=list(getattr(getattr(state, "report", None), "highlights", [])[:4]),
         )
-
-    def _enhance_skill_context(
-        self,
-        *,
-        skill_context: dict[str, Any] | None,
-        min_length: int,
-        return_citations: bool,
-    ) -> dict[str, Any]:
-        resolved = dict(skill_context or {})
-        output_style = dict(resolved.get("output_style") or {})
-        output_style.update(
-            {
-                "detail_level": "direct_answer",
-                "min_length": min_length,
-                "response_format": "direct_answer_only",
-                "include_citations": return_citations,
-                "section_outline": ["direct_answer_only"],
-            }
-        )
-        resolved["output_style"] = output_style
-        return resolved
 
     def _preferred_answer_language(self, question: str) -> str:
         return _preferred_answer_language_from_question(question)

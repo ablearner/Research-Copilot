@@ -14,7 +14,7 @@ from domain.schemas.research import (
     ResearchReport,
     ResearchTopicPlan,
 )
-from skills.research import CodeLinkingSkill, PaperRankingSkill, SurveyWritingSkill, TopicPlanningSkill
+from services.research.capabilities import CodeLinker, PaperRanker, SurveyWriter, TopicPlanner
 from tools.research import (
     ArxivSearchTool,
     IEEEMetadataSearchTool,
@@ -68,10 +68,10 @@ class PaperSearchService:
         ieee_tool: IEEEMetadataSearchTool | None = None,
         zotero_tool: Any | None = None,
         external_tool_registry: Any | None = None,
-        topic_planner: TopicPlanningSkill | None = None,
-        paper_ranker: PaperRankingSkill | None = None,
-        survey_writer: SurveyWritingSkill | None = None,
-        code_linking_skill: CodeLinkingSkill | None = None,
+        topic_planner: TopicPlanner | None = None,
+        paper_ranker: PaperRanker | None = None,
+        survey_writer: SurveyWriter | None = None,
+        code_linking_skill: CodeLinker | None = None,
         llm_adapter: Any | None = None,
         ranking_mode: str = "heuristic",
     ) -> None:
@@ -82,12 +82,12 @@ class PaperSearchService:
         self.zotero_tool = zotero_tool
         self.external_tool_registry = external_tool_registry
         self.llm_adapter = llm_adapter
-        self.topic_planner = topic_planner or TopicPlanningSkill(llm_adapter=llm_adapter)
-        self.paper_ranker = paper_ranker or PaperRankingSkill(
+        self.topic_planner = topic_planner or TopicPlanner(llm_adapter=llm_adapter)
+        self.paper_ranker = paper_ranker or PaperRanker(
             llm_adapter=llm_adapter,
             default_mode=ranking_mode,
         )
-        self.survey_writer = survey_writer or SurveyWritingSkill(llm_adapter=llm_adapter)
+        self.survey_writer = survey_writer or SurveyWriter(llm_adapter=llm_adapter)
         self.code_linking_skill = code_linking_skill
 
     async def search(

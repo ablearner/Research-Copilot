@@ -587,8 +587,6 @@ class LongSessionGraphRuntimeStub:
         )
         return type("FusedAskResult", (), {"qa": qa})()
 
-    def resolve_skill_context(self, *, task_type, preferred_skill_name=None):
-        return {"name": preferred_skill_name or "research_report", "task_type": task_type}
 
 
 def _build_long_session_service(tmp_path) -> LiteratureResearchService:

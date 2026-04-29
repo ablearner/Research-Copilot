@@ -53,8 +53,7 @@ from services.research.unified_runtime import (
 )
 from typing import TYPE_CHECKING
 from services.research.research_workspace import build_workspace_from_task, build_workspace_state
-from skills.research import PaperAnalysisSkill, PaperReadingSkill, ResearchUserIntentResolverSkill
-from skills.research.paper_curation import PaperCurationSkill
+from services.research.capabilities import PaperAnalyzer, PaperReader, ResearchIntentResolver, PaperCurator
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.research_supervisor_tool_specs import (
@@ -110,14 +109,14 @@ class ResearchRuntimeBase:
         max_steps: int = 8,
     ) -> None:
         self.research_service = research_service
-        paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReadingSkill()
+        paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReader()
         llm_adapter = getattr(getattr(research_service, "paper_search_service", None), "llm_adapter", None)
         if llm_adapter is None:
             llm_adapter = getattr(paper_reading_skill, "llm_adapter", None)
         self.manager_agent = manager_agent or ResearchSupervisorAgent(llm_adapter=llm_adapter)
         if getattr(self.manager_agent, "llm_adapter", None) is None:
             self.manager_agent.llm_adapter = llm_adapter
-        self.user_intent_resolver = ResearchUserIntentResolverSkill(llm_adapter=llm_adapter)
+        self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
         self.max_steps = max_steps
         self.reasoning_strategies = ReasoningStrategySet(
             query_planning=PlanAndSolveReasoningAgent(llm_adapter=llm_adapter),
@@ -136,7 +135,7 @@ class ResearchRuntimeBase:
             reasoning_strategies=self.reasoning_strategies,
         )
         self.paper_analysis_agent = PaperAnalysisAgent(
-            paper_analysis_skill=PaperAnalysisSkill(
+            paper_analysis_skill=PaperAnalyzer(
                 paper_reading_skill=paper_reading_skill,
                 llm_adapter=llm_adapter,
             )
@@ -148,7 +147,7 @@ class ResearchRuntimeBase:
             paper_search_service=research_service.paper_search_service,
             storage_root=research_service.report_service.storage_root,
         )
-        self.paper_curation_skill = PaperCurationSkill(research_service.paper_search_service)
+        self.paper_curation_skill = PaperCurator(research_service.paper_search_service)
         self._context_compressor = ContextCompressor(
             llm_adapter=llm_adapter,
             target_budget_ratio=0.75,
@@ -2718,12 +2717,12 @@ class ResearchRuntimeBase:
             ],
             "primary_runtime_workers": [],
             "primary_skills": [
-                "PaperCurationSkill",
-                "TopicPlanningSkill",
-                "ResearchQueryRewriteSkill",
-                "PaperRankingSkill",
-                "SurveyWritingSkill",
-                "PaperAnalysisSkill",
+                "PaperCurator",
+                "TopicPlanner",
+                "ResearchQueryRewriter",
+                "PaperRanker",
+                "SurveyWriter",
+                "PaperAnalyzer",
             ],
         }
 
@@ -2935,12 +2934,12 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             ],
             "primary_runtime_workers": [],
             "primary_skills": [
-                "PaperCurationSkill",
-                "TopicPlanningSkill",
-                "ResearchQueryRewriteSkill",
-                "PaperRankingSkill",
-                "SurveyWritingSkill",
-                "PaperAnalysisSkill",
+                "PaperCurator",
+                "TopicPlanner",
+                "ResearchQueryRewriter",
+                "PaperRanker",
+                "SurveyWriter",
+                "PaperAnalyzer",
             ],
             "supervisor_graph": {
                 "entry_node": "bootstrap_context_node",

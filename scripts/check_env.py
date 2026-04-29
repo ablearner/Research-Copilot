@@ -30,9 +30,6 @@ def main() -> int:
         "upload_dir_parent": settings.resolve_path(settings.upload_dir).parent.exists(),
         "neo4j_bolt": _can_connect("127.0.0.1", 7687) if settings.neo4j_uri else False,
         "milvus_http": _can_connect("127.0.0.1", 19530) if settings.milvus_uri else False,
-        "mysql_tcp": _can_connect(settings.mysql_host or "127.0.0.1", settings.mysql_port)
-        if settings.mysql_host
-        else False,
         "llm_api_key_present": bool(settings.dashscope_api_key or settings.openai_api_key),
     }
     payload = {

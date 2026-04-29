@@ -20,7 +20,7 @@ from memory.long_term_memory import (
     InMemoryLongTermMemoryStore,
     JsonLongTermMemoryStore,
     LongTermMemory,
-    QdrantLongTermMemoryStore,
+    SQLiteLongTermMemoryStore,
 )
 from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
@@ -29,9 +29,6 @@ from services.research.literature_research_service import LiteratureResearchServ
 from services.research.paper_import_service import PaperImportService
 from services.research.paper_search_service import PaperSearchService
 from services.research.research_report_service import ResearchReportService
-from skills.loader import SkillLoader
-from skills.registry import SkillRegistry
-from skills.research import build_core_research_skill_profiles
 from sdk.runtime_profile import RuntimeProfile, RuntimeProfileStore
 from tools.research.arxiv_search_tool import ArxivSearchTool
 from tools.research.ieee_metadata_search_tool import IEEEMetadataSearchTool
@@ -84,13 +81,11 @@ def _build_long_term_memory(settings: Settings) -> LongTermMemory:
                 settings.resolve_path(settings.research_long_term_memory_dir)
             )
         )
-    if provider == "qdrant":
+    if provider == "sqlite":
         return LongTermMemory(
-            QdrantLongTermMemoryStore(
-                path=str(settings.resolve_path(settings.qdrant_path)),
-                collection_name=settings.qdrant_collection_name,
-                vector_size=settings.qdrant_vector_size,
-                max_records=settings.qdrant_memory_max_records,
+            SQLiteLongTermMemoryStore(
+                db_path=settings.resolve_path(settings.research_sqlite_db_path),
+                max_records=settings.long_term_memory_max_records,
             )
         )
     return LongTermMemory(InMemoryLongTermMemoryStore())
@@ -119,7 +114,6 @@ class ResearchCopilotSDK:
         self.profile = profile
         self._graph_runtime: Any | None = None
         self._agent_service: LiteratureResearchService | None = None
-        self._skill_registry: SkillRegistry | None = None
         self._state_cache: OrderedDict[tuple[str, bool], tuple[float, dict[str, Any]]] = OrderedDict()
         self._trajectory_cache: OrderedDict[tuple[str, int, int], tuple[float, dict[str, Any]]] = OrderedDict()
 
@@ -403,9 +397,6 @@ class ResearchCopilotSDK:
             "upload_dir_parent": settings.resolve_path(settings.upload_dir).parent.exists(),
             "neo4j_bolt": _can_connect("127.0.0.1", 7687) if settings.neo4j_uri else False,
             "milvus_http": _can_connect("127.0.0.1", 19530) if settings.milvus_uri else False,
-            "mysql_tcp": _can_connect(settings.mysql_host or "127.0.0.1", settings.mysql_port)
-            if settings.mysql_host
-            else False,
             "llm_api_key_present": bool(settings.dashscope_api_key or settings.openai_api_key),
         }
         return {
@@ -437,7 +428,6 @@ class ResearchCopilotSDK:
             "vector_store_provider": settings.vector_store_provider,
             "graph_store_provider": settings.graph_store_provider,
             "plugins": self.list_plugins(),
-            "default_skill": self.profile.default_skill or self._skill_registry_or_build().default_skill().name,
         }
 
     def conversation_trajectory(
@@ -469,43 +459,6 @@ class ResearchCopilotSDK:
         if use_cache and ttl_seconds > 0:
             return self._cache_put(self._trajectory_cache, cache_key, payload, ttl_seconds=ttl_seconds)
         return payload
-
-    def list_skills(self) -> list[dict[str, Any]]:
-        registry = self._skill_registry_or_build()
-        default_name = self.profile.default_skill or registry.default_skill().name
-        rows: list[dict[str, Any]] = []
-        for skill in registry.list_skills(include_disabled=True):
-            rows.append(
-                {
-                    "name": skill.name,
-                    "enabled": skill.enabled,
-                    "default": skill.name == default_name,
-                    "description": skill.description,
-                    "applicable_tasks": list(skill.applicable_tasks),
-                }
-            )
-        return rows
-
-    def set_skill_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
-        registry = self._skill_registry_or_build()
-        skill = registry.get_skill(name, include_disabled=True)
-        if skill is None:
-            raise KeyError(name)
-        self.profile = self.profile_store.set_skill_enabled(name, enabled)
-        self._skill_registry = None
-        if self._graph_runtime is not None:
-            self._apply_skill_overrides(self._graph_runtime.skill_registry)
-        return {"name": name, "enabled": enabled}
-
-    def set_default_skill(self, name: str) -> dict[str, Any]:
-        registry = self._skill_registry_or_build()
-        if registry.get_skill(name, include_disabled=True) is None:
-            raise KeyError(name)
-        self.profile = self.profile_store.set_default_skill(name)
-        self._skill_registry = None
-        if self._graph_runtime is not None:
-            self._apply_skill_overrides(self._graph_runtime.skill_registry)
-        return {"default_skill": name}
 
     def list_plugins(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -576,7 +529,7 @@ class ResearchCopilotSDK:
             sources=sources or ["arxiv", "openalex", "semantic_scholar"],
             selected_paper_ids=selected_paper_ids or [],
             selected_document_ids=selected_document_ids or [],
-            skill_name=skill_name or self.profile.default_skill or "research_report",
+            skill_name=skill_name or "research_report",
             metadata={
                 "source": "sdk_terminal_agent",
                 "user_message": message,
@@ -632,7 +585,7 @@ class ResearchCopilotSDK:
                 include_graph=include_graph,
                 include_embeddings=include_embeddings,
                 fast_mode=fast_mode,
-                skill_name=skill_name or self.profile.default_skill or "research_report",
+                skill_name=skill_name or "research_report",
                 conversation_id=conversation_id,
             ),
             graph_runtime=self._graph_runtime,
@@ -680,7 +633,7 @@ class ResearchCopilotSDK:
                 paper_ids=paper_ids or [],
                 document_ids=document_ids or [],
                 conversation_id=conversation_id,
-                skill_name=skill_name or self.profile.default_skill or "research_report",
+                skill_name=skill_name or "research_report",
                 reasoning_style=reasoning_style or "cot",
             ),
             graph_runtime=self._graph_runtime,
@@ -833,26 +786,6 @@ class ResearchCopilotSDK:
                 updated_lines.append(f"{env_key}={env_value}")
         env_path.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
 
-    def _skill_registry_or_build(self) -> SkillRegistry:
-        if self._skill_registry is not None:
-            return self._skill_registry
-        registry = SkillRegistry()
-        loader = SkillLoader(specs_dir=self.settings.resolve_path("skills/specs"))
-        registry.register_many(loader.load_from_directory(), replace=True)
-        registry.register_many(build_core_research_skill_profiles(), replace=True)
-        self._apply_skill_overrides(registry)
-        self._skill_registry = registry
-        return registry
-
-    def _apply_skill_overrides(self, registry: SkillRegistry) -> None:
-        for name, state in self.profile.skills.items():
-            skill = registry.get_skill(name, include_disabled=True)
-            if skill is None:
-                continue
-            registry.register(skill.model_copy(update={"enabled": state.enabled}), replace=True)
-        if self.profile.default_skill:
-            registry.set_default_skill(self.profile.default_skill)
-
     def _register_optional_mcp_servers(self, graph_runtime: Any, settings: Settings) -> None:
         if not getattr(settings, "zotero_local_enabled", False):
             return
@@ -885,7 +818,6 @@ class ResearchCopilotSDK:
         effective_settings = self._effective_settings()
         graph_runtime = build_graph_runtime(effective_settings)
         self._register_optional_mcp_servers(graph_runtime, effective_settings)
-        self._apply_skill_overrides(graph_runtime.skill_registry)
         agent_service = build_literature_research_service(effective_settings, graph_runtime=graph_runtime)
         agent_service.memory_manager = self.service.memory_manager
         register_research_runtime_extensions(

@@ -33,7 +33,6 @@ class AnswerSynthesisStrategy(Protocol):
         task_context: dict[str, Any] | None = None,
         preference_context: dict[str, Any] | None = None,
         memory_hints: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
     ) -> Any:
         ...
 
@@ -50,7 +49,6 @@ class ToolReasoningStrategy(Protocol):
         session_context: dict[str, Any] | None = None,
         task_context: dict[str, Any] | None = None,
         preference_context: dict[str, Any] | None = None,
-        skill_context: dict[str, Any] | None = None,
         initial_retrieval_result: Any | None = None,
         initial_evidence_bundle: Any | None = None,
     ) -> Any:

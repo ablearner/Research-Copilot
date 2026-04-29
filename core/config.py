@@ -90,8 +90,6 @@ class Settings(BaseSettings):
     neo4j_database: str | None = None
 
     vector_store_provider: str = "milvus"
-    postgres_dsn: str | None = None
-    pgvector_table: str = "multimodal_embeddings"
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str | None = None
     milvus_db_name: str | None = None
@@ -101,30 +99,38 @@ class Settings(BaseSettings):
     milvus_index_type: str = "HNSW"
     graph_store_provider: str = "memory"
 
-    mysql_host: str | None = None
-    mysql_port: int = 3306
-    mysql_user: str | None = None
-    mysql_password: str | None = None
-    mysql_database: str | None = None
-    mysql_charset: str = "utf8"
-    mysql_session_memory_table: str = "session_memory"
-    session_memory_provider: str = "auto"
+    session_memory_provider: str = "sqlite"
     research_working_memory_turns: int = 10
     research_session_memory_dir: str = ".data/research/session_memory"
     research_long_term_memory_dir: str = ".data/research/long_term_memory"
     research_paper_knowledge_dir: str = ".data/research/paper_knowledge"
-    long_term_memory_provider: str = "json"
-    qdrant_path: str = ".data/research/qdrant"
-    qdrant_collection_name: str = "research_long_term_memory"
-    qdrant_vector_size: int = 128
-    qdrant_memory_max_records: int = 5000
+    long_term_memory_provider: str = "sqlite"
+    long_term_memory_max_records: int = 5000
     local_code_execution_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("LOCAL_CODE_EXECUTION_ENABLED", "MCP_CODE_EXECUTION_ENABLED"),
     )
 
     mcp_servers: dict = Field(default_factory=dict)
-    skills_dir: str = ".data/skills"
+    knowledge_dir: str = ".data/knowledge"
+
+    # ── 检索配置 ──
+    retrieval_top_k: int = 10
+    retrieval_mode: str = "hybrid"
+    graph_query_mode: str = "auto"
+    enable_graph_summary: bool = True
+
+    # ── 回答配置 ──
+    answer_language: str = "zh-CN"
+    answer_detail_level: str = "normal"
+    answer_tone: str = "factual"
+
+    # ── Prompt 路径 ──
+    answer_prompt_path: str = "prompts/document/answer_question_with_hybrid_rag.txt"
+    rewrite_prompt_path: str = "prompts/retrieval/rewrite_query.txt"
+
+    # ── MCP 白名单 ──
+    mcp_allowed_tools: str = ""
 
     local_storage_root: str = ".data/storage"
     upload_dir: str = ".data/uploads"

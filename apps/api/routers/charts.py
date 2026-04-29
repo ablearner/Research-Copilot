@@ -28,7 +28,6 @@ class UnderstandChartRequest(BaseModel):
     page_number: int = Field(..., ge=1)
     chart_id: str
     context: dict[str, Any] = Field(default_factory=dict)
-    skill_name: str | None = None
 
 
 class UnderstandChartResponse(BaseModel):
@@ -107,10 +106,6 @@ async def understand_chart(
 ) -> UnderstandChartResponse:
     try:
         trace_id = f"chart_{uuid4().hex}"
-        skill_context = graph_runtime.resolve_skill_context(
-            task_type="understand_chart",
-            preferred_skill_name=request.skill_name,
-        ) if request.skill_name else None
         state = await graph_runtime.invoke(
             {
                 "request_id": trace_id,
@@ -137,13 +132,11 @@ async def understand_chart(
                     "api_route": "/charts/understand",
                     "trace_id": trace_id,
                     "quota_context": quota_context,
-                    **({"skill_name": request.skill_name} if request.skill_name else {}),
                     **request.context,
                 },
                 "retrieval_mode": "hybrid",
                 "top_k": 10,
                 "filters": {},
-                "selected_skill": skill_context,
             }
         )
         chart_result = state.get("chart_result")
@@ -154,10 +147,7 @@ async def understand_chart(
                 page_id=request.page_id,
                 page_number=request.page_number,
                 chart_id=request.chart_id,
-                context={
-                    **request.context,
-                    **({"skill_name": request.skill_name} if request.skill_name else {}),
-                },
+                context=request.context,
             )
             chart_result = {
                 "chart": fallback_chart,

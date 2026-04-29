@@ -14,8 +14,6 @@ from rag_runtime.schemas import GraphTaskRequest
 from reasoning import ReActReasoningAgent
 from rag_runtime.services.embedding_index_service import EmbeddingIndexResult
 from rag_runtime.services.graph_index_service import GraphIndexStats
-from skills.base import SkillSpec
-from skills.registry import SkillRegistry
 from tooling.schemas import AnswerWithEvidenceToolInput, ToolSpec
 from tools.answer_toolkit import AnswerAgent as RealAnswerAgent
 from tools.retrieval_toolkit import RetrievalAgentError, RetrievalAgentResult
@@ -171,7 +169,6 @@ class RetrievalAgent:
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ) -> RetrievalAgentResult:
         self.calls.append(
             {
@@ -179,7 +176,6 @@ class RetrievalAgent:
                 "filters": filters or {},
                 "session_id": session_id,
                 "task_id": task_id,
-                "skill_context": skill_context,
             }
         )
         retrieval_result = HybridRetrievalResult(query=RetrievalQuery(query=question))
@@ -202,7 +198,6 @@ class RetrievalAgentWithEvidence(RetrievalAgent):
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ) -> RetrievalAgentResult:
         self.calls.append(
             {
@@ -210,7 +205,6 @@ class RetrievalAgentWithEvidence(RetrievalAgent):
                 "filters": filters or {},
                 "session_id": session_id,
                 "task_id": task_id,
-                "skill_context": skill_context,
             }
         )
         evidence = Evidence(
@@ -253,7 +247,6 @@ class RetrievalAgentWithVectorHitsOnly(RetrievalAgent):
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ) -> RetrievalAgentResult:
         self.calls.append(
             {
@@ -261,7 +254,6 @@ class RetrievalAgentWithVectorHitsOnly(RetrievalAgent):
                 "filters": filters or {},
                 "session_id": session_id,
                 "task_id": task_id,
-                "skill_context": skill_context,
             }
         )
         hit = RetrievalHit(
@@ -297,7 +289,6 @@ class RetrievalAgentWithVisualAnchor(RetrievalAgentWithEvidence):
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ) -> RetrievalAgentResult:
         self.calls.append(
             {
@@ -305,7 +296,6 @@ class RetrievalAgentWithVisualAnchor(RetrievalAgentWithEvidence):
                 "filters": filters or {},
                 "session_id": session_id,
                 "task_id": task_id,
-                "skill_context": skill_context,
             }
         )
         modalities = set((filters or {}).get("modalities") or [])
@@ -339,7 +329,6 @@ class RetrievalAgentWithVisualAnchor(RetrievalAgentWithEvidence):
             session_id=session_id,
             task_id=task_id,
             memory_hints=memory_hints,
-            skill_context=skill_context,
         )
 
 
@@ -354,7 +343,6 @@ class RetrievalAgentWithGraphFailure(RetrievalAgentWithEvidence):
         session_id=None,
         task_id=None,
         memory_hints=None,
-        skill_context=None,
     ) -> RetrievalAgentResult:
         self.calls.append(
             {
@@ -362,7 +350,6 @@ class RetrievalAgentWithGraphFailure(RetrievalAgentWithEvidence):
                 "filters": filters or {},
                 "session_id": session_id,
                 "task_id": task_id,
-                "skill_context": skill_context,
             }
         )
         if (filters or {}).get("retrieval_mode") == "graph":
@@ -376,7 +363,6 @@ class RetrievalAgentWithGraphFailure(RetrievalAgentWithEvidence):
             session_id=session_id,
             task_id=task_id,
             memory_hints=memory_hints,
-            skill_context=skill_context,
         )
 
 
@@ -393,7 +379,6 @@ class AnswerAgent:
         metadata=None,
         session_context=None,
         task_context=None,
-        skill_context=None,
         **kwargs,
     ) -> QAResponse:
         self.calls.append(
@@ -401,7 +386,6 @@ class AnswerAgent:
                 "question": question,
                 "task_context": task_context or {},
                 "metadata": metadata or {},
-                "skill_context": skill_context or {},
             }
         )
         answer_text = "chart-aware answer" if (task_context or {}).get("chart_answer") else "证据不足"
@@ -418,7 +402,6 @@ class InsufficientAnswerAgent(AnswerAgent):
         metadata=None,
         session_context=None,
         task_context=None,
-        skill_context=None,
         **kwargs,
     ) -> QAResponse:
         self.calls.append(
@@ -426,7 +409,6 @@ class InsufficientAnswerAgent(AnswerAgent):
                 "question": question,
                 "task_context": task_context or {},
                 "metadata": metadata or {},
-                "skill_context": skill_context or {},
             }
         )
         return QAResponse(answer="证据不足", question=question, evidence_bundle=evidence_bundle, retrieval_result=retrieval_result, confidence=0.12)
@@ -488,19 +470,11 @@ async def test_graph_runtime_dynamic_dispatch_parse(graph_runtime: GraphRuntime)
 
 @pytest.mark.asyncio
 async def test_graph_runtime_index_and_ask(graph_runtime: GraphRuntime) -> None:
-    graph_runtime.skill_registry.register(
-        SkillSpec(
-            name="indexing_profile",
-            description="Indexing-oriented skill.",
-            applicable_tasks=["index"],
-        )
-    )
     parsed = await graph_runtime.handle_parse_document("sample.pdf", "doc1")
-    index_result = await graph_runtime.handle_index_document(parsed, skill_name="indexing_profile")
+    index_result = await graph_runtime.handle_index_document(parsed)
     qa = await graph_runtime.handle_ask_document("What happened?", doc_id="doc1")
 
     assert index_result.document_id == "doc1"
-    assert index_result.metadata["skill_name"] == "indexing_profile"
     assert qa.answer == "证据不足"
     assert "RetrievalPlan" in graph_runtime.llm_adapter.calls
     assert "ValidationDecision" in graph_runtime.llm_adapter.calls
@@ -609,51 +583,7 @@ async def test_graph_runtime_builds_evidence_from_vector_hits_without_embedded_e
 
 
 @pytest.mark.asyncio
-async def test_graph_runtime_propagates_selected_skill_to_retrieval_and_answer() -> None:
-    planner_llm = StructuredPlannerLLM()
-    retrieval_agent = RetrievalAgentWithEvidence()
-    answer_agent = AnswerAgent(llm_adapter=planner_llm)
-    skill_registry = SkillRegistry()
-    skill_registry.register(
-        SkillSpec(
-            name="research_report",
-            description="Research-focused QA skill.",
-            applicable_tasks=["ask_document"],
-            preferred_tools=["hybrid_retrieve", "answer_with_evidence"],
-        )
-    )
-    graph_runtime = GraphRuntime(
-        DocumentAgent(),
-        ChartAgent(),
-        GraphExtractionAgent(),
-        retrieval_agent,
-        answer_agent,
-        GraphIndexService(),
-        EmbeddingIndexService(),
-        llm_adapter=planner_llm,
-        skill_registry=skill_registry,
-    )
-
-    qa = await graph_runtime.handle_ask_document(
-        "这份文档讲了什么？",
-        doc_id="doc1",
-        skill_name="research_report",
-    )
-
-    assert qa.answer != "证据不足"
-    assert retrieval_agent.calls[-1]["skill_context"]["name"] == "research_report"
-    assert answer_agent.calls[-1]["skill_context"]["name"] == "research_report"
-
-
-@pytest.mark.asyncio
 async def test_graph_runtime_chart_path(graph_runtime: GraphRuntime) -> None:
-    graph_runtime.skill_registry.register(
-        SkillSpec(
-            name="chart_reader",
-            description="Chart understanding skill.",
-            applicable_tasks=["understand_chart"],
-        )
-    )
     result = await graph_runtime.handle_understand_chart(
         image_path="/tmp/chart.png",
         document_id="doc1",
@@ -661,11 +591,9 @@ async def test_graph_runtime_chart_path(graph_runtime: GraphRuntime) -> None:
         page_number=1,
         chart_id="chart1",
         context={"extract_chart_graph": True},
-        skill_name="chart_reader",
     )
 
     assert result.chart.id == "chart1"
-    assert result.metadata["skill_name"] == "chart_reader"
 
 
 @pytest.mark.asyncio
