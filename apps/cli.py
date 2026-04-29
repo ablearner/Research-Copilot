@@ -937,6 +937,7 @@ def _slash_command_entries() -> list[tuple[str, str]]:
     return [
         ("/new [topic]", "Start a new session with an optional research topic"),
         ("/clear", "Delete the current session memory and start a fresh session"),
+        ("/sessions", "List saved conversations"),
         ("/use <conversation_id>", "Switch to an existing conversation"),
         ("/status", "Show runtime, scope, selected papers, and active task state"),
         ("/profile", "Show the persisted preference profile learned from past questions"),
@@ -1174,7 +1175,7 @@ async def _run_agent_shell(sdk: Any, args: argparse.Namespace) -> int:
     _render_welcome_panel()
     _render_system_note(f"session: {conversation_id}")
     _render_system_note(
-        "commands: /help /status /profile /events /trajectory /papers /select /sources /import /zotero /figure /open-figure /new /clear /use /exit"
+        "commands: /help /status /profile /events /trajectory /papers /select /sources /import /zotero /figure /open-figure /new /clear /sessions /use /exit"
     )
     print(_divider())
 
@@ -1288,6 +1289,23 @@ async def _run_agent_shell(sdk: Any, args: argparse.Namespace) -> int:
                 terminal_state.last_round_seconds = 0.0
                 _refresh_terminal_state_from_conversation(sdk, conversation_id, terminal_state)
                 _render_system_note(f"cleared {previous_conversation_id} and switched to {conversation_id}")
+                continue
+            if command == "/sessions":
+                conversations = sdk.list_conversations()
+                if not conversations:
+                    _render_system_note("no saved conversations")
+                    continue
+                lines = []
+                for index, item in enumerate(conversations, start=1):
+                    topic = item.snapshot.topic if item.snapshot.topic else "(no topic)"
+                    msgs = item.message_count
+                    active = " ← current" if item.conversation_id == conversation_id else ""
+                    lines.append(
+                        f"  {_BLUE_SOFT}{index:>2}{_RESET}  {item.conversation_id[:12]}  "
+                        f"{topic:<30}  {msgs} msgs  {item.updated_at[:10]}{active}"
+                    )
+                _boxed_lines(lines, title=f"{_BLUE}📋 Sessions{_RESET}", accent=_BLUE_DEEP, body_color=_WHITE)
+                _render_system_note("use /use <number> or /use <conversation_id> to switch")
                 continue
             if command == "/use":
                 if not rest:

@@ -323,6 +323,9 @@ class ResearchSupervisorAgent:
                 payload_overrides["query"] = extracted_topic
             if source_constraints:
                 payload_overrides["source_constraints"] = source_constraints
+            requested_paper_count = state.user_intent.get("requested_paper_count")
+            if requested_paper_count is not None:
+                payload_overrides["requested_paper_count"] = int(requested_paper_count)
             if state.has_task:
                 payload_overrides["refresh_reason"] = "user_requested_search"
             return self._guardrail_worker_action(
@@ -513,6 +516,7 @@ class ResearchSupervisorAgent:
                 "replan_count": replan_count,
                 "clarification_request": None,
                 "active_plan_id": None,
+                "new_topic_detected": state.new_topic_detected,
             },
         }
         if action_name == "finalize":
@@ -1142,6 +1146,7 @@ class ResearchSupervisorAgent:
                     "replan_count": replan_count,
                     "clarification_request": None,
                     "active_plan_id": plan_id,
+                    "new_topic_detected": state.new_topic_detected,
                 },
             },
         )
@@ -1631,6 +1636,7 @@ class ResearchSupervisorAgent:
             "replan_count": replan_count,
             "clarification_request": clarification_request,
             "active_plan_id": active_plan_id,
+            "new_topic_detected": state.new_topic_detected,
         }
         fallback = self._fallback_rule_decision(
             state,
@@ -1687,6 +1693,7 @@ class ResearchSupervisorAgent:
             "replan_count": replan_count,
             "clarification_request": clarification_request,
             "active_plan_id": active_plan_id,
+            "new_topic_detected": state.new_topic_detected,
         }
         return self._decision(
             action_name="finalize",

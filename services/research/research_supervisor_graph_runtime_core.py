@@ -1012,6 +1012,7 @@ class ResearchRuntimeBase:
             context.paper_analysis_result is not None or self._workspace_has(context, "latest_paper_analysis")
         ):
             return True
+        new_topic = bool(state.get("new_topic_detected"))
         latest_result = state.get("agent_results", [])[-1] if state.get("agent_results") else None
         latest_observation = {}
         if latest_result is not None:
@@ -1024,7 +1025,8 @@ class ResearchRuntimeBase:
             if str(item).strip()
         }
         if (
-            latest_result is not None
+            not new_topic
+            and latest_result is not None
             and latest_result.task_type == "search_literature"
             and latest_result.status == "succeeded"
             and context.task_response is not None
@@ -1034,7 +1036,8 @@ class ResearchRuntimeBase:
         ):
             return True
         if (
-            latest_result is not None
+            not new_topic
+            and latest_result is not None
             and latest_result.task_type == "write_review"
             and latest_result.status == "succeeded"
             and context.task_response is not None
@@ -1043,7 +1046,7 @@ class ResearchRuntimeBase:
             and not latest_next_actions.intersection({"import_papers", "answer_question"})
         ):
             return True
-        if context.task_response is not None and context.report is not None and not request.auto_import and request.mode != "qa":
+        if not new_topic and context.task_response is not None and context.report is not None and not request.auto_import and request.mode != "qa":
             return True
         if context.import_attempted and context.import_result is not None and not request.message.strip():
             return True
@@ -1865,16 +1868,6 @@ class ResearchRuntimeBase:
             or session_history_count >= 6
             or context_size_large
         )
-        user_intent = await self.user_intent_resolver.resolve_async(
-            message=context.request.message,
-            has_task=task is not None,
-            candidate_paper_count=len(papers),
-            candidate_papers=self._candidate_paper_scope_for_manager(papers),
-            active_paper_ids=active_paper_ids,
-            selected_paper_ids=list(context.request.selected_paper_ids),
-            has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
-            has_document_input=bool(context.request.document_file_path),
-        )
         route_mode = str(
             metadata_context.get("route_mode")
             or (snapshot.active_route_mode if snapshot is not None else "")
@@ -1890,18 +1883,27 @@ class ResearchRuntimeBase:
                 if thread.thread_id == active_thread_id:
                     active_thread_topic = thread.topic or None
                     break
+        previous_topic = active_thread_topic or (snapshot.topic if snapshot is not None else "")
+        user_intent = await self.user_intent_resolver.resolve_async(
+            message=context.request.message,
+            has_task=task is not None,
+            candidate_paper_count=len(papers),
+            candidate_papers=self._candidate_paper_scope_for_manager(papers),
+            active_paper_ids=active_paper_ids,
+            selected_paper_ids=list(context.request.selected_paper_ids),
+            has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
+            has_document_input=bool(context.request.document_file_path),
+            session_topic=previous_topic or None,
+        )
         topic_continuity_score = self._topic_continuity_score(
             context.request.message,
-            active_thread_topic or (snapshot.topic if snapshot is not None else ""),
+            previous_topic,
         )
-        new_topic_detected = (
-            route_mode == "research_discovery"
-            and bool(snapshot is not None and snapshot.topic)
-            and topic_continuity_score < 0.42
+        new_topic_detected = bool(user_intent.is_new_topic) or (
+            bool(previous_topic)
+            and topic_continuity_score < 0.15
         )
-        should_ignore_research_context = route_mode == "general_chat" or (
-            route_mode == "research_discovery" and new_topic_detected
-        )
+        should_ignore_research_context = route_mode == "general_chat" or new_topic_detected
         return ResearchSupervisorState(
             goal=context.request.message,
             mode=context.request.mode,

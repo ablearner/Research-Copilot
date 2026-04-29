@@ -36,6 +36,8 @@ class ResearchUserIntentResult(BaseModel):
     source: Literal["heuristic", "llm"] = "heuristic"
     extracted_topic: str = Field(default="", description="Research topic with source/constraint phrases stripped")
     source_constraints: list[str] = Field(default_factory=list, description="Extracted source constraints, e.g. ['arxiv']")
+    is_new_topic: bool = Field(default=False, description="Whether the user appears to be starting a new research topic unrelated to the current session")
+    requested_paper_count: int | None = Field(default=None, description="Number of papers the user explicitly requested, None if not specified")
 
 
 _FIGURE_MARKERS = ("图", "图表", "figure", "fig.", "chart", "plot", "曲线", "横轴", "纵轴")
@@ -133,6 +135,36 @@ def _extract_source_constraints(message: str) -> tuple[list[str], str]:
     return constraints, cleaned
 
 
+_PAPER_COUNT_PATTERNS = (
+    re.compile(r"(\d{1,3})\s*篇", re.IGNORECASE),
+    re.compile(r"(\d{1,3})\s*(?:papers?|articles?)\b", re.IGNORECASE),
+    re.compile(r"(?:找|搜|调研|检索)\s*(\d{1,3})\s*篇", re.IGNORECASE),
+    re.compile(r"([一二两三四五六七八九十百]+)\s*篇", re.IGNORECASE),
+)
+
+def _extract_requested_paper_count(message: str) -> int | None:
+    for pattern in _PAPER_COUNT_PATTERNS:
+        match = pattern.search(message)
+        if match:
+            raw = match.group(1).strip()
+            try:
+                return int(raw)
+            except ValueError:
+                total = 0
+                for ch in raw:
+                    val = _CHINESE_ORDINAL_MAP.get(ch)
+                    if val is not None:
+                        if ch == "十":
+                            total = max(total, 1) * 10
+                        elif total >= 10 and total % 10 == 0:
+                            total += val
+                        else:
+                            total = val
+                    elif ch == "百":
+                        total = max(total, 1) * 100
+                return total if total > 0 else None
+    return None
+
 _ORDINAL_PATTERNS = (
     re.compile(r"\bp(?:aper)?\s*([0-9]{1,2})\b", re.IGNORECASE),
     re.compile(r"第\s*([0-9]{1,2})\s*篇"),
@@ -172,6 +204,7 @@ class ResearchIntentResolver:
         selected_paper_ids: list[str],
         has_visual_anchor: bool = False,
         has_document_input: bool = False,
+        session_topic: str | None = None,
     ) -> ResearchUserIntentResult:
         heuristic_result = self.resolve(
             message=message,
@@ -182,6 +215,7 @@ class ResearchIntentResolver:
             selected_paper_ids=selected_paper_ids,
             has_visual_anchor=has_visual_anchor,
             has_document_input=has_document_input,
+            session_topic=session_topic,
         )
         if self.llm_adapter is None or heuristic_result.confidence >= 0.8:
             return heuristic_result
@@ -197,6 +231,11 @@ class ResearchIntentResolver:
                     "重要：如果用户提到数据源（如 arxiv、ieee、semantic scholar 等），"
                     "将其放入 source_constraints 列表，并在 extracted_topic 中剥离这些来源名称，"
                     "只保留纯粹的研究主题。例如“在arxiv上找LLM agent论文”→ extracted_topic='LLM agent', source_constraints=['arxiv']。"
+                    "重要：session_topic 是当前会话正在研究的主题。如果用户的新请求与 session_topic 是完全不同的研究领域，"
+                    "请将 is_new_topic 设为 true。例如会话主题是“自然语言处理”而用户现在问“医学图像处理”→ is_new_topic=true。"
+                    "如果 session_topic 为空或用户在追问同一主题的不同方面，is_new_topic 应为 false。"
+                    "重要：如果用户明确提到了想要的论文数量（如“找10篇”“20 papers”“三十篇论文”），"
+                    "请将 requested_paper_count 设为该数字。如果用户没有提到具体数量，requested_paper_count 应为 null。"
                     "只返回结构化字段，不要执行任务。"
                 ),
                 input_data={
@@ -208,6 +247,7 @@ class ResearchIntentResolver:
                     "selected_paper_ids": selected_paper_ids,
                     "has_visual_anchor": has_visual_anchor,
                     "has_document_input": has_document_input,
+                    "session_topic": session_topic or "",
                     "heuristic_hint": heuristic_result.model_dump(mode="json"),
                 },
                 response_model=ResearchUserIntentResult,
@@ -227,6 +267,7 @@ class ResearchIntentResolver:
         selected_paper_ids: list[str],
         has_visual_anchor: bool = False,
         has_document_input: bool = False,
+        session_topic: str | None = None,
     ) -> ResearchUserIntentResult:
         normalized = f" {message.strip().lower()} "
         markers: list[str] = []
@@ -349,6 +390,7 @@ class ResearchIntentResolver:
                 "Question appears to need literature discovery.",
                 extracted_topic=cleaned_message,
                 source_constraints=source_constraints,
+                requested_paper_count=_extract_requested_paper_count(message),
             )
         if resolved_ordinal_ids or has_any(_SINGLE_PAPER_MARKERS):
             ambiguous = self._has_ambiguous_reference(normalized) and not (active_paper_ids or selected_paper_ids)
@@ -401,6 +443,7 @@ class ResearchIntentResolver:
         clarification_question: str | None = None,
         extracted_topic: str = "",
         source_constraints: list[str] | None = None,
+        requested_paper_count: int | None = None,
     ) -> ResearchUserIntentResult:
         return ResearchUserIntentResult(
             intent=intent,
@@ -414,6 +457,7 @@ class ResearchIntentResolver:
             clarification_question=clarification_question,
             extracted_topic=extracted_topic,
             source_constraints=list(source_constraints or []),
+            requested_paper_count=requested_paper_count,
         )
 
     def _resolve_ordinal_references(

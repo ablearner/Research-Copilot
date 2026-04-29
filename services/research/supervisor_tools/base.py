@@ -229,6 +229,7 @@ class ResearchAgentGraphState(TypedDict, total=False):
     progress_signature: str
     stagnant_decision_count: int
     repeated_action_count: int
+    new_topic_detected: bool
 
 
 class ResearchAgentTool(Protocol):

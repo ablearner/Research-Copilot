@@ -42,7 +42,10 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
     # over the raw user message which may contain "arxiv", "ieee" etc.
     user_intent = (request.metadata or {}).get("user_intent") or {}
     extracted_topic = str(user_intent.get("extracted_topic") or "").strip()
-    source_constraints = list(user_intent.get("source_constraints") or [])
+    source_constraints = (
+        list(task_payload.get("source_constraints") or [])
+        or list(user_intent.get("source_constraints") or [])
+    )
     topic = str(
         task_payload.get("evidence_gap_query")
         or task_payload.get("query")
@@ -50,13 +53,13 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
         or extracted_topic
         or request.message
     ).strip()
-    resolved_sources = list(request.sources)
-    if source_constraints and not resolved_sources:
-        resolved_sources = source_constraints
+    resolved_sources = source_constraints if source_constraints else list(request.sources)
+    requested_paper_count = task_payload.get("requested_paper_count")
+    max_papers = int(requested_paper_count) if requested_paper_count is not None else 5
     return UnifiedLiteratureSearchInput(
         topic=topic or request.message.strip(),
         days_back=request.days_back,
-        max_papers=request.max_papers,
+        max_papers=max_papers,
         sources=resolved_sources or list(request.sources),
         run_immediately=True,
         conversation_id=request.conversation_id,

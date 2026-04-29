@@ -103,6 +103,8 @@ _REWRITE_PROMPT = (
     "- Preserve the user's research intent, time window, and field.\n"
     "- If the user writes in Chinese, produce English search queries for English-first scholarly providers "
     "such as arXiv, Semantic Scholar, OpenAlex, and IEEE Xplore.\n"
+    "- Always include the user's original-language query in local_queries so local libraries (e.g. Zotero) "
+    "can match titles in the user's language as well as English.\n"
     "- Remove conversational framing such as 'help me find', 'recent', 'which papers', and question punctuation.\n"
     "- Prefer canonical academic terms over literal translation.\n"
     "- Produce concise queries (2-6 words each). Do not include explanations.\n"
@@ -212,7 +214,22 @@ class ResearchQueryRewriter:
         if not cleaned:
             return []
         if source == "zotero":
-            return cleaned[: _ENGLISH_SOURCE_LIMITS.get(source, 3)]
+            # Zotero titleCreatorYear uses AND-matching on multi-word queries,
+            # so prefer short individual terms for broader recall.  Exclude
+            # mixed-language concatenated strings (e.g. "无人机 UAV drone …")
+            # which waste a query slot with near-zero matches.
+            pure_cjk = sorted(
+                (q for q in cleaned if _contains_cjk(q) and not _contains_ascii_letter(q)),
+                key=len,
+            )
+            pure_eng = sorted(
+                (q for q in cleaned if _contains_ascii_letter(q) and not _contains_cjk(q)),
+                key=len,
+            )
+            limit = _ENGLISH_SOURCE_LIMITS.get(source, 3)
+            mixed = _dedupe_queries([*pure_cjk[:limit], *pure_eng[:limit]])
+            mixed = mixed[:limit] if mixed else cleaned[:limit]
+            return mixed
 
         english_queries = [query for query in cleaned if _contains_ascii_letter(query)]
         selected = english_queries or cleaned
