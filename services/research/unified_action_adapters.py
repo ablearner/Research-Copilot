@@ -55,7 +55,7 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
     ).strip()
     resolved_sources = source_constraints if source_constraints else list(request.sources)
     requested_paper_count = task_payload.get("requested_paper_count")
-    max_papers = int(requested_paper_count) if requested_paper_count is not None else 5
+    max_papers = int(requested_paper_count) if requested_paper_count is not None else int(request.max_papers or 5)
     return UnifiedLiteratureSearchInput(
         topic=topic or request.message.strip(),
         days_back=request.days_back,
@@ -249,12 +249,16 @@ def build_document_understanding_input(*, context: Any, decision: Any) -> Unifie
 def build_document_understanding_output(
     *,
     parsed_document: Any,
-    document_index_result: dict[str, Any] | None,
+    document_index_result: Any | None,
 ) -> UnifiedDocumentUnderstandingOutput:
+    if isinstance(document_index_result, dict):
+        index_status = document_index_result.get("status")
+    else:
+        index_status = getattr(document_index_result, "status", None)
     return UnifiedDocumentUnderstandingOutput(
         document_id=parsed_document.id,
         page_count=len(parsed_document.pages),
-        index_status=(document_index_result or {}).get("status"),
+        index_status=index_status,
     )
 
 

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from mcp.client.base import BaseMCPClient
+from mcp.client.base import BaseMCPClient, build_jsonrpc_request, _MCP_PROTOCOL_VERSION, _CLIENT_INFO
 from mcp.schemas import (
     MCPPromptContent,
     MCPPromptSpec,
@@ -49,7 +49,9 @@ class StdioMCPClient(BaseMCPClient):
         self._max_retries = max_retries
         self._process: asyncio.subprocess.Process | None = None
         self._connected = False
+        self._initialized = False
         self._tools_cache: list[MCPToolSpec] | None = None
+        self._request_id = 0
 
     @property
     def server_name(self) -> str:
@@ -99,13 +101,12 @@ class StdioMCPClient(BaseMCPClient):
         await asyncio.sleep(delay)
         await self.connect()
 
-    async def _send_receive(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON-RPC request via stdin and read response from stdout.
+    def _next_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
 
-        This is a simplified protocol handler. A full implementation would
-        use the official ``mcp`` SDK transport, but this provides the
-        core auto-reconnect + timeout + error-sanitization layer.
-        """
+    async def _send_receive(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Send a JSON-RPC 2.0 request via stdin and read response from stdout."""
         import json
 
         if not self._connected or self._process is None:
@@ -125,15 +126,72 @@ class StdioMCPClient(BaseMCPClient):
         )
         if not line:
             raise ConnectionError(f"MCP stdio EOF from {self._server_name}")
-        return json.loads(line)
+        resp = json.loads(line)
+        if "error" in resp:
+            err = resp["error"]
+            code = err.get("code", -1)
+            message = err.get("message", "Unknown JSON-RPC error")
+            raise RuntimeError(f"JSON-RPC error {code}: {message}")
+        return resp
+
+    async def _send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
+        """Send a JSON-RPC 2.0 notification (no id, no response expected)."""
+        import json
+
+        if self._process is None or self._process.stdin is None:
+            return
+        msg = build_jsonrpc_request(method, params)
+        payload = json.dumps(msg) + "\n"
+        self._process.stdin.write(payload.encode())
+        await self._process.stdin.drain()
+
+    async def initialize(self) -> dict[str, Any]:
+        """Perform MCP initialize handshake (JSON-RPC 2.0)."""
+        if self._initialized:
+            return {"serverInfo": self._server_info or {}, "capabilities": self._server_capabilities or {}}
+        if not self._connected or self._process is None:
+            await self.connect()
+        try:
+            req = build_jsonrpc_request(
+                "initialize",
+                params={
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {"tools": {}},
+                    "clientInfo": _CLIENT_INFO,
+                },
+                request_id=self._next_id(),
+            )
+            resp = await self._send_receive(req)
+            result = resp.get("result", {})
+            self._server_info = result.get("serverInfo", {})
+            self._server_capabilities = result.get("capabilities", {})
+            self._initialized = True
+            await self._send_notification("notifications/initialized")
+            logger.info(
+                "MCP stdio initialized: %s (server=%s)",
+                self._server_name,
+                self._server_info.get("name", "unknown"),
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "MCP initialize handshake failed for %s, continuing without: %s",
+                self._server_name, sanitize_error(str(exc)),
+            )
+            self._initialized = True
+            return {}
 
     async def list_tools(self) -> list[MCPToolSpec]:
         if self._tools_cache is not None:
             return self._tools_cache
 
+        if not self._initialized:
+            await self.initialize()
+
         for attempt in range(self._max_retries + 1):
             try:
-                resp = await self._send_receive({"method": "tools/list", "params": {}})
+                req = build_jsonrpc_request("tools/list", params={}, request_id=self._next_id())
+                resp = await self._send_receive(req)
                 tools = [
                     MCPToolSpec(
                         name=t["name"],
@@ -164,10 +222,12 @@ class StdioMCPClient(BaseMCPClient):
         cid = call_id or f"call_{uuid4().hex}"
         for attempt in range(self._max_retries + 1):
             try:
-                resp = await self._send_receive({
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": arguments or {}},
-                })
+                req = build_jsonrpc_request(
+                    "tools/call",
+                    params={"name": tool_name, "arguments": arguments or {}},
+                    request_id=self._next_id(),
+                )
+                resp = await self._send_receive(req)
                 result = resp.get("result", {})
                 is_error = result.get("isError", False)
                 content_parts = result.get("content", [])

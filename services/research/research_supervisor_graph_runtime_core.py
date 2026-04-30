@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
-from uuid import uuid4
+from typing import Any, Literal
 
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.general_answer_agent import GeneralAnswerAgent
 from agents.literature_scout_agent import LiteratureScoutAgent
 from agents.paper_analysis_agent import PaperAnalysisAgent
 from agents.preference_memory_agent import PreferenceMemoryAgent
-from agents.research_knowledge_agent import ResearchKnowledgeAgent, merge_retrieval_hits
+from agents.research_knowledge_agent import ResearchKnowledgeAgent
 from agents.research_supervisor_agent import (
     ResearchSupervisorAgent,
     ResearchSupervisorDecision,
@@ -25,14 +24,9 @@ from domain.schemas.research import (
     ResearchAgentRunResponse,
     ResearchAgentTraceStep,
     ResearchMessage,
-    ResearchReport,
-    ResearchTask,
-    ResearchTaskAskResponse,
     ResearchTaskResponse,
     ResearchWorkspaceState,
 )
-from domain.schemas.retrieval import RetrievalHit
-from domain.schemas.research_functions import AnalyzePapersFunctionOutput, RecommendPapersFunctionOutput
 from domain.schemas.sub_manager import SubManagerState, TaskStep
 from domain.schemas.unified_runtime import (
     UNIFIED_ACTION_OUTPUT_METADATA_KEY,
@@ -40,15 +34,7 @@ from domain.schemas.unified_runtime import (
     UnifiedAgentResult,
     UnifiedAgentTask,
 )
-from reasoning import CoTReasoningAgent, PlanAndSolveReasoningAgent, ReasoningStrategySet
-from services.research.research_context import ResearchExecutionContext
 from services.research.unified_runtime import (
-    build_phase1_unified_agent_registry,
-    build_phase1_unified_blueprint,
-    build_phase1_unified_runtime_context,
-    serialize_unified_agent_messages,
-    serialize_unified_agent_registry,
-    serialize_unified_agent_results,
     serialize_unified_delegation_plan,
 )
 from typing import TYPE_CHECKING
@@ -61,19 +47,23 @@ from tooling.research_supervisor_tool_specs import (
     SupervisorActionToolOutput,
 )
 from context.compressor import ContextCompressor
+from core.skill_registry import SkillRegistry
+from core.skill_matcher import SkillMatcher
 from core.utils import normalize_topic_text as _normalize_topic_text_impl
+from services.research.research_action_dispatcher import ResearchActionDispatcher
+from services.research.research_agent_context_builder import ResearchAgentContextBuilder
+from services.research.research_agent_result_aggregator import ResearchAgentResultAggregator
+from services.research.research_capability_registry import ResearchCapabilityRegistry
+from services.research.research_skill_resolver import ResearchSkillResolver
 
 # --- Supervisor tool classes (extracted to services.research.supervisor_tools) ---
 from services.research.supervisor_tools import (  # noqa: E402
     AnalyzePaperFiguresTool,
     AnalyzePapersTool,
     AnswerQuestionTool,
-    AnswerResearchQuestionTool,
     CompressContextTool,
-    CreateResearchTaskTool,
     GeneralAnswerTool,
     ImportPapersTool,
-    ImportRelevantPapersTool,
     RecommendFromPreferencesTool,
     ResearchAgentGraphState,
     ResearchAgentTool,
@@ -84,11 +74,7 @@ from services.research.supervisor_tools import (  # noqa: E402
     UnderstandChartTool,
     UnderstandDocumentTool,
     WriteReviewTool,
-    _llm_stage_timeout_seconds,
     _message,
-    _now_iso,
-    _observation_envelope,
-    _should_fallback_llm_stage,
     _update_runtime_progress,
 )
 
@@ -118,21 +104,16 @@ class ResearchRuntimeBase:
             self.manager_agent.llm_adapter = llm_adapter
         self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
         self.max_steps = max_steps
-        self.reasoning_strategies = ReasoningStrategySet(
-            query_planning=PlanAndSolveReasoningAgent(llm_adapter=llm_adapter),
-            answer_synthesis=CoTReasoningAgent(llm_adapter=llm_adapter),
-        )
         self.literature_scout_agent = LiteratureScoutAgent(
             research_service.paper_search_service,
-            reasoning_strategies=self.reasoning_strategies,
+            llm_adapter=llm_adapter,
         )
         self.research_knowledge_agent = ResearchKnowledgeAgent(
-            reasoning_strategies=self.reasoning_strategies,
+            llm_adapter=llm_adapter,
         )
         self.research_writer_agent = ResearchWriterAgent(
             research_service.paper_search_service,
             llm_adapter=llm_adapter,
-            reasoning_strategies=self.reasoning_strategies,
         )
         self.paper_analysis_agent = PaperAnalysisAgent(
             paper_analysis_skill=PaperAnalyzer(
@@ -175,9 +156,25 @@ class ResearchRuntimeBase:
             UnderstandChartTool.name: UnderstandChartTool(chart_analysis_agent=self.chart_analysis_agent),
             AnalyzePaperFiguresTool.name: AnalyzePaperFiguresTool(chart_analysis_agent=self.chart_analysis_agent),
         }
+        self.unified_agent_delegates = self._build_unified_agent_delegates()
+        self.unified_execution_handlers = self._build_unified_execution_handlers()
         self.action_tool_registry = ToolRegistry()
         self.action_tool_executor = ToolExecutor(self.action_tool_registry)
         self._action_invocations: dict[str, tuple[ResearchAgentToolContext, ResearchSupervisorDecision]] = {}
+        self.skill_registry = SkillRegistry()
+        self.skill_matcher = SkillMatcher(self.skill_registry)
+        self.skill_registry.scan()
+        self.skill_resolver = ResearchSkillResolver(
+            registry=self.skill_registry,
+            matcher=self.skill_matcher,
+        )
+        self.context_builder = ResearchAgentContextBuilder(
+            runtime=self,
+            skill_resolver=self.skill_resolver,
+        )
+        self.capability_registry = ResearchCapabilityRegistry(runtime=self)
+        self.action_dispatcher = ResearchActionDispatcher(runtime=self)
+        self.result_aggregator = ResearchAgentResultAggregator(runtime=self)
         ResearchSupervisorActionRegistry(self.action_tool_registry).register_many(
             self._build_action_tool_handlers(),
             replace=True,
@@ -492,49 +489,9 @@ class ResearchRuntimeBase:
         return _normalize_topic_text_impl(text)
 
     def _build_tool_context(self, *, request: ResearchAgentRunRequest, graph_runtime: Any) -> ResearchAgentToolContext:
-        hydrated_request, restored_task_response = self._hydrate_request_from_conversation(request=request)
-        context = ResearchAgentToolContext(
-            request=hydrated_request,
-            research_service=self.research_service,
-            graph_runtime=graph_runtime,
-            warnings=[],
-        )
-        if restored_task_response is not None:
-            context.task_response = restored_task_response
-        elif hydrated_request.task_id:
-            try:
-                context.task_response = self.research_service.get_task(hydrated_request.task_id)
-            except KeyError:
-                context.warnings.append(f"research task not found: {hydrated_request.task_id}")
-        context.execution_context = self.research_service.build_execution_context(
-            graph_runtime=graph_runtime,
-            conversation_id=hydrated_request.conversation_id,
-            task=context.task_response.task if context.task_response else None,
-            report=context.task_response.report if context.task_response else None,
-            papers=context.task_response.papers if context.task_response else None,
-            document_ids=context.task_response.task.imported_document_ids if context.task_response else [],
-            selected_paper_ids=hydrated_request.selected_paper_ids,
-            skill_name=hydrated_request.skill_name,
-            reasoning_style=hydrated_request.reasoning_style,
-            metadata=hydrated_request.metadata,
-        )
-        context.unified_runtime_context = build_phase1_unified_runtime_context(
-            graph_runtime=graph_runtime,
-            research_service=self.research_service,
-        )
-        context.unified_agent_registry = build_phase1_unified_agent_registry(
-            graph_runtime=graph_runtime,
-            research_service=self.research_service,
-            legacy_delegates=self._legacy_unified_delegates(),
-            execution_handlers=self._legacy_unified_execution_handlers(),
-        )
-        context.unified_blueprint = build_phase1_unified_blueprint(
-            graph_runtime=graph_runtime,
-            research_service=self.research_service,
-        ).model_dump(mode="json")
-        return context
+        return self.context_builder.build(request=request, graph_runtime=graph_runtime)
 
-    def _legacy_unified_delegates(self) -> dict[str, Any]:
+    def _build_unified_agent_delegates(self) -> dict[str, Any]:
         return {
             "ResearchSupervisorAgent": self.manager_agent,
             "LiteratureScoutAgent": self.literature_scout_agent,
@@ -546,7 +503,7 @@ class ResearchRuntimeBase:
             "GeneralAnswerAgent": self.general_answer_agent,
         }
 
-    def _legacy_unified_execution_handlers(self) -> dict[str, Any]:
+    def _build_unified_execution_handlers(self) -> dict[str, Any]:
         return {
             "LiteratureScoutAgent": self._build_unified_execution_handler(
                 agent_name="LiteratureScoutAgent",
@@ -584,7 +541,7 @@ class ResearchRuntimeBase:
         agent_name: str,
         supported_task_types: set[str],
     ):
-        async def handler(task: UnifiedAgentTask, runtime_context, legacy_delegate):
+        async def handler(task: UnifiedAgentTask, runtime_context, agent_delegate):
             supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
             decision = runtime_context.metadata.get("supervisor_decision")
             if supervisor_context is None or decision is None:
@@ -606,8 +563,8 @@ class ResearchRuntimeBase:
                     metadata={
                         "execution_engine": "unified_agent_registry",
                         "execution_adapter": "phase1_wrapped_action_tool",
-                        "legacy_delegate_type": (
-                            legacy_delegate.__class__.__name__ if legacy_delegate is not None else None
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
                         ),
                     },
                 )
@@ -630,8 +587,8 @@ class ResearchRuntimeBase:
                     metadata={
                         "execution_engine": "unified_agent_registry",
                         "execution_adapter": "phase1_wrapped_action_tool",
-                        "legacy_delegate_type": (
-                            legacy_delegate.__class__.__name__ if legacy_delegate is not None else None
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
                         ),
                     },
                 )
@@ -644,8 +601,8 @@ class ResearchRuntimeBase:
             execution_metadata = {
                 "execution_engine": "unified_agent_registry",
                 "execution_adapter": "phase1_wrapped_action_tool",
-                "legacy_delegate_type": (
-                    legacy_delegate.__class__.__name__ if legacy_delegate is not None else None
+                "delegate_type": (
+                    agent_delegate.__class__.__name__ if agent_delegate is not None else None
                 ),
                 **self._action_tool_execution_metadata(execution_result),
             }
@@ -693,28 +650,10 @@ class ResearchRuntimeBase:
         return handler
 
     def _build_action_tool_handlers(self) -> dict[str, Any]:
-        return {
-            name: self._build_action_tool_handler(name)
-            for name in self.tools
-        }
+        return self.action_dispatcher.build_action_tool_handlers()
 
     def _build_action_tool_handler(self, action_name: str):
-        async def handler(*, invocation_id: str):
-            invocation = self._action_invocations.get(invocation_id)
-            if invocation is None:
-                raise RuntimeError(f"unknown supervisor action invocation: {invocation_id}")
-            context, decision = invocation
-            tool = self.tools.get(action_name)
-            if tool is None:
-                raise RuntimeError(f"supervisor action tool not registered: {action_name}")
-            result = await tool.run(context, decision)
-            return SupervisorActionToolOutput(
-                status=result.status if result.status in {"succeeded", "failed", "skipped"} else "failed",
-                observation=result.observation,
-                metadata=dict(result.metadata),
-            )
-
-        return handler
+        return self.action_dispatcher.build_action_tool_handler(action_name)
 
     async def _execute_action_tool(
         self,
@@ -723,23 +662,11 @@ class ResearchRuntimeBase:
         context: ResearchAgentToolContext,
         decision: ResearchSupervisorDecision,
     ):
-        invocation_id = f"supervisor_action_{uuid4().hex}"
-        self._action_invocations[invocation_id] = (context, decision)
-        try:
-            execution_result = await self.action_tool_executor.execute_tool_call(
-                action_name,
-                {"invocation_id": invocation_id},
-            )
-            normalized = self._normalize_execution_result_metadata(
-                action_name=action_name,
-                context=context,
-                execution_result=execution_result,
-            )
-            if normalized is not None:
-                execution_result.output = normalized
-            return execution_result
-        finally:
-            self._action_invocations.pop(invocation_id, None)
+        return await self.action_dispatcher.execute_action_tool(
+            action_name=action_name,
+            context=context,
+            decision=decision,
+        )
 
     def _normalize_execution_result_metadata(
         self,
@@ -748,35 +675,11 @@ class ResearchRuntimeBase:
         context: ResearchAgentToolContext,
         execution_result,
     ) -> SupervisorActionToolOutput | None:
-        output = execution_result.output
-        if output is None:
-            return None
-        if isinstance(output, SupervisorActionToolOutput):
-            metadata = dict(output.metadata)
-            metadata = self._with_standardized_observation(
-                action_name=action_name,
-                context=context,
-                status=output.status,
-                metadata=metadata,
-            )
-            return SupervisorActionToolOutput(
-                status=output.status,
-                observation=output.observation,
-                metadata=metadata,
-            )
-        if isinstance(output, dict):
-            metadata = self._with_standardized_observation(
-                action_name=action_name,
-                context=context,
-                status=str(output.get("status") or "failed"),
-                metadata=dict(output.get("metadata") or {}),
-            )
-            return SupervisorActionToolOutput(
-                status=str(output.get("status") or "failed"),
-                observation=str(output.get("observation") or execution_result.error_message or ""),
-                metadata=metadata,
-            )
-        return None
+        return self.action_dispatcher.normalize_execution_result_metadata(
+            action_name=action_name,
+            context=context,
+            execution_result=execution_result,
+        )
 
     def _with_standardized_observation(
         self,
@@ -786,103 +689,18 @@ class ResearchRuntimeBase:
         status: str,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
-        next_actions = list((context.workspace.next_actions if context.workspace is not None else [])[:3])
-        observation = dict(metadata.get("observation_envelope") or {})
-        progress_made = status == "succeeded" and metadata.get("reason") not in {"route_mismatch"}
-        confidence = metadata.get("confidence")
-        if action_name == "answer_question" and context.qa_result is not None:
-            confidence = context.qa_result.qa.confidence
-            next_actions = list((context.qa_result.report.workspace.next_actions if context.qa_result.report is not None else next_actions)[:3])
-        elif action_name == "general_answer":
-            confidence = metadata.get("confidence")
-        elif action_name == "search_literature":
-            confidence = 0.82 if status == "succeeded" else 0.35
-        elif action_name == "write_review":
-            confidence = 0.78 if status == "succeeded" else 0.4
-        elif action_name == "analyze_papers":
-            confidence = 0.8 if status == "succeeded" else 0.4
-        elif action_name == "recommend_from_preferences":
-            confidence = 0.83 if status == "succeeded" else 0.35
-        elif action_name == "compress_context":
-            confidence = 0.74 if status == "succeeded" else 0.3
-        missing_inputs = list(observation.get("missing_inputs") or [])
-        reason = str(metadata.get("reason") or "").strip()
-        if reason == "missing_task":
-            missing_inputs.append("task")
-        elif reason == "missing_document_file_path":
-            missing_inputs.append("document_file_path")
-        elif reason == "missing_chart_image_path":
-            missing_inputs.append("chart_image_path")
-        elif reason == "no_target_papers":
-            missing_inputs.append("paper_scope")
-        elif reason == "no_papers":
-            missing_inputs.append("papers")
-        elif reason == "missing_execution_context":
-            missing_inputs.append("execution_context")
-        suggested = list(observation.get("suggested_next_actions") or [])
-        if not suggested:
-            if status == "skipped" and reason in {"missing_task", "no_target_papers", "no_papers"}:
-                suggested = ["clarify_request", "search_literature"]
-            elif action_name == "answer_question":
-                suggested = ["analyze_papers", "compress_context"]
-            elif action_name == "search_literature":
-                suggested = ["write_review", "import_papers", "answer_question"]
-            elif action_name == "recommend_from_preferences":
-                suggested = ["search_literature", "answer_question"]
-            elif action_name == "general_answer" and metadata.get("reason") == "route_mismatch":
-                suggested = [str(metadata.get("suggested_action") or "answer_question")]
-            elif next_actions:
-                suggested = next_actions
-        state_delta = dict(observation.get("state_delta") or {})
-        if action_name == "search_literature" and context.task is not None:
-            state_delta.setdefault("task_id", context.task.task_id)
-            state_delta.setdefault("paper_count", len(context.papers))
-        if action_name == "answer_question" and context.qa_result is not None:
-            state_delta.setdefault("qa_task_id", context.qa_result.task_id)
-            state_delta.setdefault("paper_ids", list(context.qa_result.paper_ids))
-        if action_name == "recommend_from_preferences" and context.preference_recommendation_result is not None:
-            state_delta.setdefault(
-                "recommended_paper_ids",
-                [item.paper_id for item in context.preference_recommendation_result.recommendations],
-            )
-        if action_name == "general_answer":
-            state_delta.setdefault("ignore_research_context", bool(metadata.get("ignore_research_context")))
-        metadata["observation_envelope"] = _observation_envelope(
-            progress_made=progress_made,
-            confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
-            missing_inputs=list(dict.fromkeys(item for item in missing_inputs if item)),
-            suggested_next_actions=list(dict.fromkeys(str(item).strip() for item in suggested if str(item).strip()))[:4],
-            state_delta=state_delta,
+        return self.action_dispatcher.with_standardized_observation(
+            action_name=action_name,
+            context=context,
+            status=status,
+            metadata=metadata,
         )
-        return metadata
 
     def _action_tool_result_from_execution(self, execution_result) -> ResearchToolResult | None:
-        output = execution_result.output
-        if output is None:
-            return None
-        if isinstance(output, SupervisorActionToolOutput):
-            return ResearchToolResult(
-                status=output.status,
-                observation=output.observation,
-                metadata=dict(output.metadata),
-            )
-        if isinstance(output, dict):
-            return ResearchToolResult(
-                status=str(output.get("status") or "failed"),
-                observation=str(output.get("observation") or execution_result.error_message or ""),
-                metadata=dict(output.get("metadata") or {}),
-            )
-        return None
+        return self.action_dispatcher.action_tool_result_from_execution(execution_result)
 
     def _action_tool_execution_metadata(self, execution_result) -> dict[str, Any]:
-        metadata = {
-            "supervisor_action_call_id": execution_result.call_id,
-            "supervisor_action_tool_status": execution_result.status,
-            "supervisor_action_attempt_count": execution_result.attempt_count,
-        }
-        if execution_result.error_message:
-            metadata["supervisor_action_error"] = execution_result.error_message
-        return metadata
+        return self.action_dispatcher.action_tool_execution_metadata(execution_result)
 
     async def _execute_unified_worker(
         self,
@@ -892,60 +710,19 @@ class ResearchRuntimeBase:
         active_message: AgentMessage | None,
         worker_agent: str,
     ) -> UnifiedAgentResult | None:
-        if active_message is None:
-            return None
-        registry = context.unified_agent_registry
-        runtime_context = context.unified_runtime_context
-        if registry is None or runtime_context is None:
-            return None
-        executor = registry.get(worker_agent)
-        if executor is None:
-            return None
-        runtime_context.metadata.update(
-            {
-                "supervisor_tool_context": context,
-                "supervisor_decision": decision,
-                "supervisor_worker_agent": worker_agent,
-                "supervisor_action_name": decision.action_name,
-            }
+        return await self.action_dispatcher.execute_unified_worker(
+            context=context,
+            decision=decision,
+            active_message=active_message,
+            worker_agent=worker_agent,
         )
-        task = UnifiedAgentTask.from_agent_message(
-            active_message,
-            preferred_skill_name=self._preferred_skill_name_for_message(
-                context,
-                active_message=active_message,
-                worker_agent=worker_agent,
-            ),
-            available_tool_names=self._available_tool_names_for_agent(
-                context,
-                agent_name=worker_agent,
-            ),
-        )
-        return await executor.execute(task, runtime_context)
 
     def _research_tool_result_from_unified_result(
         self,
         unified_result: UnifiedAgentResult,
     ) -> ResearchToolResult:
-        payload = dict(unified_result.payload)
-        tool_metadata = payload.get("tool_metadata")
-        metadata = dict(tool_metadata) if isinstance(tool_metadata, dict) else {}
-        metadata.update(dict(unified_result.metadata))
-        action_output = unified_result.action_output or UnifiedAgentResult.extract_action_output(
-            payload=payload,
-            metadata=metadata,
-        )
-        if action_output is not None:
-            metadata.setdefault(
-                UNIFIED_ACTION_OUTPUT_METADATA_KEY,
-                dict(action_output),
-            )
-            for key, value in action_output.items():
-                metadata.setdefault(key, value)
-        return ResearchToolResult(
-            status=unified_result.status,
-            observation=str(payload.get("observation") or ""),
-            metadata=metadata,
+        return self.action_dispatcher.research_tool_result_from_unified_result(
+            unified_result
         )
 
     async def _decide_next_action(self, state: ResearchAgentGraphState) -> ResearchSupervisorDecision:
@@ -1006,6 +783,16 @@ class ResearchRuntimeBase:
         request = context.request
         if request.mode == "qa" and context.qa_result is not None:
             return True
+        latest_result = state.get("agent_results", [])[-1] if state.get("agent_results") else None
+        workflow_constraint = str((request.metadata or {}).get("workflow_constraint") or "").strip()
+        if (
+            workflow_constraint == "discovery_only"
+            and latest_result is not None
+            and latest_result.task_type == "search_literature"
+            and latest_result.status == "succeeded"
+            and context.report is not None
+        ):
+            return True
         if context.preference_recommendation_result is not None:
             return True
         if request.advanced_action in {"analyze", "compare", "recommend"} and (
@@ -1013,7 +800,6 @@ class ResearchRuntimeBase:
         ):
             return True
         new_topic = bool(state.get("new_topic_detected"))
-        latest_result = state.get("agent_results", [])[-1] if state.get("agent_results") else None
         latest_observation = {}
         if latest_result is not None:
             observation = latest_result.payload.get("observation_envelope")
@@ -1046,7 +832,14 @@ class ResearchRuntimeBase:
             and not latest_next_actions.intersection({"import_papers", "answer_question"})
         ):
             return True
-        if not new_topic and context.task_response is not None and context.report is not None and not request.auto_import and request.mode != "qa":
+        if (
+            workflow_constraint != "discovery_only"
+            and not new_topic
+            and context.task_response is not None
+            and context.report is not None
+            and not request.auto_import
+            and request.mode != "qa"
+        ):
             return True
         if context.import_attempted and context.import_result is not None and not request.message.strip():
             return True
@@ -1454,7 +1247,7 @@ class ResearchRuntimeBase:
             selected_paper_ids=context.request.selected_paper_ids,
         )
         if execution_context.session_id:
-            self.research_service.memory_manager.save_context(
+            self.research_service.memory_gateway.save_context(
                 execution_context.session_id,
                 research_context,
             )
@@ -1908,6 +1701,7 @@ class ResearchRuntimeBase:
             goal=context.request.message,
             mode=context.request.mode,
             route_mode=route_mode,
+            workflow_constraint=str(request_metadata.get("workflow_constraint") or "").strip() or None,
             active_thread_id=active_thread_id,
             active_thread_topic=active_thread_topic,
             topic_continuity_score=topic_continuity_score,
@@ -1951,6 +1745,7 @@ class ResearchRuntimeBase:
             failed_actions=failed_actions,
             candidate_papers=self._candidate_paper_scope_for_manager(papers),
             user_intent=user_intent.model_dump(mode="json"),
+            skill_context=context.skill_context,
         )
 
     def _topic_continuity_score(self, current: str | None, previous: str | None) -> float:
@@ -2008,147 +1803,18 @@ class ResearchRuntimeBase:
         clarification_request: str | None,
         active_plan_id: str | None,
     ) -> ResearchAgentRunResponse:
-        warnings = list(context.warnings or [])
-        if context.task_response:
-            warnings.extend(warning for warning in context.task_response.warnings if warning not in warnings)
-        if context.import_result:
-            for result in context.import_result.results:
-                if result.status == "failed" and result.error_message:
-                    warning = f"import failed: {result.title}: {result.error_message}"
-                    if warning not in warnings:
-                        warnings.append(warning)
-        if clarification_request and clarification_request not in warnings:
-            warnings.append(clarification_request)
-        workspace = self._resolve_workspace(context=context, trace=trace, failed=failed, exhausted=exhausted)
-        advanced_strategy = self._resolved_advanced_strategy(context, workspace=workspace)
-        workspace = workspace.model_copy(
-            update={
-                "metadata": {
-                    **workspace.metadata,
-                    "advanced_strategy": advanced_strategy.model_dump(mode="json"),
-                }
-            }
-        )
-        context.task_response = self.research_service.persist_runtime_state(
-            task_response=context.task_response,
-            workspace=workspace,
-            conversation_id=request.conversation_id,
-            advanced_strategy=advanced_strategy,
-        )
-        messages = self._build_messages(
-            request,
-            context,
-            trace,
-            workspace,
-            agent_messages=agent_messages,
-            agent_results=agent_results,
-            clarification_request=clarification_request,
-            replan_count=replan_count,
-        )
-        self._log_internal_runtime_state(
+        return self.result_aggregator.build_response(
             request=request,
-            workspace=workspace,
+            context=context,
             trace=trace,
+            failed=failed,
+            exhausted=exhausted,
             agent_messages=agent_messages,
             agent_results=agent_results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
             clarification_request=clarification_request,
-        )
-        next_actions = self._next_actions(context, workspace, clarification_request=clarification_request)
-        status = "failed" if failed and not context.task_response else "partial" if failed or warnings else "succeeded"
-        runtime_metadata = self._response_runtime_metadata()
-        active_paper_ids = (
-            list(context.execution_context.research_context.active_papers)
-            if context.execution_context and context.execution_context.research_context
-            else self._active_paper_ids_for_manager(context)
-        )
-        return ResearchAgentRunResponse(
-            status=status,
-            task=context.task,
-            papers=context.papers,
-            report=context.report,
-            import_result=context.import_result,
-            qa=context.qa_result.qa if context.qa_result else None,
-            parsed_document=context.parsed_document,
-            document_index_result=context.document_index_result,
-            chart=getattr(context.chart_result, "chart", None) if context.chart_result is not None else None,
-            chart_graph_text=getattr(context.chart_result, "graph_text", None) if context.chart_result is not None else None,
-            messages=messages,
-            trace=trace,
-            warnings=warnings,
-            next_actions=next_actions,
-            workspace=workspace,
-            metadata={
-                **runtime_metadata,
-                "tool_count": len(self.action_tool_registry.list_tools(include_disabled=False)),
-                "supervisor_action_tool_engine": "tool_executor",
-                "supervisor_worker_execution_engine": (
-                    "unified_agent_registry" if context.unified_agent_registry is not None else "legacy_action_tools"
-                ),
-                "supervisor_action_trace_count": len(self.action_tool_executor.get_traces()),
-                "unified_supervisor_mode": "pure_supervisor",
-                "unified_runtime_blueprint": context.unified_blueprint or {},
-                "unified_agent_registry": serialize_unified_agent_registry(context.unified_agent_registry),
-                "task_id": context.task.task_id if context.task else None,
-                "qa_task_id": context.qa_result.task_id if context.qa_result else None,
-                "active_paper_ids": active_paper_ids,
-                "route_mode": (
-                    ((context.request.metadata or {}).get("context") or {}).get("route_mode")
-                    if isinstance((context.request.metadata or {}).get("context"), dict)
-                    else None
-                ),
-                "active_thread_id": (
-                    ((context.request.metadata or {}).get("context") or {}).get("active_thread_id")
-                    if isinstance((context.request.metadata or {}).get("context"), dict)
-                    else None
-                ),
-                "session_id": context.execution_context.session_id if context.execution_context else None,
-                "memory_enabled": context.execution_context.memory_enabled if context.execution_context else False,
-                "has_document_tool_output": context.parsed_document is not None,
-                "has_chart_tool_output": context.chart_result is not None,
-                "has_general_answer": context.general_answer is not None,
-                "preference_recommendations": (
-                    context.preference_recommendation_result.model_dump(mode="json")
-                    if context.preference_recommendation_result is not None
-                    else workspace.metadata.get("latest_preference_recommendations")
-                ),
-                "workspace_stage": workspace.current_stage,
-                "workspace_summary": workspace.status_summary,
-                "stop_reason": workspace.stop_reason,
-                "trace_steps": len(trace),
-                "manager_decision_count": planner_runs,
-                "recovery_decision_count": replan_count,
-                "agent_message_count": len(agent_messages),
-                "agent_result_count": len(agent_results),
-                "active_decision_batch_id": active_plan_id,
-                "clarification_requested": bool(clarification_request),
-                "advanced_strategy": advanced_strategy.model_dump(mode="json"),
-                "delegation_plan": self._serialize_task_plan(agent_messages, agent_results),
-                "unified_delegation_plan": serialize_unified_delegation_plan(
-                    agent_messages,
-                    agent_results,
-                    registry=context.unified_agent_registry,
-                ),
-                "agent_lane_states": (
-                    {
-                        name: state.model_dump(mode="json")
-                        for name, state in context.execution_context.research_context.sub_manager_states.items()
-                    }
-                    if context.execution_context and context.execution_context.research_context
-                    else {}
-                ),
-                "agent_messages": [message.model_dump(mode="json") for message in agent_messages],
-                "agent_results": [result.model_dump(mode="json") for result in agent_results],
-                "general_answer": context.general_answer,
-                "general_answer_metadata": context.general_answer_metadata or {},
-                "unified_agent_messages": serialize_unified_agent_messages(
-                    agent_messages,
-                    registry=context.unified_agent_registry,
-                ),
-                "unified_agent_results": serialize_unified_agent_results(
-                    agent_results,
-                    registry=context.unified_agent_registry,
-                ),
-            },
+            active_plan_id=active_plan_id,
         )
 
     def _log_internal_runtime_state(

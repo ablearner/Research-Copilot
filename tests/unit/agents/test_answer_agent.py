@@ -276,9 +276,8 @@ async def test_answer_agent_preserves_chart_metadata_for_answer_chain() -> None:
 
 
 @pytest.mark.asyncio
-async def test_answer_agent_uses_cot_for_research_collection_when_not_react(mock_llm, sample_evidence) -> None:
-    cot_reasoner = CoTReasonerStub()
-    response = await AnswerAgent(mock_llm, cot_reasoning_agent=cot_reasoner).answer_with_evidence(
+async def test_answer_agent_uses_chain_for_research_collection(mock_llm, sample_evidence) -> None:
+    response = await AnswerAgent(mock_llm).answer_with_evidence(
         "哪篇论文最值得优先阅读？",
         EvidenceBundle(evidences=[sample_evidence]),
         metadata={"qa_mode": "research_collection"},
@@ -286,29 +285,24 @@ async def test_answer_agent_uses_cot_for_research_collection_when_not_react(mock
         memory_hints={"preferred_sources": ["survey"]},
     )
 
-    assert response.metadata["reasoning_mode"] == "cot_stub"
-    assert len(cot_reasoner.calls) == 1
-    assert cot_reasoner.calls[0]["memory_hints"] == {"preferred_sources": ["survey"]}
-    assert mock_llm.calls == []
+    assert response.metadata["answered_by"] == "AnswerAgent"
+    assert mock_llm.calls == ["generate_structured"]
 
 
 @pytest.mark.asyncio
-async def test_answer_agent_uses_cot_as_default_reasoning_style(mock_llm, sample_evidence) -> None:
-    cot_reasoner = CoTReasonerStub()
-    response = await AnswerAgent(mock_llm, cot_reasoning_agent=cot_reasoner).answer_with_evidence(
+async def test_answer_agent_uses_chain_as_default_reasoning_style(mock_llm, sample_evidence) -> None:
+    response = await AnswerAgent(mock_llm).answer_with_evidence(
         "这份材料的核心结论是什么？",
         EvidenceBundle(evidences=[sample_evidence]),
     )
 
-    assert response.metadata["reasoning_mode"] == "cot_stub"
-    assert len(cot_reasoner.calls) == 1
-    assert mock_llm.calls == []
+    assert response.metadata["answered_by"] == "AnswerAgent"
+    assert mock_llm.calls == ["generate_structured"]
 
 
 @pytest.mark.asyncio
-async def test_answer_agent_keeps_react_path_outside_cot(mock_llm, sample_evidence) -> None:
-    cot_reasoner = CoTReasonerStub()
-    response = await AnswerAgent(mock_llm, cot_reasoning_agent=cot_reasoner).answer_with_evidence(
+async def test_answer_agent_uses_chain_for_react_style(mock_llm, sample_evidence) -> None:
+    response = await AnswerAgent(mock_llm).answer_with_evidence(
         "哪篇论文最值得优先阅读？",
         EvidenceBundle(evidences=[sample_evidence]),
         metadata={"qa_mode": "research_collection", "reasoning_style": "react"},
@@ -316,5 +310,4 @@ async def test_answer_agent_keeps_react_path_outside_cot(mock_llm, sample_eviden
     )
 
     assert response.metadata["answered_by"] == "AnswerAgent"
-    assert cot_reasoner.calls == []
     assert mock_llm.calls == ["generate_structured"]

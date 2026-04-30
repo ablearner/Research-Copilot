@@ -4,13 +4,15 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from apps.api.audit import audit_api_call
+from apps.api.document_upload import handle_upload_document_request
 from apps.api.deps import get_graph_runtime, get_literature_research_service
 from apps.api.exception_handlers import build_error_detail
 from apps.api.security import build_quota_context, require_api_key
+from domain.schemas.api import UploadDocumentResponse
 from domain.schemas.research import (
     AnalyzeResearchPaperFigureRequest,
     AnalyzeResearchPaperFigureResponse,
@@ -128,6 +130,17 @@ async def _run_research_agent_impl(
         ) from exc
 
 
+@router.post("/documents/upload", response_model=UploadDocumentResponse)
+async def upload_research_document(
+    request: Request,
+    file: UploadFile = File(...),
+    _: None = Depends(require_api_key),
+    quota_context: dict[str, str] = Depends(build_quota_context),
+) -> UploadDocumentResponse:
+    request.state.quota_context = quota_context
+    return await handle_upload_document_request(request=request, file=file)
+
+
 @router.post("/agent/stream")
 async def run_research_agent_stream(
     request: ResearchAgentRunRequest,
@@ -168,7 +181,7 @@ async def run_research_agent_stream(
                     event = await asyncio.wait_for(progress_queue.get(), timeout=2.0)
                     yield f"event: progress\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 except asyncio.TimeoutError:
-                    yield f"event: heartbeat\ndata: {{}}\n\n"
+                    yield "event: heartbeat\ndata: {}\n\n"
             result = task.result()
             if request.conversation_id:
                 research_service.record_agent_turn(
@@ -727,12 +740,18 @@ async def rerun_todo_search(
     request: ResearchTodoActionRequest,
     http_request: Request,
     research_service: LiteratureResearchService = Depends(get_literature_research_service),
+    graph_runtime: RagRuntime = Depends(get_graph_runtime),
     _: None = Depends(require_api_key),
     quota_context: dict[str, str] = Depends(build_quota_context),
 ) -> ResearchTodoActionResponse:
     try:
         trace_id = f"research_todo_search_{uuid4().hex}"
-        response = await research_service.rerun_todo_search(task_id, todo_id, request)
+        response = await research_service.rerun_todo_search(
+            task_id,
+            todo_id,
+            request,
+            graph_runtime=graph_runtime,
+        )
         audit_api_call(
             http_request,
             route=f"/research/tasks/{task_id}/todos/{todo_id}/search",

@@ -5,14 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from domain.schemas.agent_message import AgentMessage
-from domain.schemas.research import PaperCandidate, ResearchReport
+from domain.schemas.research import PaperCandidate
 from domain.schemas.research_functions import AnalyzePapersFunctionOutput
 from agents.research_supervisor_agent import ResearchSupervisorDecision
 from core.utils import now_iso as _now_iso
-from services.research.supervisor_tools.base import (
-    ResearchAgentToolContext,
-    ResearchToolResult,
-)
+from services.research.supervisor_tools.base import ResearchAgentToolContext
 
 
 class _PlannerMessageTool:
@@ -140,7 +137,7 @@ class _WorkspacePersistenceMixin:
                 selected_paper_ids=self._dedupe_ids(selected_paper_ids),
             )
             if execution_context.session_id:
-                context.research_service.memory_manager.save_context(
+                context.research_service.memory_gateway.save_context(
                     execution_context.session_id,
                     research_context,
                 )

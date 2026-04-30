@@ -2,7 +2,6 @@ import logging
 
 from core.config import Settings
 from domain.schemas.research import PaperCandidate
-from mcp.client.registry import MCPClientRegistry
 from rag_runtime.runtime import RagRuntime
 from services.research.capabilities import (
     CodeLinker,
@@ -156,17 +155,7 @@ def build_literature_research_service(
         external_tool_registry = getattr(graph_runtime, "external_tool_registry", None) or getattr(
             graph_runtime, "mcp_client_registry", None
         )
-    reasoning_strategies = getattr(graph_runtime, "reasoning_strategies", None) if graph_runtime is not None else None
-    plan_and_solve_reasoning_agent = (
-        getattr(reasoning_strategies, "query_planning", None)
-        or getattr(graph_runtime, "plan_and_solve_reasoning_agent", None)
-        if graph_runtime is not None
-        else None
-    )
-    llm_adapter = (
-        getattr(reasoning_strategies, "llm_adapter", None)
-        or getattr(plan_and_solve_reasoning_agent, "llm_adapter", None)
-    )
+    llm_adapter = getattr(graph_runtime, "llm_adapter", None) if graph_runtime is not None else None
     writing_polish_skill = WritingPolisher(llm_adapter=llm_adapter)
     review_writing_skill = ReviewWriter(
         survey_writer=SurveyWriter(llm_adapter=llm_adapter),

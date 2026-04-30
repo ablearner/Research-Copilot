@@ -63,12 +63,12 @@ class UnifiedAgentRegistry:
 @dataclass(slots=True)
 class PhaseOneUnifiedAgentAdapter:
     descriptor: UnifiedAgentDescriptor
-    legacy_delegate: Any | None = None
+    agent_delegate: Any | None = None
     execution_handler: UnifiedExecutionHandler | None = None
 
     async def execute(self, task: UnifiedAgentTask, context: UnifiedRuntimeContext) -> UnifiedAgentResult:
         if self.execution_handler is not None:
-            return await self.execution_handler(task, context, self.legacy_delegate)
+            return await self.execution_handler(task, context, self.agent_delegate)
         del context
         return UnifiedAgentResult(
             task_id=task.task_id,
@@ -85,8 +85,8 @@ class PhaseOneUnifiedAgentAdapter:
             metadata={
                 "migration_phase": "phase1_skeleton",
                 "reason": "legacy runtime still owns execution; this adapter only standardizes composition metadata",
-                "legacy_delegate_type": (
-                    self.legacy_delegate.__class__.__name__ if self.legacy_delegate is not None else None
+                "delegate_type": (
+                    self.agent_delegate.__class__.__name__ if self.agent_delegate is not None else None
                 ),
             },
         )
@@ -260,7 +260,7 @@ def build_phase1_unified_agent_registry(
     *,
     graph_runtime: Any,
     research_service: Any,
-    legacy_delegates: dict[str, Any] | None = None,
+    agent_delegates: dict[str, Any] | None = None,
     execution_handlers: dict[str, UnifiedExecutionHandler] | None = None,
 ) -> UnifiedAgentRegistry:
     blueprint = build_phase1_unified_blueprint(
@@ -268,13 +268,13 @@ def build_phase1_unified_agent_registry(
         research_service=research_service,
     )
     registry = UnifiedAgentRegistry()
-    delegates = legacy_delegates or {}
+    delegates = agent_delegates or {}
     handlers = execution_handlers or {}
     for descriptor in blueprint.agent_descriptors:
         registry.register(
             PhaseOneUnifiedAgentAdapter(
                 descriptor=descriptor,
-                legacy_delegate=delegates.get(descriptor.name),
+                agent_delegate=delegates.get(descriptor.name),
                 execution_handler=handlers.get(descriptor.name),
             )
         )

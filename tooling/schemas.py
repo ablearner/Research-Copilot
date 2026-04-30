@@ -12,7 +12,7 @@ from domain.schemas.chart import ChartSchema
 from domain.schemas.document import ParsedDocument
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit
-from rag_runtime.schemas import DocumentIndexResult
+from rag_runtime.schemas import DocumentIndexResult, FusedAskResult
 
 ToolHandler = Callable[..., Awaitable[Any]]
 ToolCallStatus = Literal[
@@ -143,6 +143,40 @@ class AnswerWithEvidenceToolInput(BaseModel):
     memory_hints: dict[str, Any] = Field(default_factory=dict)
 
 
+class AskDocumentToolInput(BaseModel):
+    question: str = Field(..., min_length=1)
+    doc_id: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
+    top_k: int = Field(default=10, ge=1, le=100)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    session_id: str | None = None
+    task_intent: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    reasoning_style: str | None = None
+
+
+class AskFusedToolInput(BaseModel):
+    question: str = Field(..., min_length=1)
+    image_path: str = Field(..., min_length=1)
+    doc_id: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
+    page_id: str | None = None
+    page_number: int = Field(default=1, ge=1)
+    chart_id: str | None = None
+    session_id: str | None = None
+    top_k: int = Field(default=10, ge=1, le=100)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    reasoning_style: str | None = None
+
+
+class GraphBackfillDocumentToolInput(BaseModel):
+    parsed_document: ParsedDocument
+    charts: list[ChartSchema] = Field(default_factory=list)
+    session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class UnderstandChartToolOutput(BaseModel):
     chart: ChartSchema
     graph_text: str
@@ -169,4 +203,7 @@ TOOL_OUTPUT_SCHEMAS: dict[str, type[Any]] = {
     "hybrid_retrieve": HybridRetrieveToolOutput,
     "query_graph_summary": GraphSummaryToolOutput,
     "answer_with_evidence": QAResponse,
+    "ask_document": QAResponse,
+    "ask_fused": FusedAskResult,
+    "graph_backfill_document": DocumentIndexResult,
 }

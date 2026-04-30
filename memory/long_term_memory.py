@@ -226,8 +226,6 @@ class SQLiteLongTermMemoryStore:
         return updated
 
     def search(self, query: LongTermMemoryQuery) -> LongTermMemorySearchResult:
-        import json
-
         search_terms = " ".join(query.keywords) + " " + query.query if query.keywords else query.query
         fts_query = " OR ".join(
             f'"{term}"' for term in _tokenize(search_terms) if term

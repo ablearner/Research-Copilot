@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -117,6 +119,9 @@ class MCPClientRegistry:
 
         registered: list[str] = []
         for name, cfg in servers.items():
+            if not cfg.get("enabled", True):
+                logger.info("MCP server %s is disabled, skipping", name)
+                continue
             transport = cfg.get("transport", "stdio")
             timeout = cfg.get("timeout", 120)
             retries = cfg.get("max_retries", 5)
@@ -165,6 +170,49 @@ class MCPClientRegistry:
                     tool.name, tool.server_name, issues,
                 )
         return warnings
+
+    def register_from_json_file(self, path: str | Path) -> list[str]:
+        """Load ``mcp_servers.json`` and register all enabled servers.
+
+        The file may contain either::
+
+            {"servers": {"name": {...}, ...}}
+
+        or a flat dict::
+
+            {"name": {...}, ...}
+
+        Returns list of registered server names, or empty list if file
+        does not exist or is invalid.
+        """
+        filepath = Path(path)
+        if not filepath.is_file():
+            logger.debug("MCP config file not found: %s", filepath)
+            return []
+        try:
+            raw = json.loads(filepath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read MCP config %s: %s", filepath, exc)
+            return []
+        servers = raw.get("servers", raw) if isinstance(raw, dict) else {}
+        if not isinstance(servers, dict):
+            logger.warning("Invalid MCP config format in %s", filepath)
+            return []
+        registered = self.register_from_config(servers)
+        if registered:
+            logger.info(
+                "Registered %d MCP server(s) from %s: %s",
+                len(registered), filepath, ", ".join(registered),
+            )
+        return registered
+
+    async def initialize_all(self) -> None:
+        """Run initialize handshake on all registered clients."""
+        for name, client in self._clients.items():
+            try:
+                await client.initialize()
+            except Exception:
+                logger.warning("MCP initialize failed for %s", name, exc_info=True)
 
     def _target_clients(self, server_name: str | None) -> list[tuple[str, BaseMCPClient]]:
         if server_name:

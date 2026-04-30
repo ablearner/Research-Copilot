@@ -1,0 +1,26 @@
+{
+  "_comment": "MCP Server 配置文件。添加外部 MCP 工具服务器后重启生效。",
+  "servers": {
+    "example-stdio-server": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-example"],
+      "env": {
+        "API_KEY": "your-api-key-here"
+      },
+      "timeout": 120,
+      "max_retries": 3,
+      "enabled": true
+    },
+    "example-http-server": {
+      "transport": "http",
+      "url": "http://localhost:3001",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      },
+      "timeout": 60,
+      "max_retries": 3,
+      "enabled": true
+    }
+  }
+}

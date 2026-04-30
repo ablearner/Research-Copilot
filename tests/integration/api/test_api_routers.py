@@ -9,12 +9,8 @@ from starlette.datastructures import UploadFile
 from types import SimpleNamespace
 
 from apps.api.main import create_app
-from apps.api.routers.ask import AskDocumentRequest, AskFusedRequest, ask_document, ask_fused
-from apps.api.routers.charts import AskChartRequest, UnderstandChartRequest, ask_chart, understand_chart
 from apps.api.routers.health import health_check
-from apps.api.routers.index import IndexDocumentRequest, index_document
 from apps.api.routers.mcp import MCPToolCallRequest, call_tool as call_mcp_tool
-from apps.api.routers.parse import ParseDocumentRequest, parse_document
 from apps.api.routers.research import (
     create_task,
     get_job,
@@ -25,10 +21,11 @@ from apps.api.routers.research import (
     reset_research_workspace,
     rerun_todo_search,
     run_research_agent,
+    run_task,
     search_papers,
+    upload_research_document,
     update_todo_status,
 )
-from apps.api.routers.upload import upload_document
 from apps.api.security import build_quota_context, require_api_key
 from domain.schemas.api import QAResponse
 from domain.schemas.chart import ChartSchema
@@ -248,6 +245,9 @@ class LiteratureResearchServiceStub:
             workspace=task_response.task.workspace,
         )
 
+    async def run_task(self, task_id, *, graph_runtime=None, conversation_id=None):
+        return self.get_task(task_id)
+
     def build_execution_context(self, **kwargs):
         return ResearchExecutionContext()
 
@@ -310,7 +310,7 @@ class LiteratureResearchServiceStub:
         ]
         return response
 
-    async def rerun_todo_search(self, task_id: str, todo_id: str, request):
+    async def rerun_todo_search(self, task_id: str, todo_id: str, request, *, graph_runtime=None):
         response = self.get_task(task_id)
         response.task.todo_items = [
             ResearchTodoItem(
@@ -500,17 +500,8 @@ def test_app_registers_api_routes() -> None:
     app = create_app()
     paths = {route.path for route in app.routes if hasattr(route, "path")}
 
-    assert "/documents/upload" in paths
-    assert "/documents/parse" in paths
-    assert "/documents/index" in paths
-    assert "/documents/ask" in paths
-    assert "/documents/ask/fused" in paths
     assert "/uploads" in paths
-    assert "/upload/documents" in paths
-    assert "/parse/documents" in paths
-    assert "/index/documents" in paths
-    assert "/charts/understand" in paths
-    assert "/ask/documents" in paths
+    assert "/research/documents/upload" in paths
     assert "/research/papers/search" in paths
     assert "/research/agent" in paths
     assert "/research/agent/run" in paths
@@ -518,13 +509,26 @@ def test_app_registers_api_routes() -> None:
     assert "/research/tasks/{task_id}/papers/import" in paths
     assert "/research/tasks/{task_id}/papers/import/jobs" in paths
     assert "/mcp/discovery" in paths
+    assert "/documents/upload" not in paths
+    assert "/documents/parse" not in paths
+    assert "/documents/index" not in paths
+    assert "/documents/ask" not in paths
+    assert "/documents/ask/fused" not in paths
+    assert "/upload/documents" not in paths
+    assert "/parse/documents" not in paths
+    assert "/index/documents" not in paths
+    assert "/charts/understand" not in paths
+    assert "/ask/documents" not in paths
     assert app.openapi()
 
 
 def test_app_disables_upload_preview_route_outside_local(tmp_path, monkeypatch) -> None:
     settings = make_upload_settings(tmp_path, app_env="production")
     graph_runtime = SimpleNamespace(
-        external_tool_registry=SimpleNamespace(register_server=lambda *args, **kwargs: None)
+        external_tool_registry=SimpleNamespace(
+            register_server=lambda *args, **kwargs: None,
+            register_from_json_file=lambda *args, **kwargs: None,
+        )
     )
     research_service = SimpleNamespace(reset_state=AsyncMock())
     monkeypatch.setattr("apps.api.main.get_settings", lambda: settings)
@@ -558,10 +562,10 @@ def test_upload_routes_require_api_key_dependencies() -> None:
     upload_routes = [
         route
         for route in app.routes
-        if isinstance(route, APIRoute) and route.path in {"/documents/upload", "/upload/documents"}
+        if isinstance(route, APIRoute) and route.path == "/research/documents/upload"
     ]
 
-    assert {route.path for route in upload_routes} == {"/documents/upload", "/upload/documents"}
+    assert {route.path for route in upload_routes} == {"/research/documents/upload"}
     for route in upload_routes:
         dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
         assert require_api_key in dependency_calls
@@ -569,30 +573,17 @@ def test_upload_routes_require_api_key_dependencies() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_router_handler() -> None:
-    runtime = GraphRuntimeStub()
-    response = await parse_document(
-        ParseDocumentRequest(file_path="sample.pdf", document_id="doc1"),
-        http_request=make_request(),
-        graph_runtime=runtime,
-        quota_context={},
-    )
-
-    assert response.parsed_document.id == "doc1"
-    assert runtime.last_invoke_state is not None
-
-
-@pytest.mark.asyncio
-async def test_upload_router_handler_persists_document(tmp_path, monkeypatch) -> None:
+async def test_research_upload_router_handler_persists_document(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "apps.api.routers.upload.get_settings",
+        "apps.api.document_upload.get_settings",
         lambda: make_upload_settings(tmp_path),
     )
 
     upload = make_upload_file(b"%PDF-1.4 mock")
-    response = await upload_document(
+    response = await upload_research_document(
         request=make_request(),
         file=upload,
+        quota_context={},
     )
 
     assert response.status == "uploaded"
@@ -604,16 +595,17 @@ async def test_upload_router_handler_persists_document(tmp_path, monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_upload_router_handler_rejects_oversized_document(tmp_path, monkeypatch) -> None:
+async def test_research_upload_router_handler_rejects_oversized_document(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "apps.api.routers.upload.get_settings",
+        "apps.api.document_upload.get_settings",
         lambda: make_upload_settings(tmp_path, upload_max_bytes=4),
     )
 
     with pytest.raises(HTTPException) as excinfo:
-        await upload_document(
+        await upload_research_document(
             request=make_request(),
             file=make_upload_file(b"12345"),
+            quota_context={},
         )
 
     assert excinfo.value.status_code == 413
@@ -622,110 +614,18 @@ async def test_upload_router_handler_rejects_oversized_document(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_index_router_handler() -> None:
-    runtime = GraphRuntimeStub()
-    parsed = ParsedDocument(
-        id="doc1",
-        filename="sample.pdf",
-        content_type="application/pdf",
-        status="parsed",
-        pages=[],
-    )
-    response = await index_document(
-        IndexDocumentRequest(parsed_document=parsed),
+async def test_research_task_run_router_handler() -> None:
+    service = LiteratureResearchServiceStub()
+    response = await run_task(
+        "research_1",
         http_request=make_request(),
-        graph_runtime=runtime,
-        quota_context={},
-    )
-
-    assert response.result.document_id == "doc1"
-    assert runtime.last_invoke_state is not None
-
-
-@pytest.mark.asyncio
-async def test_charts_router_handler() -> None:
-    runtime = GraphRuntimeStub()
-    response = await understand_chart(
-        UnderstandChartRequest(
-            image_path="/tmp/chart.png",
-            document_id="doc1",
-            page_id="p1",
-            page_number=1,
-            chart_id="chart1",
-        ),
-        http_request=make_request(),
-        graph_runtime=runtime,
-        quota_context={},
-    )
-
-    assert response.result.chart.id == "chart1"
-    assert runtime.last_invoke_state is not None
-
-
-@pytest.mark.asyncio
-async def test_ask_chart_router_handler() -> None:
-    response = await ask_chart(
-        AskChartRequest(
-            image_path="/tmp/chart.png",
-            question="What does the blue line show?",
-            session_id="s1",
-            document_id="doc1",
-            page_id="p1",
-            chart_id="chart1",
-        ),
-        http_request=make_request(),
+        research_service=service,
         graph_runtime=GraphRuntimeStub(),
         quota_context={},
     )
 
-    assert response.answer == "chart answer"
-    assert response.session_id == "s1"
-    assert response.evidence["source"] == "vision_model"
-    assert response.confidence is not None
-
-
-@pytest.mark.asyncio
-async def test_ask_router_handler() -> None:
-    runtime = GraphRuntimeStub()
-    response = await ask_document(
-        AskDocumentRequest(
-            question="What happened?",
-            doc_id="doc1",
-            reasoning_style="react",
-        ),
-        http_request=make_request(),
-        graph_runtime=runtime,
-        quota_context={},
-    )
-
-    assert response.qa.answer == "证据不足"
-    assert runtime.last_ask_document_kwargs is not None
-    assert runtime.last_ask_document_kwargs["reasoning_style"] == "react"
-
-
-@pytest.mark.asyncio
-async def test_ask_fused_router_handler() -> None:
-    runtime = GraphRuntimeStub()
-    response = await ask_fused(
-        AskFusedRequest(
-            question="Does the chart agree with the document conclusion?",
-            image_path="/tmp/chart.png",
-            doc_id="doc1",
-            document_ids=["doc1"],
-            page_id="p1",
-            chart_id="chart1",
-            session_id="fused1",
-            reasoning_style="react",
-        ),
-        http_request=make_request(),
-        graph_runtime=runtime,
-        quota_context={},
-    )
-
-    assert response.chart_answer == "chart answer"
-    assert response.qa.answer == "fused answer"
-    assert runtime.last_ask_fused_kwargs is not None
-    assert runtime.last_ask_fused_kwargs["reasoning_style"] == "react"
+    assert response.task.task_id == "research_1"
+    assert response.report is not None
 
 
 @pytest.mark.asyncio
@@ -884,6 +784,7 @@ async def test_research_todo_search_router_handler() -> None:
         ResearchTodoActionRequest(max_papers=5),
         http_request=make_request(),
         research_service=service,
+        graph_runtime=GraphRuntimeStub(),
         quota_context={},
     )
 

@@ -2,32 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
-
-from agents.literature_scout_agent import LiteratureScoutAgent
 from agents.research_supervisor_agent import ResearchSupervisorDecision
-from agents.research_writer_agent import ResearchWriterAgent
-from domain.schemas.research import ResearchTaskResponse
 from core.utils import now_iso as _now_iso
+from domain.schemas.research import ResearchReport, ResearchTask, ResearchTaskResponse
+from services.research.research_workspace import build_workspace_from_task
 from services.research.supervisor_tools.base import (
     ResearchAgentToolContext,
     ResearchToolResult,
-    _llm_stage_timeout_seconds,
-    _should_fallback_llm_stage,
     _update_runtime_progress,
-    _DISCOVERY_PLAN_TIMEOUT_SECONDS,
-    _SURVEY_WRITING_TIMEOUT_SECONDS,
-    _TODO_PLANNING_TIMEOUT_SECONDS,
 )
 from services.research.unified_action_adapters import (
     build_literature_search_input,
     build_literature_search_output,
 )
-from services.research.research_workspace import build_workspace_state
-from services.research.capabilities import PaperCurator
-
-logger = logging.getLogger(__name__)
 
 
 class CreateResearchTaskTool:
@@ -36,24 +23,179 @@ class CreateResearchTaskTool:
     def __init__(
         self,
         *,
-        literature_scout_agent: LiteratureScoutAgent,
-        research_writer_agent: ResearchWriterAgent,
-        curation_skill: PaperCurator,
+        literature_scout_agent=None,
+        research_writer_agent=None,
+        curation_skill=None,
     ) -> None:
         self.literature_scout_agent = literature_scout_agent
         self.research_writer_agent = research_writer_agent
         self.curation_skill = curation_skill
 
+    def _search_metadata(self, *, topic: str, bundle) -> dict[str, object]:
+        return {
+            "last_search_query": topic,
+            "last_search_discovered_paper_ids": [paper.paper_id for paper in bundle.papers],
+            "last_search_discovered_count": len(bundle.papers),
+            "search_plan": bundle.plan.model_dump(mode="json"),
+        }
+
+    def _build_discovery_execution_context(
+        self,
+        *,
+        context: ResearchAgentToolContext,
+        task: ResearchTask,
+        report: ResearchReport | None,
+        papers,
+    ):
+        request = context.request
+        return context.research_service.build_execution_context(
+            graph_runtime=context.graph_runtime,
+            conversation_id=request.conversation_id,
+            task=task,
+            report=report,
+            papers=list(papers),
+            document_ids=list(task.imported_document_ids),
+            selected_paper_ids=request.selected_paper_ids,
+            skill_name=request.skill_name,
+            reasoning_style=request.reasoning_style,
+            metadata=request.metadata,
+        )
+
+    def _persist_new_task_response(
+        self,
+        *,
+        context: ResearchAgentToolContext,
+        task: ResearchTask,
+        bundle,
+        topic: str,
+    ) -> ResearchTaskResponse:
+        search_metadata = self._search_metadata(topic=topic, bundle=bundle)
+        saved_report = bundle.report.model_copy(
+            update={"metadata": {**bundle.report.metadata, **search_metadata}}
+        )
+        completed_task = task.model_copy(
+            update={
+                "status": "completed",
+                "paper_count": len(bundle.papers),
+                "report_id": saved_report.report_id,
+                "todo_items": bundle.todo_items,
+                "workspace": bundle.workspace,
+                "updated_at": _now_iso(),
+                "metadata": {**task.metadata, **search_metadata},
+            }
+        )
+        context.research_service.report_service.save_papers(completed_task.task_id, bundle.papers)
+        context.research_service.report_service.save_report(saved_report)
+        context.research_service.save_task_state(completed_task, conversation_id=context.request.conversation_id)
+        return ResearchTaskResponse(
+            task=completed_task,
+            papers=bundle.papers,
+            report=saved_report,
+            warnings=bundle.warnings,
+        )
+
+    def _persist_existing_task_response(
+        self,
+        *,
+        context: ResearchAgentToolContext,
+        task: ResearchTask,
+        bundle,
+        topic: str,
+    ) -> ResearchTaskResponse:
+        existing_papers = context.research_service.report_service.load_papers(task.task_id)
+        merged_papers = context.research_service._refresh_existing_pool(
+            existing_papers=existing_papers,
+            incoming_papers=bundle.papers,
+            ranking_topic=topic,
+        )
+        existing_report = context.research_service.report_service.load_report(task.task_id, task.report_id)
+        search_metadata = self._search_metadata(topic=topic, bundle=bundle)
+        refreshed_report = bundle.report.model_copy(
+            update={
+                "task_id": task.task_id,
+                "report_id": existing_report.report_id if existing_report is not None else bundle.report.report_id,
+                "generated_at": _now_iso(),
+                "metadata": {
+                    **(existing_report.metadata if existing_report is not None else {}),
+                    **bundle.report.metadata,
+                    **search_metadata,
+                },
+            }
+        )
+        if existing_report is not None:
+            markdown = refreshed_report.markdown.rstrip()
+            qa_section = context.research_service._extract_markdown_section(existing_report.markdown, "## 研究集合问答补充")
+            todo_section = context.research_service._extract_markdown_section(existing_report.markdown, "## TODO 执行记录")
+            if qa_section:
+                markdown = f"{markdown}\n\n{qa_section.strip()}"
+            if todo_section:
+                markdown = f"{markdown}\n\n{todo_section.strip()}"
+            carry_highlights = [
+                item for item in existing_report.highlights
+                if item.startswith("问答补充：") or item.startswith("TODO执行：")
+            ]
+            refreshed_report = refreshed_report.model_copy(
+                update={
+                    "markdown": markdown,
+                    "highlights": context.research_service._merge_text_entries(
+                        refreshed_report.highlights,
+                        carry_highlights,
+                        limit=12,
+                    ),
+                    "gaps": context.research_service._merge_text_entries(
+                        refreshed_report.gaps,
+                        list(existing_report.gaps),
+                        limit=12,
+                    ),
+                }
+            )
+        updated_task = task.model_copy(
+            update={
+                "status": "completed",
+                "paper_count": len(merged_papers),
+                "report_id": refreshed_report.report_id,
+                "updated_at": _now_iso(),
+                "metadata": {**task.metadata, **search_metadata},
+            }
+        )
+        updated_workspace = build_workspace_from_task(
+            task=updated_task,
+            report=refreshed_report,
+            papers=merged_papers,
+            plan=bundle.plan,
+            stop_reason="Literature discovery refreshed the current research workspace.",
+            metadata={
+                **dict(updated_task.workspace.metadata),
+                "last_search_query": topic,
+                "last_search_discovered_count": len(bundle.papers),
+            },
+        )
+        refreshed_report = refreshed_report.model_copy(update={"workspace": updated_workspace})
+        updated_task = updated_task.model_copy(update={"workspace": updated_workspace})
+        context.research_service.report_service.save_papers(updated_task.task_id, merged_papers)
+        context.research_service.report_service.save_report(refreshed_report)
+        context.research_service.save_task_state(updated_task, conversation_id=context.request.conversation_id)
+        return ResearchTaskResponse(
+            task=updated_task,
+            papers=merged_papers,
+            report=refreshed_report,
+            warnings=bundle.warnings,
+        )
+
     async def run(self, context: ResearchAgentToolContext, decision: ResearchSupervisorDecision) -> ResearchToolResult:
         request = context.request
         search_input = build_literature_search_input(context=context, decision=decision)
-        create_request = search_input.to_create_research_task_request().model_copy(
+        search_request = search_input.to_create_research_task_request().model_copy(
             update={"run_immediately": False}
         )
-        response = await context.research_service.create_task(
-            create_request,
-            graph_runtime=context.graph_runtime,
-        )
+        task_response = context.task_response
+        active_task = task_response.task if task_response is not None else None
+        if active_task is None:
+            task_response = await context.research_service.create_task(
+                search_request,
+                graph_runtime=context.graph_runtime,
+            )
+            active_task = task_response.task
         _update_runtime_progress(
             context,
             stage="search_literature",
@@ -61,26 +203,6 @@ class CreateResearchTaskTool:
             status="running",
             summary="Planning literature discovery queries.",
         )
-        planning_timeout_seconds = _llm_stage_timeout_seconds(
-            self.literature_scout_agent.reasoning_strategies.llm_adapter,
-            fallback_seconds=_DISCOVERY_PLAN_TIMEOUT_SECONDS,
-            slack_seconds=10.0,
-        )
-        try:
-            plan = await asyncio.wait_for(
-                self.literature_scout_agent.plan(create_request),
-                timeout=planning_timeout_seconds,
-            )
-        except Exception as exc:
-            if not _should_fallback_llm_stage(exc):
-                raise
-            logger.warning("Discovery planning timed out or hit transport failure; falling back to heuristic planner: %s", exc)
-            plan = self.literature_scout_agent._require_search_service().topic_planner.plan(
-                topic=create_request.topic,
-                days_back=create_request.days_back,
-                max_papers=create_request.max_papers,
-                sources=create_request.sources,
-            )
         _update_runtime_progress(
             context,
             stage="search_literature",
@@ -88,86 +210,20 @@ class CreateResearchTaskTool:
             status="running",
             summary="Searching literature sources.",
         )
-        scout_state = type(
-            "SupervisorDiscoveryState",
-            (),
-            {
-                "topic": create_request.topic,
-                "days_back": create_request.days_back,
-                "max_papers": create_request.max_papers,
-                "sources": create_request.sources,
-                "task_id": response.task.task_id,
-                "execution_context": context.research_service.build_execution_context(
-                    graph_runtime=context.graph_runtime,
-                    conversation_id=request.conversation_id,
-                    task=response.task,
-                    report=None,
-                    papers=[],
-                    document_ids=[],
-                    selected_paper_ids=request.selected_paper_ids,
-                    skill_name=request.skill_name,
-                    reasoning_style=request.reasoning_style,
-                    metadata=request.metadata,
-                ),
-                "initial_plan": plan,
-                "active_queries": list(plan.queries),
-                "round_index": 0,
-                "max_rounds": 2,
-                "queried_pairs": set(),
-                "search_completed": False,
-                "curation_completed": False,
-                "raw_papers": [],
-                "trace": [],
-                "warnings": [],
-                "curated_papers": [],
-                "must_read_ids": [],
-                "ingest_candidate_ids": [],
-                "report": None,
-                "todo_items": [],
-                "refinement_used": False,
-            },
-        )()
-        raw_papers, warnings = await self.literature_scout_agent.search(scout_state)
-        scout_state.warnings = list(warnings)
         _update_runtime_progress(
             context,
             stage="search_literature",
             node="search_literature:curation",
             status="running",
             summary="Curating candidate papers.",
-            extra={"raw_paper_count": len(raw_papers)},
         )
-        curated_papers, must_read_ids, ingest_candidate_ids = self.curation_skill.curate(
-            topic=create_request.topic,
-            raw_papers=raw_papers,
-            max_papers=create_request.max_papers,
-        )
-        scout_state.curated_papers = curated_papers
-        scout_state.must_read_ids = must_read_ids
-        scout_state.ingest_candidate_ids = ingest_candidate_ids
         _update_runtime_progress(
             context,
             stage="search_literature",
             node="search_literature:survey_writing",
             status="running",
             summary="Writing literature survey report.",
-            extra={"paper_count": len(curated_papers)},
         )
-        survey_timeout_seconds = _llm_stage_timeout_seconds(
-            self.research_writer_agent.llm_adapter,
-            fallback_seconds=_SURVEY_WRITING_TIMEOUT_SECONDS,
-            slack_seconds=15.0,
-        )
-        try:
-            report = await asyncio.wait_for(
-                self.research_writer_agent.synthesize_async(scout_state),
-                timeout=survey_timeout_seconds,
-            )
-        except Exception as exc:
-            if not _should_fallback_llm_stage(exc):
-                raise
-            logger.warning("Survey writing timed out or hit transport failure; falling back to heuristic report generation: %s", exc)
-            report = self.research_writer_agent.synthesize(scout_state)
         _update_runtime_progress(
             context,
             stage="search_literature",
@@ -175,72 +231,43 @@ class CreateResearchTaskTool:
             status="running",
             summary="Planning follow-up research todos.",
         )
-        todo_timeout_seconds = _llm_stage_timeout_seconds(
-            self.research_writer_agent.llm_adapter,
-            fallback_seconds=_TODO_PLANNING_TIMEOUT_SECONDS,
-            slack_seconds=8.0,
+        bundle = await context.research_service.research_discovery_capability.discover(
+            topic=search_request.topic,
+            days_back=search_request.days_back,
+            max_papers=search_request.max_papers,
+            sources=list(search_request.sources),
+            task_id=active_task.task_id,
+            execution_context=self._build_discovery_execution_context(
+                context=context,
+                task=active_task,
+                report=task_response.report if task_response is not None else None,
+                papers=task_response.papers if task_response is not None else [],
+            ),
+            literature_scout_agent=self.literature_scout_agent,
+            research_writer_agent=self.research_writer_agent,
+            curation_skill=self.curation_skill,
         )
-        try:
-            todo_items = await asyncio.wait_for(
-                self.research_writer_agent.plan_todos_async(scout_state),
-                timeout=todo_timeout_seconds,
+        response = (
+            self._persist_existing_task_response(
+                context=context,
+                task=active_task,
+                bundle=bundle,
+                topic=search_request.topic,
             )
-        except Exception as exc:
-            if not _should_fallback_llm_stage(exc):
-                raise
-            logger.warning("TODO planning timed out or hit transport failure; falling back to heuristic TODO generation: %s", exc)
-            todo_items = self.research_writer_agent.plan_todos(scout_state)
-        scout_state.report = report
-        scout_state.todo_items = todo_items
-        workspace = build_workspace_state(
-            objective=create_request.topic,
-            stage="complete",
-            papers=curated_papers,
-            imported_document_ids=[],
-            report=report,
-            plan=plan,
-            todo_items=todo_items,
-            must_read_ids=must_read_ids,
-            ingest_candidate_ids=ingest_candidate_ids,
-            stop_reason="ResearchSupervisorAgent completed direct literature discovery.",
-            metadata={
-                "decision_model": "supervisor_direct_execution",
-                "autonomy_rounds": 1,
-                "trace_steps": 0,
-            },
-        )
-        saved_report = report.model_copy(update={"workspace": workspace})
-        completed_task = response.task.model_copy(
-            update={
-                "status": "completed",
-                "paper_count": len(curated_papers),
-                "report_id": saved_report.report_id,
-                "todo_items": todo_items,
-                "workspace": workspace,
-                "updated_at": _now_iso(),
-            }
-        )
-        context.research_service.report_service.save_papers(completed_task.task_id, curated_papers)
-        context.research_service.report_service.save_report(saved_report)
-        context.research_service.save_task_state(completed_task, conversation_id=request.conversation_id)
-        response = ResearchTaskResponse(
-            task=completed_task,
-            papers=curated_papers,
-            report=saved_report,
-            warnings=warnings,
+            if context.task is not None
+            else self._persist_new_task_response(
+                context=context,
+                task=active_task,
+                bundle=bundle,
+                topic=search_request.topic,
+            )
         )
         context.task_response = response
-        context.execution_context = context.research_service.build_execution_context(
-            graph_runtime=context.graph_runtime,
-            conversation_id=request.conversation_id,
+        context.execution_context = self._build_discovery_execution_context(
+            context=context,
             task=response.task,
             report=response.report,
             papers=response.papers,
-            document_ids=response.task.imported_document_ids,
-            selected_paper_ids=request.selected_paper_ids,
-            skill_name=request.skill_name,
-            reasoning_style=request.reasoning_style,
-            metadata=request.metadata,
         )
         if request.conversation_id:
             context.research_service.record_task_turn(request.conversation_id, response=response)
@@ -250,12 +277,13 @@ class CreateResearchTaskTool:
             node="search_literature:completed",
             status="completed",
             summary="Literature discovery completed.",
-            extra={"paper_count": len(response.papers)},
+            extra={"paper_count": len(response.papers), "query_count": len(bundle.plan.queries)},
         )
         output = build_literature_search_output(task_response=response)
+        action_label = "updated task" if task_response is not None else "created task"
         return ResearchToolResult(
             status="succeeded",
-            observation=f"created task {response.task.task_id}; papers={len(response.papers)}; report={bool(response.report)}",
+            observation=f"{action_label} {response.task.task_id}; papers={len(response.papers)}; report={bool(response.report)}",
             metadata=output.to_metadata(),
         )
 

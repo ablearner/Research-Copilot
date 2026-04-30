@@ -818,6 +818,9 @@ class ResearchCopilotSDK:
         effective_settings = self._effective_settings()
         graph_runtime = build_graph_runtime(effective_settings)
         self._register_optional_mcp_servers(graph_runtime, effective_settings)
+        from pathlib import Path as _Path
+        mcp_config_path = _Path(effective_settings.resolve_path("mcp_servers.json"))
+        graph_runtime.external_tool_registry.register_from_json_file(mcp_config_path)
         agent_service = build_literature_research_service(effective_settings, graph_runtime=graph_runtime)
         agent_service.memory_manager = self.service.memory_manager
         register_research_runtime_extensions(

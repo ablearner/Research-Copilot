@@ -6,9 +6,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from domain.schemas.research import PaperCandidate, ResearchTopicPlan
-from reasoning.plan_and_solve import PlanAndSolveReasoningAgent
-from reasoning.strategies import ReasoningStrategySet
-from reasoning.style import normalize_reasoning_style
+from agents.research_qa_agent import normalize_reasoning_style
 from services.research.paper_search_service import format_search_warning
 
 if TYPE_CHECKING:
@@ -136,17 +134,10 @@ class LiteratureScoutAgent:
         self,
         paper_search_service: PaperSearchService | None = None,
         *,
-        plan_and_solve_reasoning_agent: PlanAndSolveReasoningAgent | None = None,
-        reasoning_strategies: ReasoningStrategySet | None = None,
+        llm_adapter: Any | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
-        self.reasoning_strategies = reasoning_strategies or ReasoningStrategySet(
-            query_planning=plan_and_solve_reasoning_agent,
-        )
-        self.plan_and_solve_reasoning_agent = (
-            plan_and_solve_reasoning_agent
-            or self.reasoning_strategies.plan_and_solve_reasoning_agent
-        )
+        self.llm_adapter = llm_adapter
 
     async def plan(self, state: Any) -> ResearchTopicPlan:
         paper_search_service = self._require_search_service()
@@ -162,9 +153,8 @@ class LiteratureScoutAgent:
             "manager_agent": "ResearchSupervisorAgent",
             "agent_architecture": "main_agents_plus_skills",
         }
-        planning_strategy = self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent
-        if self._should_use_plan_and_solve(state) and planning_strategy is not None:
-            reasoning_plan = await planning_strategy.plan_queries(
+        if self._should_use_plan_and_execute(state) and self.llm_adapter is not None:
+            reasoning_plan = await self._plan_queries(
                 objective=f"Literature discovery for {state.topic}",
                 seed_queries=base_plan.queries,
                 context={
@@ -175,16 +165,15 @@ class LiteratureScoutAgent:
                     "memory_hints": self._memory_hints(state),
                 },
                 max_queries=4,
-                agent_name=self.name,
             )
             return base_plan.model_copy(
                 update={
-                    "queries": _dedupe_queries([*reasoning_plan.queries, *base_plan.queries])[:4],
+                    "queries": _dedupe_queries([*reasoning_plan["queries"], *base_plan.queries])[:4],
                     "metadata": {
                         **plan_metadata,
-                        "reasoning_style": "plan_and_solve",
-                        "reasoning_summary": reasoning_plan.reasoning_summary,
-                        "plan_steps": " | ".join(reasoning_plan.plan_steps[:3]),
+                        "reasoning_style": "plan_and_execute",
+                        "reasoning_summary": reasoning_plan["reasoning_summary"],
+                        "plan_steps": " | ".join(reasoning_plan["plan_steps"][:3]),
                     },
                 }
             )
@@ -290,10 +279,9 @@ class LiteratureScoutAgent:
 
     async def propose_queries(self, state: Any) -> list[str]:
         heuristic_queries = self._heuristic_propose_queries(state)
-        planning_strategy = self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent
-        if not self._should_use_plan_and_solve(state) or planning_strategy is None:
+        if not self._should_use_plan_and_execute(state) or self.llm_adapter is None:
             return heuristic_queries
-        reasoning_plan = await planning_strategy.plan_queries(
+        reasoning_plan = await self._plan_queries(
             objective=f"Broaden literature coverage for {state.topic}",
             seed_queries=heuristic_queries or list(state.active_queries),
             context={
@@ -305,9 +293,8 @@ class LiteratureScoutAgent:
                 "memory_hints": self._memory_hints(state),
             },
             max_queries=3,
-            agent_name=self.name,
         )
-        return _dedupe_queries([*reasoning_plan.queries, *heuristic_queries])[:3]
+        return _dedupe_queries([*reasoning_plan["queries"], *heuristic_queries])[:3]
 
     def _heuristic_propose_queries(self, state: Any) -> list[str]:
         keywords = _paper_keywords(state.curated_papers)
@@ -335,10 +322,77 @@ class LiteratureScoutAgent:
             deduped_queries.append(normalized)
         return deduped_queries[:3]
 
-    def _should_use_plan_and_solve(self, state: Any) -> bool:
-        if (self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent) is None:
+    def _should_use_plan_and_execute(self, state: Any) -> bool:
+        if self.llm_adapter is None:
             return False
         return normalize_reasoning_style(self._reasoning_style(state)) != "react"
+
+    async def _plan_queries(
+        self,
+        *,
+        objective: str,
+        seed_queries: list[str],
+        context: dict[str, Any] | None = None,
+        max_queries: int = 4,
+    ) -> dict[str, Any]:
+        """Internal Plan-and-Execute: decompose objective into queries."""
+        import json
+        from adapters.llm.base import LLMAdapterError, is_expected_provider_error
+        heuristic = {
+            "plan_steps": [
+                "Identify the core research objective.",
+                "Break it into search facets for better coverage.",
+                "Emit a compact set of high-yield queries.",
+            ],
+            "queries": self._normalize_plan_queries(seed_queries or [objective], limit=max_queries),
+            "reasoning_summary": "Kept strongest seed queries as a compact next-step query set.",
+        }
+        if self.llm_adapter is None:
+            return heuristic
+        payload = {
+            "objective": objective,
+            "seed_queries": seed_queries,
+            "max_queries": max(1, min(max_queries, 6)),
+            "context": context or {},
+        }
+        try:
+            result = await self.llm_adapter.generate_structured(
+                prompt=(
+                    "You are a Plan-and-Execute query planner. "
+                    "First plan the subproblems privately, then return only structured output. "
+                    "Produce a short list of plan_steps, a deduplicated query set, and a concise reasoning_summary."
+                ),
+                input_data=payload,
+                response_model=None,
+            )
+            if isinstance(result, str):
+                result = json.loads(result)
+            if not isinstance(result, dict):
+                return heuristic
+            queries = self._normalize_plan_queries(
+                [*(result.get("queries") or []), *seed_queries],
+                limit=max_queries,
+            )
+            if not queries:
+                return heuristic
+            return {
+                "plan_steps": list(result.get("plan_steps") or heuristic["plan_steps"]),
+                "queries": queries,
+                "reasoning_summary": str(result.get("reasoning_summary") or heuristic["reasoning_summary"]),
+            }
+        except (LLMAdapterError, OSError, ValueError, Exception) as exc:
+            if is_expected_provider_error(exc):
+                import logging
+                logging.getLogger(__name__).warning("Plan-and-Execute planning failed; using heuristic: %s", exc)
+            return heuristic
+
+    def _normalize_plan_queries(self, queries: list[str], *, limit: int) -> list[str]:
+        deduped: list[str] = []
+        for query in queries:
+            normalized = " ".join(str(query).strip().split())
+            if normalized and normalized not in deduped:
+                deduped.append(normalized)
+        return deduped[:max(1, min(limit, 6))]
 
     def _reasoning_style(self, state: Any) -> str | None:
         execution_context = getattr(state, "execution_context", None)

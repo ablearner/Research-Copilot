@@ -110,6 +110,7 @@ def build_research_supervisor_tool_spec(
         output_schema=SupervisorActionToolOutput,
         handler=handler,
         tags=list(definition.tags),
+        category="research",
         enabled=enabled,
         max_retries=max_retries,
         strict_output_validation=strict_output_validation,

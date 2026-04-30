@@ -32,6 +32,9 @@ from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import (
     AnswerWithEvidenceToolInput,
+    AskDocumentToolInput,
+    AskFusedToolInput,
+    GraphBackfillDocumentToolInput,
     HybridRetrieveToolInput,
     IndexDocumentToolInput,
     ParseDocumentToolInput,
@@ -120,6 +123,7 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
     graph_runtime.cot_reasoning_agent = reasoning_strategies.cot_reasoning_agent
     graph_runtime.plan_and_solve_reasoning_agent = reasoning_strategies.plan_and_solve_reasoning_agent
     graph_runtime.react_reasoning_agent = reasoning_strategies.react_reasoning_agent
+    graph_runtime.research_qa_agent = reasoning_strategies.react_reasoning_agent
     graph_runtime.answer_tools.reasoning_strategies = reasoning_strategies
     graph_runtime.answer_tools.cot_reasoning_agent = reasoning_strategies.cot_reasoning_agent
     logger.info(
@@ -229,6 +233,30 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["answer_with_evidence"],
                 handler=graph_runtime.answer_tools.answer_with_evidence,
                 tags=["answer", "generation"],
+            ),
+            ToolSpec(
+                name="ask_document",
+                description="Run grounded document QA over one or more documents.",
+                input_schema=AskDocumentToolInput,
+                output_schema=TOOL_OUTPUT_SCHEMAS["ask_document"],
+                handler=graph_runtime.handle_ask_document,
+                tags=["answer", "retrieval", "document"],
+            ),
+            ToolSpec(
+                name="ask_fused",
+                description="Run grounded fused QA over documents plus a chart/image anchor.",
+                input_schema=AskFusedToolInput,
+                output_schema=TOOL_OUTPUT_SCHEMAS["ask_fused"],
+                handler=graph_runtime.handle_ask_fused,
+                tags=["answer", "retrieval", "chart", "vision"],
+            ),
+            ToolSpec(
+                name="graph_backfill_document",
+                description="Backfill graph extraction/indexing for a parsed document.",
+                input_schema=GraphBackfillDocumentToolInput,
+                output_schema=TOOL_OUTPUT_SCHEMAS["graph_backfill_document"],
+                handler=graph_runtime.handle_graph_backfill_document,
+                tags=["document", "graph", "index"],
             ),
         ],
         replace=True,

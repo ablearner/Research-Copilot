@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from mcp.client.base import BaseMCPClient
+from mcp.client.base import BaseMCPClient, build_jsonrpc_request, _MCP_PROTOCOL_VERSION, _CLIENT_INFO
 from mcp.schemas import (
     MCPPromptContent,
     MCPPromptSpec,
@@ -44,26 +44,73 @@ class HttpMCPClient(BaseMCPClient):
         self._tool_timeout = tool_timeout
         self._max_retries = max_retries
         self._tools_cache: list[MCPToolSpec] | None = None
+        self._initialized = False
+        self._request_id = 0
 
     @property
     def server_name(self) -> str:
         return self._server_name
 
+    def _next_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
+
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON-RPC style POST to the MCP HTTP server."""
+        """Send a JSON-RPC 2.0 POST to the MCP HTTP server."""
         import httpx
 
         url = f"{self._base_url}{path}"
         async with httpx.AsyncClient(timeout=self._tool_timeout, headers=self._headers) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if "error" in data:
+                err = data["error"]
+                raise RuntimeError(f"JSON-RPC error {err.get('code', -1)}: {err.get('message', 'unknown')}")
+            return data
+
+    async def initialize(self) -> dict[str, Any]:
+        """Perform MCP initialize handshake over HTTP."""
+        if self._initialized:
+            return {"serverInfo": self._server_info or {}, "capabilities": self._server_capabilities or {}}
+        try:
+            req = build_jsonrpc_request(
+                "initialize",
+                params={
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {"tools": {}},
+                    "clientInfo": _CLIENT_INFO,
+                },
+                request_id=self._next_id(),
+            )
+            resp = await self._post("/mcp", req)
+            result = resp.get("result", {})
+            self._server_info = result.get("serverInfo", {})
+            self._server_capabilities = result.get("capabilities", {})
+            self._initialized = True
+            logger.info(
+                "MCP HTTP initialized: %s (server=%s)",
+                self._server_name,
+                self._server_info.get("name", "unknown"),
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "MCP initialize handshake failed for %s, continuing without: %s",
+                self._server_name, sanitize_error(str(exc)),
+            )
+            self._initialized = True
+            return {}
 
     async def list_tools(self) -> list[MCPToolSpec]:
         if self._tools_cache is not None:
             return self._tools_cache
 
-        resp = await self._post("/mcp", {"method": "tools/list", "params": {}})
+        if not self._initialized:
+            await self.initialize()
+
+        req = build_jsonrpc_request("tools/list", params={}, request_id=self._next_id())
+        resp = await self._post("/mcp", req)
         tools = [
             MCPToolSpec(
                 name=t["name"],
@@ -89,10 +136,12 @@ class HttpMCPClient(BaseMCPClient):
 
         for attempt in range(self._max_retries + 1):
             try:
-                resp = await self._post("/mcp", {
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": arguments or {}},
-                })
+                req = build_jsonrpc_request(
+                    "tools/call",
+                    params={"name": tool_name, "arguments": arguments or {}},
+                    request_id=self._next_id(),
+                )
+                resp = await self._post("/mcp", req)
                 result = resp.get("result", {})
                 is_error = result.get("isError", False)
                 content_parts = result.get("content", [])

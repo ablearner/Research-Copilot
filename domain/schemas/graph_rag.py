@@ -23,7 +23,7 @@ class GraphCommunity(BaseModel):
 class GraphCommunityBuildResult(BaseModel):
     document_id: str
     communities: list[GraphCommunity] = Field(default_factory=list)
-    strategy: Literal["label_topic", "source_topic", "simple"] = "label_topic"
+    strategy: Literal["leiden"] = "leiden"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

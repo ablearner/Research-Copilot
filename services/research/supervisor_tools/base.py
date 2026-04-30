@@ -5,37 +5,24 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import logging
-from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
+from typing import Any, Awaitable, Callable, Protocol, TypedDict
 from uuid import uuid4
 
 import httpx
 
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
 from domain.schemas.research import (
-    AnalyzeResearchPaperFigureRequest,
-    ImportPapersRequest,
     ImportPapersResponse,
     PaperCandidate,
-    ResearchAdvancedStrategy,
     ResearchAgentRunRequest,
-    ResearchAgentRunResponse,
     ResearchAgentTraceStep,
     ResearchMessage,
     ResearchReport,
     ResearchTask,
     ResearchTaskAskResponse,
     ResearchTaskResponse,
-    ResearchWorkspaceState,
 )
-from domain.schemas.retrieval import RetrievalHit
 from domain.schemas.research_functions import AnalyzePapersFunctionOutput, RecommendPapersFunctionOutput
-from domain.schemas.sub_manager import SubManagerState, TaskStep
-from domain.schemas.unified_runtime import (
-    UNIFIED_ACTION_OUTPUT_METADATA_KEY,
-    UnifiedAgentDescriptor,
-    UnifiedAgentResult,
-    UnifiedAgentTask,
-)
 from core.utils import now_iso as _now_iso
 from services.research.research_context import ResearchExecutionContext
 
@@ -124,6 +111,9 @@ class ResearchAgentToolContext:
     unified_runtime_context: Any | None = None
     runtime_progress: dict[str, Any] | None = None
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+    skill_context: str | None = None
+    skill_selection: Any | None = None
+    knowledge_access: Any | None = None
 
     @property
     def task(self) -> ResearchTask | None:

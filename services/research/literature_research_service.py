@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
-from datetime import UTC, datetime
-from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from core.utils import now_iso as _now_iso, normalize_topic_text as _normalize_topic_text
+from core.utils import now_iso as _now_iso
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.literature_scout_agent import LiteratureScoutAgent
 from agents.preference_memory_agent import PreferenceMemoryAgent
@@ -29,6 +26,7 @@ from domain.schemas.research import (
     ResearchStatusMetadata,
     ResearchTask,
     ResearchTaskResponse,
+    ResearchTopicPlan,
     ResearchWorkspaceState,
     ResearchLifecycleStatus,
     SearchPapersRequest,
@@ -49,17 +47,19 @@ from services.research.capabilities import (
 )
 from services.research.research_context import ResearchExecutionContext
 from services.research.research_context_manager import ResearchContextManager
-from services.research.paper_selector_service import PaperSelectionScope, PaperSelectorService
+from services.research.research_discovery_capability import ResearchDiscoveryCapability
+from services.research.research_memory_gateway import ResearchMemoryGateway
+from services.research.paper_selector_service import PaperSelectorService
 from services.research.paper_import_service import PaperImportService
 from services.research.observability_service import ResearchObservabilityService
 from services.research.paper_search_service import PaperSearchService
 from services.research.research_report_service import ResearchReportService
 from services.research.research_workspace import build_workspace_state
+from services.research.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
+from services.research.paper_operations import PaperOperationsMixin
+from services.research.qa_router import QARoutingMixin
 
 logger = logging.getLogger(__name__)
-
-
-
 
 INTERNAL_CONVERSATION_MESSAGE_TITLES = {
     "Manager 任务分解",
@@ -68,9 +68,6 @@ INTERNAL_CONVERSATION_MESSAGE_TITLES = {
     "TODO 动作回执",
     "Research-Copilot",
 }
-from services.research.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
-from services.research.paper_operations import PaperOperationsMixin
-from services.research.qa_router import QARoutingMixin, ResearchQARouteDecision
 
 
 class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperationsMixin):
@@ -126,6 +123,11 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             paper_search_service,
             llm_adapter=llm_adapter,
         )
+        self.research_discovery_capability = ResearchDiscoveryCapability(
+            literature_scout_agent=self.literature_scout_agent,
+            research_writer_agent=self.research_writer_agent,
+            curation_skill=self.paper_curation_skill,
+        )
         self.qa_routing_skill = ResearchQARouter(llm_adapter=llm_adapter)
         self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
         self.chart_analysis_agent = ChartAnalysisAgent(
@@ -136,6 +138,12 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             memory_manager=self.memory_manager,
             paper_search_service=self.paper_search_service,
             storage_root=report_service.storage_root,
+        )
+        self.memory_gateway = ResearchMemoryGateway(
+            memory_manager=self.memory_manager,
+            research_context_manager=self.research_context_manager,
+            paper_reading_skill=self.paper_reading_skill,
+            compact_text=lambda value: self._compact_text(value, limit=280),
         )
         self.evaluation_skill = evaluation_skill or ResearchEvaluator()
         self.review_writing_skill = review_writing_skill or ReviewWriter()
@@ -278,7 +286,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
                 if (message.content or message.title)
             ],
         }
-        user_profile = self.memory_manager.load_user_profile()
+        user_profile = self.memory_gateway.load_user_profile()
         metadata_context = {}
         if isinstance(metadata, dict) and isinstance(metadata.get("context"), dict):
             metadata_context = dict(metadata["context"])
@@ -325,7 +333,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             },
         )
         if session_id:
-            research_context = self.memory_manager.hydrate_context(
+            research_context = self.memory_gateway.hydrate_context(
                 session_id,
                 base_context=research_context,
             )
@@ -414,15 +422,9 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         )
         if not session_id:
             return
-        session_memory = getattr(graph_runtime, "session_memory", None) if graph_runtime is not None else None
         resolved_document_ids = list(document_ids or (task.imported_document_ids if task else []))
         resolved_selected_paper_ids = list(dict.fromkeys(selected_paper_ids or []))
         resolved_papers = list(papers or [])
-        report_summary = ""
-        if report is not None and report.highlights:
-            report_summary = self._compact_text("；".join(report.highlights[:2]), limit=280)
-        elif report is not None:
-            report_summary = self._compact_text(report.markdown, limit=280)
         cleaned_metadata = {
             "conversation_id": resolved_conversation_id,
             "task_id": task.task_id if task else None,
@@ -434,84 +436,85 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             "report_gaps": report.gaps[:2] if report else None,
             **(metadata_update or {}),
         }
-        research_context = self.research_context_manager.build_from_artifacts(
+        self.memory_gateway.persist_research_update(
+            session_id=session_id,
+            conversation_id=resolved_conversation_id,
+            graph_runtime=graph_runtime,
             task=task,
             report=report,
             papers=resolved_papers,
+            document_ids=resolved_document_ids,
             selected_paper_ids=resolved_selected_paper_ids,
-            paper_summaries=self.research_context_manager.compress_papers(
-                papers=resolved_papers,
-                selected_paper_ids=resolved_selected_paper_ids,
-                paper_reading_skill=self.paper_reading_skill,
-            ),
-            metadata=cleaned_metadata,
+            task_intent=task_intent,
+            question=question,
+            answer=answer,
+            retrieval_summary=retrieval_summary,
+            metadata_update=cleaned_metadata,
         )
-        hydrated_context = self.memory_manager.hydrate_context(
-            session_id,
-            base_context=research_context,
+
+    def _build_discovery_only_request(
+        self,
+        *,
+        message: str,
+        days_back: int,
+        max_papers: int,
+        sources: list[str],
+        conversation_id: str | None,
+        trigger: str,
+        task_id: str | None = None,
+        selected_paper_ids: list[str] | None = None,
+        selected_document_ids: list[str] | None = None,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> ResearchAgentRunRequest:
+        return ResearchAgentRunRequest(
+            message=message,
+            mode="research",
+            task_id=task_id,
+            conversation_id=conversation_id,
+            days_back=days_back,
+            max_papers=max_papers,
+            sources=list(sources),
+            selected_paper_ids=list(selected_paper_ids or []),
+            selected_document_ids=list(selected_document_ids or []),
+            advanced_action="discover",
+            auto_import=False,
+            import_top_k=0,
+            include_graph=True,
+            include_embeddings=True,
+            skill_name="research_report",
+            reasoning_style="cot",
+            metadata={
+                "workflow_constraint": "discovery_only",
+                "trigger": trigger,
+                "routing_authority": "supervisor_llm",
+                "context": {
+                    "route_mode": "research_discovery",
+                },
+                **(metadata_update or {}),
+            },
         )
-        merged_context = self.research_context_manager.update_context(
-            current_context=hydrated_context,
-            topic=research_context.research_topic,
-            goals=research_context.research_goals,
-            selected_papers=resolved_selected_paper_ids,
-            imported_papers=research_context.imported_papers,
-            known_conclusions=research_context.known_conclusions,
-            open_questions=research_context.open_questions,
-            paper_summaries=research_context.paper_summaries,
-            current_task_plan=hydrated_context.current_task_plan,
-            sub_manager_states=hydrated_context.sub_manager_states,
-            metadata=cleaned_metadata,
+
+    def _recover_search_plan(
+        self,
+        *,
+        report: ResearchReport,
+        topic: str,
+        days_back: int,
+        max_papers: int,
+        sources: list[str],
+    ) -> ResearchTopicPlan:
+        raw_plan = report.metadata.get("search_plan")
+        if isinstance(raw_plan, dict):
+            try:
+                return ResearchTopicPlan.model_validate(raw_plan)
+            except Exception:
+                logger.warning("Failed to validate persisted search_plan metadata; rebuilding topic plan.")
+        return self.paper_search_service.topic_planner.plan(
+            topic=topic,
+            days_back=days_back,
+            max_papers=max_papers,
+            sources=sources,
         )
-        self.memory_manager.save_context(session_id, merged_context)
-        if retrieval_summary:
-            self.memory_manager.working_memory.append_intermediate_step(
-                session_id=session_id,
-                content=retrieval_summary,
-                step_type="retrieve",
-                metadata={
-                    "task_intent": task_intent,
-                    "document_ids": resolved_document_ids[:8],
-                },
-            )
-        if question and answer:
-            self.memory_manager.record_turn(
-                session_id,
-                question=question,
-                answer=answer,
-                selected_paper_ids=resolved_selected_paper_ids,
-                metadata={
-                    "task_id": task.task_id if task else None,
-                    "conversation_id": resolved_conversation_id,
-                    "document_ids": resolved_document_ids,
-                    "task_intent": task_intent,
-                    "paper_count": len(resolved_papers) if papers is not None else (task.paper_count if task else 0),
-                },
-            )
-        if session_memory is not None and hasattr(session_memory, "update_research_context"):
-            session_memory.update_research_context(
-                session_id=session_id,
-                current_document_id=(resolved_document_ids or [None])[0],
-                last_retrieval_summary=retrieval_summary,
-                last_answer_summary=(
-                    self._compact_text(answer, limit=280) if answer else report_summary or None
-                ),
-                current_task_intent=task_intent,
-                metadata_update=cleaned_metadata,
-            )
-        if question and answer and session_memory is not None and hasattr(session_memory, "append_research_turn"):
-            session_memory.append_research_turn(
-                session_id=session_id,
-                question=question,
-                answer=answer,
-                task_id=task.task_id if task else None,
-                conversation_id=resolved_conversation_id,
-                document_ids=resolved_document_ids,
-                metadata={
-                    "task_intent": task_intent,
-                    "paper_count": len(resolved_papers) if papers is not None else (task.paper_count if task else 0),
-                },
-            )
 
     async def search_papers(
         self,
@@ -519,41 +522,49 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         *,
         graph_runtime: Any | None = None,
     ) -> SearchPapersResponse:
-        execution_context = (
-            self.build_execution_context(
-                graph_runtime=graph_runtime,
-                conversation_id=request.conversation_id,
-                skill_name="research_report",
-                metadata={},
-            )
-            if graph_runtime is not None
-            else None
+        if graph_runtime is None:
+            raise RuntimeError("search_papers requires an initialized graph runtime")
+        agent_request = self._build_discovery_only_request(
+            message=request.topic,
+            days_back=request.days_back,
+            max_papers=request.max_papers,
+            sources=list(request.sources),
+            conversation_id=request.conversation_id,
+            trigger="search_papers",
+            metadata_update={
+                "search_topic": request.topic,
+                "response_contract": "search_papers",
+            },
         )
-        bundle = await self._run_direct_discovery(
+        agent_response = await self.run_agent(agent_request, graph_runtime=graph_runtime)
+        report = agent_response.report
+        if report is None:
+            raise RuntimeError("search_papers did not produce a research report")
+        plan = self._recover_search_plan(
+            report=report,
             topic=request.topic,
             days_back=request.days_back,
             max_papers=request.max_papers,
-            sources=request.sources,
-            execution_context=execution_context,
+            sources=list(request.sources),
         )
         self._update_research_memory(
             graph_runtime=graph_runtime,
             conversation_id=request.conversation_id,
-            report=bundle.report,
-            papers=bundle.papers,
+            report=report,
+            papers=agent_response.papers,
             task_intent="research_search",
             metadata_update={
                 "days_back": request.days_back,
                 "max_papers": request.max_papers,
                 "sources": list(request.sources),
-                "report_id": bundle.report.report_id,
+                "report_id": report.report_id,
             },
         )
         return SearchPapersResponse(
-            plan=bundle.plan,
-            papers=bundle.papers,
-            report=bundle.report,
-            warnings=bundle.warnings,
+            plan=plan,
+            papers=agent_response.papers,
+            report=report,
+            warnings=list(agent_response.warnings),
         )
 
     async def create_task(
@@ -598,7 +609,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
                 "sources": list(request.sources),
             },
         )
-        self.memory_manager.update_user_profile(
+        self.memory_gateway.update_user_profile(
             topic=request.topic,
             answer_language=_preferred_answer_language_from_text(request.topic),
         )
@@ -651,6 +662,8 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         task = self.report_service.load_task(task_id)
         if task is None:
             raise KeyError(task_id)
+        if graph_runtime is None:
+            raise RuntimeError("run_task requires an initialized graph runtime")
         running_task = self._transition_task(
             task,
             status="running",
@@ -674,77 +687,48 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             event_type="tool_called",
             task_id=running_task.task_id,
             correlation_id=running_task.status_metadata.correlation_id,
-            payload={"tool_name": "research_discovery_runtime"},
+            payload={"tool_name": "research_supervisor_graph"},
         )
         try:
-            execution_context = (
-                self.build_execution_context(
-                    graph_runtime=graph_runtime,
-                    conversation_id=conversation_id,
-                    task=running_task,
-                    skill_name="research_report",
-                )
-                if graph_runtime is not None
-                else None
-            )
-            bundle = await self._run_direct_discovery(
-                topic=task.topic,
-                days_back=task.days_back,
-                max_papers=task.max_papers,
-                sources=task.sources,
-                task_id=task.task_id,
-                execution_context=execution_context,
-            )
-            runtime_report = bundle.report.model_copy(
-                update={
-                    "metadata": {
-                        **bundle.report.metadata,
-                        "decision_model": "llm_dynamic_single_manager",
-                    }
-                }
-            )
-            completed_task = self._transition_task(
-                running_task,
-                status="completed",
-                correlation_id=running_task.metadata.get("correlation_id") if isinstance(running_task.metadata, dict) else None,
-                paper_count=len(bundle.papers),
-                report_id=runtime_report.report_id,
-                todo_items=bundle.todo_items,
-                workspace=bundle.workspace,
-                metadata={
-                    **running_task.metadata,
-                    "autonomy_mode": "lead_agent_loop",
-                    "agent_architecture": runtime_report.metadata.get("agent_architecture"),
-                    "decision_model": runtime_report.metadata.get("decision_model"),
-                    "primary_agents": runtime_report.metadata.get("primary_agents"),
-                    "primary_skills": runtime_report.metadata.get("primary_skills"),
-                    "autonomy_rounds": runtime_report.metadata.get("autonomy_rounds"),
-                    "autonomy_trace_steps": runtime_report.metadata.get("autonomy_trace_steps"),
-                },
-            )
-            self.save_task_state(completed_task)
-            self.report_service.save_papers(task.task_id, bundle.papers)
-            self.report_service.save_report(runtime_report)
-            self._update_research_memory(
-                graph_runtime=graph_runtime,
+            agent_request = ResearchAgentRunRequest(
+                message=(
+                    f"请继续完成研究任务“{running_task.topic}”，"
+                    "统一通过 Supervisor 自主完成检索、导入、问答和报告更新。"
+                ),
+                mode="research",
+                task_id=running_task.task_id,
                 conversation_id=conversation_id,
-                task=completed_task,
-                report=runtime_report,
-                papers=bundle.papers,
-                document_ids=completed_task.imported_document_ids,
-                task_intent="research_discovery",
-                metadata_update={
-                    "report_id": runtime_report.report_id,
-                    "autonomy_rounds": runtime_report.metadata.get("autonomy_rounds"),
-                    "autonomy_trace_steps": runtime_report.metadata.get("autonomy_trace_steps"),
+                days_back=running_task.days_back,
+                max_papers=running_task.max_papers,
+                sources=list(running_task.sources),
+                selected_paper_ids=list(running_task.workspace.must_read_paper_ids),
+                selected_document_ids=list(running_task.imported_document_ids),
+                auto_import=True,
+                include_graph=True,
+                include_embeddings=True,
+                skill_name="research_report",
+                reasoning_style="cot",
+                metadata={
+                    "task_id": running_task.task_id,
+                    "task_topic": running_task.topic,
+                    "route_mode": "research_discovery",
+                    "routing_authority": "supervisor_llm",
+                    "trigger": "run_task",
                 },
             )
+            response = await self.run_agent(
+                agent_request,
+                graph_runtime=graph_runtime,
+            )
+            completed_response = self.get_task(running_task.task_id)
+            runtime_report = completed_response.report
+            completed_task = completed_response.task
             self.observability_service.record_metric(
                 metric_type="task_completed",
                 payload={
                     "task_id": completed_task.task_id,
-                    "paper_count": len(bundle.papers),
-                    "warning_count": len(bundle.warnings),
+                    "paper_count": len(completed_response.papers),
+                    "warning_count": len(response.warnings),
                 },
             )
             self.append_runtime_event(
@@ -753,16 +737,17 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
                 task_id=completed_task.task_id,
                 correlation_id=completed_task.status_metadata.correlation_id,
                 payload={
-                    "paper_count": len(bundle.papers),
-                    "report_id": runtime_report.report_id,
-                    "warning_count": len(bundle.warnings),
+                    "paper_count": len(completed_response.papers),
+                    "report_id": runtime_report.report_id if runtime_report is not None else None,
+                    "warning_count": len(response.warnings),
+                    "trigger": "run_task",
                 },
             )
             return ResearchTaskResponse(
                 task=completed_task,
-                papers=bundle.papers,
+                papers=completed_response.papers,
                 report=runtime_report,
-                warnings=bundle.warnings,
+                warnings=list(response.warnings),
             )
         except Exception:
             failed_task = self._transition_task(
@@ -1375,4 +1360,3 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
                 payload=payload,
             )
         return job
-

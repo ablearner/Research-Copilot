@@ -293,7 +293,7 @@ class ConversationMixin:
         )
         self.report_service.save_conversation(conversation)
         self.report_service.save_messages(conversation.conversation_id, [welcome])
-        self.memory_manager.update_user_profile(
+        self.memory_gateway.update_user_profile(
             topic=request.topic,
             answer_language=_preferred_answer_language_from_text(request.topic),
             note="conversation_created",

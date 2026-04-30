@@ -11,15 +11,9 @@ from apps.api.middleware.audit import AuditMiddleware
 from apps.api.middleware.rate_limit import RateLimitMiddleware
 from apps.api.runtime import build_graph_runtime, close_graph_runtime, initialize_graph_runtime
 from apps.api.exception_handlers import register_exception_handlers
-from apps.api.routers.ask import router as ask_router
-from apps.api.routers.charts import router as charts_router
-from apps.api.routers.documents import router as documents_router
 from apps.api.routers.health import router as health_router
-from apps.api.routers.index import router as index_router
 from apps.api.routers.mcp import router as mcp_router
-from apps.api.routers.parse import router as parse_router
 from apps.api.routers.research import router as research_router
-from apps.api.routers.upload import router as upload_router
 from apps.api.research_runtime import (
     build_academic_search_mcp_dependencies,
     build_literature_research_service,
@@ -57,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         logger.info("Research persistence preserved on startup")
     await initialize_graph_runtime(app.state.graph_runtime)
+    await app.state.graph_runtime.external_tool_registry.initialize_all()
     try:
         yield
     finally:
@@ -116,14 +111,10 @@ def create_app() -> FastAPI:
             ),
             replace=True,
         )
+    mcp_config_path = Path(settings.resolve_path("mcp_servers.json"))
+    app.state.graph_runtime.external_tool_registry.register_from_json_file(mcp_config_path)
     app.state.mcp_server = MCPServerApp.from_graph_runtime(app.state.graph_runtime)
     app.include_router(health_router)
-    app.include_router(documents_router)
-    app.include_router(upload_router)
-    app.include_router(parse_router)
-    app.include_router(index_router)
-    app.include_router(charts_router)
-    app.include_router(ask_router)
     app.include_router(research_router)
     app.include_router(mcp_router)
     return app

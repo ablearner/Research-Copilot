@@ -8,9 +8,9 @@ from core.utils import now_iso as _now_iso
 from domain.schemas.api import QAResponse
 from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
-from reasoning.strategies import ReasoningStrategySet
 from retrieval.evidence_builder import build_evidence_bundle
 from services.research.capabilities import PaperAnalyzer
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
 
 if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
@@ -30,12 +30,10 @@ class ResearchWriterAgent:
         paper_search_service: PaperSearchService | None = None,
         *,
         llm_adapter: Any | None = None,
-        reasoning_strategies: ReasoningStrategySet | None = None,
         paper_analysis_skill: PaperAnalyzer | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
-        self.reasoning_strategies = reasoning_strategies or ReasoningStrategySet()
-        self.llm_adapter = llm_adapter or self.reasoning_strategies.llm_adapter
+        self.llm_adapter = llm_adapter
         self.paper_analysis_skill = paper_analysis_skill or PaperAnalyzer(llm_adapter=self.llm_adapter)
 
     def synthesize(self, state: Any) -> ResearchReport:
@@ -323,37 +321,18 @@ class ResearchWriterAgent:
         }
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
         selected_paper_analysis = await self._analyze_selected_papers(state)
-        runtime_reasoning = getattr(graph_runtime, "reasoning_strategies", None)
-        react_reasoning_agent = (
-            self.reasoning_strategies.tool_reasoning
-            or getattr(runtime_reasoning, "tool_reasoning", None)
-            or getattr(graph_runtime, "react_reasoning_agent", None)
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
+        qa = await knowledge_access.answer_with_evidence(
+            question=state.question,
+            evidence_bundle=evidence_bundle,
+            retrieval_result=retrieval_result,
+            metadata=answer_metadata,
+            session_context=session_context,
+            task_context=task_context,
+            preference_context=preference_context,
+            memory_hints=memory_hints,
+            available_tool_names=["answer_with_evidence"],
         )
-        if state.request.reasoning_style == "react" and react_reasoning_agent is not None:
-            qa = await react_reasoning_agent.reason(
-                question=state.question,
-                available_tool_names=["answer_with_evidence"],
-                metadata=answer_metadata,
-                session_context=session_context,
-                task_context=task_context,
-                preference_context=preference_context,
-                initial_retrieval_result=retrieval_result,
-                initial_evidence_bundle=evidence_bundle,
-            )
-        else:
-            answer_tools = getattr(graph_runtime, "answer_tools", None)
-            if answer_tools is None:
-                raise RuntimeError("Graph runtime is missing answer_tools for research collection QA")
-            qa = await answer_tools.answer_with_evidence(
-                question=state.question,
-                evidence_bundle=evidence_bundle,
-                retrieval_result=retrieval_result,
-                metadata=answer_metadata,
-                session_context=session_context,
-                task_context=task_context,
-                preference_context=preference_context,
-                memory_hints=memory_hints,
-            )
         citations = self._build_citations(state=state, retrieval_result=retrieval_result)
         extended_analysis = await self._build_extended_analysis_async(
             state=state,

@@ -120,9 +120,13 @@ Browser (http://localhost:3000)
 - `tooling/`
   工具注册 / 执行框架和 research function 规范
 - `mcp/`
-  MCP（Model Context Protocol）客户端注册和服务端暴露
+  MCP（Model Context Protocol）客户端注册和服务端暴露。已实现标准 MCP 协议，详见下方 [MCP 标准化架构](#mcp-标准化架构) 章节
 - `evaluation/`
   评测框架（7 种 case 类型）、benchmark 构建、metrics 和数据集管理
+- `core/`
+  共享核心模块：配置（`config.py`）、知识加载（`knowledge_loader.py`）、技能系统（`skill_registry.py`、`skill_matcher.py`、`skill_validator.py`）
+- `skills/`
+  标准化技能目录，`builtin/` 内置技能（git-tracked），`community/` 社区/外部技能（gitignored）。每个技能是一个含 `SKILL.md` 的文件夹
 - `scripts/`
   环境检查、Milvus 重置、SciGraphQA 入库、WSL Zotero 桥接等工具脚本
 - `sdk/`
@@ -149,15 +153,10 @@ Browser (http://localhost:3000)
 - `POST /research/tasks/{task_id}/papers/{paper_id}/figures/analyze`
 - `PATCH /research/tasks/{task_id}/todos/{todo_id}`
 
-### RAG / Document / Chart API
+### Research Document API
 
-- `POST /documents/upload`
-- `POST /documents/parse`
-- `POST /documents/index`
-- `POST /documents/ask`
-- `POST /documents/ask/fused`
-- `POST /charts/understand`
-- `POST /charts/ask`
+- `POST /research/documents/upload`
+- 文档解析、索引、图表理解和 grounded QA 已收编为 Supervisor 内部 knowledge tools，不再暴露独立低层 API
 - `GET /health` — 应用健康检查（含 uptime）
 - `GET /health/metrics` — 运行时指标（LLM 调用延迟/计数/错误分布）
 
@@ -216,6 +215,125 @@ Browser (http://localhost:3000)
 - `CORS_ALLOW_ORIGINS` 默认允许 localhost:3000/3001
 - `RATE_LIMIT_MAX_REQUESTS` 默认 60 次/分钟/IP
 - `JSON_LOG_FORMAT` 默认 `false`，设为 `true` 启用结构化 JSON 日志
+
+## MCP 标准化架构
+
+项目的 MCP（Model Context Protocol）客户端已完成标准化，完全符合 MCP 规范：
+
+### 协议合规
+
+- **JSON-RPC 2.0 信封**：所有 MCP 通信（`tools/list`、`tools/call`、`initialize` 等）均使用标准 JSON-RPC 2.0 格式，包含 `jsonrpc`、`method`、`params`、`id` 字段
+- **initialize 握手**：客户端在首次通信前自动执行 MCP `initialize` 握手，交换 `protocolVersion`、`capabilities` 和 `clientInfo`，并发送 `notifications/initialized` 通知
+- **错误处理**：自动解析 JSON-RPC `error` 对象（含 `code` 和 `message`），并对错误消息进行凭据脱敏
+
+### 传输方式
+
+| 传输方式 | 客户端类 | 说明 |
+|---------|---------|------|
+| stdio | `StdioMCPClient` | 通过子进程 stdin/stdout 通信，支持自动重连、指数退避 |
+| HTTP | `HttpMCPClient` | 通过 HTTP POST 通信，支持自定义 headers 和重试 |
+| 进程内 | `InProcessMCPClient` | 直接调用本地 MCPServerApp，无网络开销 |
+
+### 添加外部 MCP 工具
+
+用户可以通过配置文件动态添加外部 MCP 工具服务器（如论文搜索、翻译等）：
+
+1. 复制配置模板：`cp mcp_servers.example.json mcp_servers.json`
+2. 编辑 `mcp_servers.json`，添加你的 MCP 服务器：
+
+```json
+{
+  "servers": {
+    "paper-search": {
+      "transport": "http",
+      "url": "http://localhost:3001",
+      "headers": {"Authorization": "Bearer your-token"},
+      "timeout": 60,
+      "enabled": true
+    },
+    "local-tool": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@some/mcp-server"],
+      "env": {"API_KEY": "xxx"},
+      "enabled": true
+    }
+  }
+}
+```
+
+3. 重启后端服务，系统自动注册并初始化配置的 MCP 服务器
+4. 外部工具会自动注入到 ReAct 推理引擎的可用工具池中
+
+**注意**：`mcp_servers.json` 已加入 `.gitignore`，不会被提交到版本控制。
+
+### 关键文件
+
+| 文件 | 职责 |
+|-----|------|
+| `mcp/client/base.py` | MCP 客户端基类、JSON-RPC 2.0 构建器、协议常量 |
+| `mcp/client/stdio_client.py` | stdio 传输客户端 |
+| `mcp/client/http_client.py` | HTTP 传输客户端 |
+| `mcp/client/registry.py` | MCP 客户端注册中心、配置加载、工具发现 |
+| `mcp/security.py` | 环境变量过滤、错误脱敏、工具描述注入检测 |
+| `mcp/server/app.py` | MCP 服务端（对外暴露本系统能力） |
+| `mcp_servers.example.json` | 用户配置模板 |
+
+## Skill 系统
+
+项目实现了标准化的技能系统，支持内置技能和外部社区技能的即插即用。
+
+### 目录结构
+
+```text
+skills/
+├── builtin/                  # 内置技能（git-tracked）
+│   ├── paper-comparison/     # 论文对比分析
+│   ├── literature-survey/    # 文献综述写作
+│   ├── paper-reading/        # 论文深度阅读
+│   └── research-evaluation/  # 研究质量评估
+├── community/                # 社区/外部技能（gitignored）
+└── .skill_config.json        # 技能启用/禁用配置（gitignored）
+```
+
+### 核心模块
+
+| 文件 | 职责 |
+|-----|------|
+| `core/skill_registry.py` | SkillRegistry — 扫描、索引、三级渐进加载（L1 元数据 / L2 指令 / L3 引用文件） |
+| `core/skill_matcher.py` | SkillMatcher — trigger 正则匹配 + tag/description 关键词匹配 |
+| `core/skill_validator.py` | SkillValidator — prompt injection 检测、路径安全、大小限制 |
+
+### 添加外部技能
+
+从网上下载的技能文件夹（包含 `SKILL.md`）放入 `skills/community/` 即可：
+
+```bash
+cp -r downloaded-skill/ skills/community/
+# 重启后自动扫描并可用
+```
+
+### SKILL.md 格式
+
+每个技能目录必须包含一个 `SKILL.md` 文件，使用 YAML frontmatter + Markdown body：
+
+```markdown
+---
+name: my-skill
+description: "技能描述"
+triggers:
+  - "触发正则1"
+  - "触发正则2"
+tags: [tag1, tag2]
+trust_level: community    # builtin | trusted | community
+enabled: true
+requires:
+  tools: [tool_name]
+---
+
+# 技能指令（Markdown）
+具体的执行步骤和输出格式要求...
+```
 
 ## 本地启动
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
@@ -37,8 +36,8 @@ from domain.schemas.research import (
     ResearchTodoItem,
     ResearchWorkspaceState,
 )
-from services.research.research_context import ResearchExecutionContext
-from services.research.research_workspace import build_workspace_from_task, build_workspace_state
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
+from services.research.research_workspace import build_workspace_from_task
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget
 
 logger = logging.getLogger(__name__)
@@ -183,7 +182,7 @@ class PaperOperationsMixin:
         document_id = str(paper.metadata.get("document_id") or "").strip()
         if not storage_uri or not document_id:
             raise ValueError("Imported paper is missing storage metadata.")
-        return await graph_runtime.handle_parse_document(
+        return await ResearchKnowledgeAccess.from_runtime(graph_runtime).parse_document(
             file_path=storage_uri,
             document_id=document_id,
             metadata={
@@ -353,6 +352,8 @@ class PaperOperationsMixin:
         task_id: str,
         todo_id: str,
         request: ResearchTodoActionRequest,
+        *,
+        graph_runtime: Any,
     ) -> ResearchTodoActionResponse:
         task, todo = self._load_task_and_todo(task_id, todo_id)
         existing_report = self.report_service.load_report(task.task_id, task.report_id)
@@ -360,6 +361,7 @@ class PaperOperationsMixin:
             task=task,
             todo=todo,
             max_papers=request.max_papers,
+            graph_runtime=graph_runtime,
         )
         now = datetime.now(UTC).isoformat()
         updated_todo = todo.model_copy(
@@ -429,6 +431,7 @@ class PaperOperationsMixin:
                 task=task,
                 todo=todo,
                 max_papers=request.max_papers,
+                graph_runtime=graph_runtime,
             )
             current_papers = merged_papers
             candidate_papers = self._select_todo_import_candidates(
@@ -664,7 +667,8 @@ class PaperOperationsMixin:
                 )
 
             artifact = await self.paper_import_service.download_paper(paper)
-            parsed_document = await graph_runtime.handle_parse_document(
+            knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
+            parsed_document = await knowledge_access.parse_document(
                 file_path=artifact.storage_uri,
                 document_id=artifact.document_id,
                 session_id=session_id,
@@ -676,7 +680,7 @@ class PaperOperationsMixin:
                 },
                 skill_name=request.skill_name,
             )
-            index_result = await graph_runtime.handle_index_document(
+            index_result = await knowledge_access.index_document(
                 parsed_document=parsed_document,
                 charts=[],
                 include_graph=(request.include_graph and not request.fast_mode),
@@ -807,121 +811,38 @@ class PaperOperationsMixin:
         task: ResearchTask,
         todo: ResearchTodoItem,
         max_papers: int,
+        graph_runtime: Any,
     ) -> tuple[str, list[PaperCandidate], list[PaperCandidate], list[str]]:
         query = self._build_todo_query(task, todo)
-        bundle = await self._run_direct_discovery(
-            topic=query,
+        agent_request = self._build_discovery_only_request(
+            message=query,
             days_back=task.days_back,
             max_papers=max_papers,
-            sources=task.sources,
+            sources=list(task.sources),
+            conversation_id=None,
             task_id=task.task_id,
-        )
-        merged_papers = self._refresh_existing_pool(
-            existing_papers=self.report_service.load_papers(task.task_id),
-            incoming_papers=bundle.papers,
-            ranking_topic=query,
-        )
-        return query, bundle.papers, merged_papers, bundle.warnings
-
-    async def _run_direct_discovery(
-        self,
-        *,
-        topic: str,
-        days_back: int,
-        max_papers: int,
-        sources: list[str],
-        task_id: str | None = None,
-        execution_context: ResearchExecutionContext | None = None,
-    ):
-        state = SimpleNamespace(
-            topic=topic,
-            days_back=days_back,
-            max_papers=max_papers,
-            sources=sources,
-            task_id=task_id,
-            execution_context=execution_context,
-            max_rounds=2,
-            round_index=0,
-            queried_pairs=set(),
-            search_completed=False,
-            curation_completed=False,
-            raw_papers=[],
-            trace=[],
-            warnings=[],
-            curated_papers=[],
-            must_read_ids=[],
-            ingest_candidate_ids=[],
-            report=None,
-            todo_items=[],
-            refinement_used=False,
-        )
-        plan = await self.literature_scout_agent.plan(state)
-        state.initial_plan = plan
-        state.active_queries = list(plan.queries)
-        raw_papers, warnings = await self.literature_scout_agent.search(state)
-        state.warnings = list(warnings)
-        curated_papers, must_read_ids, ingest_candidate_ids = self.paper_curation_skill.curate(
-            topic=topic,
-            raw_papers=raw_papers,
-            max_papers=max_papers,
-        )
-        state.curated_papers = curated_papers
-        state.must_read_ids = must_read_ids
-        state.ingest_candidate_ids = ingest_candidate_ids
-        report = await self.research_writer_agent.synthesize_async(state)
-        state.report = report
-        todo_items = await self.research_writer_agent.plan_todos_async(state)
-        state.todo_items = todo_items
-        workspace = build_workspace_state(
-            objective=topic,
-            stage="complete",
-            papers=curated_papers,
-            imported_document_ids=[],
-            report=report,
-            plan=plan,
-            todo_items=todo_items,
-            must_read_ids=must_read_ids,
-            ingest_candidate_ids=ingest_candidate_ids,
-            stop_reason="Direct supervisor-aligned discovery completed.",
-            metadata={
-                "decision_model": "supervisor_direct_execution",
-                "autonomy_rounds": 1,
-                "trace_steps": 0,
+            selected_paper_ids=list(task.workspace.must_read_paper_ids),
+            selected_document_ids=list(task.imported_document_ids),
+            trigger="todo_search",
+            metadata_update={
+                "todo_id": todo.todo_id,
+                "todo_query": query,
+                "response_contract": "todo_search",
             },
         )
-        saved_report = report.model_copy(
-            update={
-                "workspace": workspace,
-                "metadata": {
-                    **report.metadata,
-                    "autonomy_mode": "lead_agent_loop",
-                    "agent_architecture": "main_agents_plus_skills",
-                    "decision_model": "supervisor_direct_execution",
-                    "primary_agents": [
-                        "ResearchSupervisorAgent",
-                        "LiteratureScoutAgent",
-                        "ResearchWriterAgent",
-                    ],
-                    "primary_skills": [
-                        "PaperCurator",
-                    ],
-                    "supervisor_agent_architecture": "supervisor_direct_execution",
-                    "supervisor_decision_model": "supervisor_direct_execution",
-                    "autonomy_rounds": 1,
-                },
-            }
-        )
-        return SimpleNamespace(
-            plan=plan,
-            papers=curated_papers,
-            report=saved_report,
-            workspace=workspace,
-            warnings=list(warnings),
-            todo_items=todo_items,
-            trace=[],
-            must_read_ids=must_read_ids,
-            ingest_candidate_ids=ingest_candidate_ids,
-        )
+        response = await self.run_agent(agent_request, graph_runtime=graph_runtime)
+        refreshed_state = self.get_task(task.task_id)
+        discovered_ids = {
+            str(item).strip()
+            for item in refreshed_state.task.metadata.get("last_search_discovered_paper_ids", [])
+            if str(item).strip()
+        }
+        discovered_papers = [
+            paper
+            for paper in refreshed_state.papers
+            if paper.paper_id in discovered_ids
+        ]
+        return query, discovered_papers, refreshed_state.papers, list(response.warnings)
 
 
     async def _run_import_job(
@@ -1184,7 +1105,8 @@ class PaperOperationsMixin:
             if paper is None:
                 continue
             try:
-                parsed_document = await graph_runtime.handle_parse_document(
+                knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
+                parsed_document = await knowledge_access.parse_document(
                     file_path=result.storage_uri,
                     document_id=result.document_id,
                     session_id=request.conversation_id,
@@ -1196,7 +1118,7 @@ class PaperOperationsMixin:
                     },
                     skill_name=request.skill_name,
                 )
-                backfill_result = await graph_runtime.handle_graph_backfill_document(
+                backfill_result = await knowledge_access.graph_backfill_document(
                     parsed_document=parsed_document,
                     charts=[],
                     session_id=request.conversation_id,
@@ -1486,4 +1408,3 @@ class PaperOperationsMixin:
             if len(merged) >= limit:
                 break
         return merged
-

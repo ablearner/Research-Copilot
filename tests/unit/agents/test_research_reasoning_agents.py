@@ -6,21 +6,23 @@ from agents.literature_scout_agent import LiteratureScoutAgent, _dynamic_source_
 from agents.research_knowledge_agent import ResearchKnowledgeAgent
 from domain.schemas.research import PaperCandidate, ResearchReport, ResearchTask, ResearchTaskAskRequest, ResearchTopicPlan
 from domain.schemas.retrieval import RetrievalHit
-from services.research.research_supervisor_graph_runtime_core import _llm_stage_timeout_seconds
+from services.research.supervisor_tools.base import _llm_stage_timeout_seconds
 
 
-class PlanAndSolveReasonerStub:
+class PlanAndExecuteLLMStub:
+    """Stub LLM that returns structured plan output for Plan-and-Execute tests."""
     def __init__(self, *, queries: list[str]) -> None:
         self.queries = queries
         self.calls: list[dict] = []
+        self.timeout_seconds = 30.0
 
-    async def plan_queries(self, **kwargs):
-        self.calls.append(kwargs)
-        return SimpleNamespace(
-            queries=list(self.queries),
-            reasoning_summary="stubbed reasoning summary",
-            plan_steps=["decompose objective", "expand evidence coverage"],
-        )
+    async def generate_structured(self, *, prompt, input_data, response_model=None):
+        self.calls.append({"prompt": prompt, "input_data": input_data})
+        return {
+            "queries": list(self.queries),
+            "reasoning_summary": "stubbed reasoning summary",
+            "plan_steps": ["decompose objective", "expand evidence coverage"],
+        }
 
 
 class TopicPlannerStub:
@@ -62,11 +64,11 @@ def test_llm_stage_timeout_uses_adapter_timeout_with_slack() -> None:
 
 
 @pytest.mark.asyncio
-async def test_literature_scout_agent_uses_plan_and_solve_for_topic_plan() -> None:
-    reasoning_agent = PlanAndSolveReasonerStub(queries=["无人机路径规划 survey benchmark"])
+async def test_literature_scout_agent_uses_plan_and_execute_for_topic_plan() -> None:
+    llm_stub = PlanAndExecuteLLMStub(queries=["无人机路径规划 survey benchmark"])
     scout = LiteratureScoutAgent(
         paper_search_service=PaperSearchServiceStub(),
-        plan_and_solve_reasoning_agent=reasoning_agent,
+        llm_adapter=llm_stub,
     )
     state = SimpleNamespace(
         topic="无人机路径规划",
@@ -81,17 +83,16 @@ async def test_literature_scout_agent_uses_plan_and_solve_for_topic_plan() -> No
 
     plan = await scout.plan(state)
 
-    assert plan.metadata["reasoning_style"] == "plan_and_solve"
+    assert plan.metadata["reasoning_style"] == "plan_and_execute"
     assert "stubbed reasoning summary" == plan.metadata["reasoning_summary"]
     assert "无人机路径规划 survey benchmark" in plan.queries
-    assert len(reasoning_agent.calls) == 1
-    assert reasoning_agent.calls[0]["context"]["memory_hints"] == {"preferred_sources": ["survey"]}
+    assert len(llm_stub.calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_research_knowledge_agent_uses_plan_and_solve_queries_when_not_react() -> None:
-    reasoning_agent = PlanAndSolveReasonerStub(queries=["无人机路径规划 survey benchmark evidence"])
-    agent = ResearchKnowledgeAgent(plan_and_solve_reasoning_agent=reasoning_agent)
+async def test_research_knowledge_agent_uses_plan_and_execute_queries_when_not_react() -> None:
+    llm_stub = PlanAndExecuteLLMStub(queries=["无人机路径规划 survey benchmark evidence"])
+    agent = ResearchKnowledgeAgent(llm_adapter=llm_stub)
     task = ResearchTask(
         task_id="task_reasoning_1",
         topic="无人机路径规划",
@@ -131,14 +132,13 @@ async def test_research_knowledge_agent_uses_plan_and_solve_queries_when_not_rea
     queries = await agent.plan_collection_queries(state)
 
     assert "无人机路径规划 survey benchmark evidence" in queries
-    assert len(reasoning_agent.calls) == 1
-    assert reasoning_agent.calls[0]["context"]["memory_hints"] == {"preferred_sources": ["survey"]}
+    assert len(llm_stub.calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_research_knowledge_agent_skips_plan_and_solve_for_react() -> None:
-    reasoning_agent = PlanAndSolveReasonerStub(queries=["should not be used"])
-    agent = ResearchKnowledgeAgent(plan_and_solve_reasoning_agent=reasoning_agent)
+async def test_research_knowledge_agent_skips_plan_and_execute_for_react() -> None:
+    llm_stub = PlanAndExecuteLLMStub(queries=["should not be used"])
+    agent = ResearchKnowledgeAgent(llm_adapter=llm_stub)
     task = ResearchTask(
         task_id="task_reasoning_2",
         topic="无人机路径规划",
@@ -160,7 +160,7 @@ async def test_research_knowledge_agent_skips_plan_and_solve_for_react() -> None
     queries = await agent.plan_collection_queries(state)
 
     assert queries
-    assert reasoning_agent.calls == []
+    assert llm_stub.calls == []
 
 
 def test_research_knowledge_agent_uses_report_summary_only_as_fallback() -> None:

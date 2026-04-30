@@ -5,9 +5,8 @@ from typing import Any
 
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
-from reasoning.plan_and_solve import PlanAndSolveReasoningAgent
-from reasoning.strategies import ReasoningStrategySet
-from reasoning.style import normalize_reasoning_style
+from agents.research_qa_agent import normalize_reasoning_style
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
 
 _TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _STOPWORDS = {
@@ -82,16 +81,9 @@ class ResearchKnowledgeAgent:
     def __init__(
         self,
         *,
-        plan_and_solve_reasoning_agent: PlanAndSolveReasoningAgent | None = None,
-        reasoning_strategies: ReasoningStrategySet | None = None,
+        llm_adapter: Any | None = None,
     ) -> None:
-        self.reasoning_strategies = reasoning_strategies or ReasoningStrategySet(
-            query_planning=plan_and_solve_reasoning_agent,
-        )
-        self.plan_and_solve_reasoning_agent = (
-            plan_and_solve_reasoning_agent
-            or self.reasoning_strategies.plan_and_solve_reasoning_agent
-        )
+        self.llm_adapter = llm_adapter
 
     def decide(self, state: Any) -> tuple[str, str]:
         if not state.queries:
@@ -112,10 +104,9 @@ class ResearchKnowledgeAgent:
 
     async def plan_collection_queries(self, state: Any) -> list[str]:
         planned = self._heuristic_plan_collection_queries(state)
-        planning_strategy = self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent
-        if not self._should_use_plan_and_solve(state) or planning_strategy is None:
+        if not self._should_use_plan_and_execute(state) or self.llm_adapter is None:
             return planned
-        reasoning_plan = await planning_strategy.plan_queries(
+        reasoning_plan = await self._plan_queries(
             objective=f"Grounded research collection QA for: {state.question}",
             seed_queries=planned,
             context={
@@ -125,9 +116,8 @@ class ResearchKnowledgeAgent:
                 "memory_hints": self._memory_hints(state),
             },
             max_queries=3,
-            agent_name=self.name,
         )
-        return self._normalize_queries([*reasoning_plan.queries, *planned], limit=3)
+        return self._normalize_queries([*reasoning_plan["queries"], *planned], limit=3)
 
     def _heuristic_plan_collection_queries(self, state: Any) -> list[str]:
         candidates = [state.question]
@@ -151,12 +141,10 @@ class ResearchKnowledgeAgent:
         return self._heuristic_plan_collection_queries(state)
 
     async def retrieve_collection_evidence(self, *, graph_runtime: Any, state: Any, query: str) -> list[RetrievalHit]:
-        retrieval_tools = getattr(graph_runtime, "retrieval_tools", None)
-        if retrieval_tools is None:
-            raise RuntimeError("Graph runtime is missing retrieval_tools for research collection QA")
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         execution_context = getattr(state, "execution_context", None)
         scope_filters = self._scope_filters(state)
-        result = await retrieval_tools.retrieve(
+        result = await knowledge_access.retrieve(
             question=query,
             document_ids=state.document_ids,
             top_k=state.top_k,
@@ -173,11 +161,12 @@ class ResearchKnowledgeAgent:
         return result.retrieval_result.hits
 
     async def retrieve_graph_summary(self, *, graph_runtime: Any, state: Any) -> list[RetrievalHit]:
-        if not state.document_ids or not hasattr(graph_runtime, "query_graph_summary"):
+        if not state.document_ids:
             return []
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         execution_context = getattr(state, "execution_context", None)
         scope_filters = self._scope_filters(state)
-        summary_output = await graph_runtime.query_graph_summary(
+        summary_output = await knowledge_access.query_graph_summary(
             question=state.question,
             document_ids=state.document_ids,
             top_k=max(3, min(state.top_k, 6)),
@@ -252,10 +241,9 @@ class ResearchKnowledgeAgent:
 
     async def propose_collection_queries(self, state: Any) -> list[str]:
         refined = self._heuristic_propose_collection_queries(state)
-        planning_strategy = self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent
-        if not self._should_use_plan_and_solve(state) or planning_strategy is None:
+        if not self._should_use_plan_and_execute(state) or self.llm_adapter is None:
             return refined
-        reasoning_plan = await planning_strategy.plan_queries(
+        reasoning_plan = await self._plan_queries(
             objective=f"Broaden evidence coverage for research QA: {state.question}",
             seed_queries=refined or list(state.queries),
             context={
@@ -266,9 +254,8 @@ class ResearchKnowledgeAgent:
                 "memory_hints": self._memory_hints(state),
             },
             max_queries=2,
-            agent_name=self.name,
         )
-        return self._normalize_queries([*reasoning_plan.queries, *refined], limit=2)
+        return self._normalize_queries([*reasoning_plan["queries"], *refined], limit=2)
 
     def _heuristic_propose_collection_queries(self, state: Any) -> list[str]:
         focus_terms: list[str] = []
@@ -302,10 +289,69 @@ class ResearchKnowledgeAgent:
     def propose_queries(self, state: Any) -> list[str]:
         return self._heuristic_propose_collection_queries(state)
 
-    def _should_use_plan_and_solve(self, state: Any) -> bool:
-        if (self.reasoning_strategies.query_planning or self.plan_and_solve_reasoning_agent) is None:
+    def _should_use_plan_and_execute(self, state: Any) -> bool:
+        if self.llm_adapter is None:
             return False
         return normalize_reasoning_style(self._reasoning_style(state)) != "react"
+
+    async def _plan_queries(
+        self,
+        *,
+        objective: str,
+        seed_queries: list[str],
+        context: dict[str, Any] | None = None,
+        max_queries: int = 4,
+    ) -> dict[str, Any]:
+        """Internal Plan-and-Execute: decompose objective into queries."""
+        import json
+        from adapters.llm.base import LLMAdapterError, is_expected_provider_error
+        heuristic = {
+            "plan_steps": [
+                "Identify the core research objective.",
+                "Break it into search facets for better coverage.",
+                "Emit a compact set of high-yield queries.",
+            ],
+            "queries": self._normalize_queries(seed_queries or [objective], limit=max_queries),
+            "reasoning_summary": "Kept strongest seed queries as a compact next-step query set.",
+        }
+        if self.llm_adapter is None:
+            return heuristic
+        payload = {
+            "objective": objective,
+            "seed_queries": seed_queries,
+            "max_queries": max(1, min(max_queries, 6)),
+            "context": context or {},
+        }
+        try:
+            result = await self.llm_adapter.generate_structured(
+                prompt=(
+                    "You are a Plan-and-Execute query planner. "
+                    "First plan the subproblems privately, then return only structured output. "
+                    "Produce a short list of plan_steps, a deduplicated query set, and a concise reasoning_summary."
+                ),
+                input_data=payload,
+                response_model=None,
+            )
+            if isinstance(result, str):
+                result = json.loads(result)
+            if not isinstance(result, dict):
+                return heuristic
+            queries = self._normalize_queries(
+                [*(result.get("queries") or []), *seed_queries],
+                limit=max_queries,
+            )
+            if not queries:
+                return heuristic
+            return {
+                "plan_steps": list(result.get("plan_steps") or heuristic["plan_steps"]),
+                "queries": queries,
+                "reasoning_summary": str(result.get("reasoning_summary") or heuristic["reasoning_summary"]),
+            }
+        except (LLMAdapterError, OSError, ValueError, Exception) as exc:
+            if is_expected_provider_error(exc):
+                import logging
+                logging.getLogger(__name__).warning("Plan-and-Execute planning failed; using heuristic: %s", exc)
+            return heuristic
 
     def _reasoning_style(self, state: Any) -> str | None:
         request = getattr(state, "request", None)

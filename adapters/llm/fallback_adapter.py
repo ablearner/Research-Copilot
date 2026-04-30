@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from adapters.llm.base import BaseLLMAdapter, LLMAdapterError, TModel
+from adapters.llm.base import BaseLLMAdapter, TModel
 from adapters.llm.error_classifier import classify_llm_error
 
 logger = logging.getLogger(__name__)

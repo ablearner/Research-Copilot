@@ -466,6 +466,25 @@ def test_research_supervisor_graph_hydration_prefers_latest_conversation_task(tm
     assert hydrated_request.selected_document_ids == ["paper_doc_agent_1"]
 
 
+def test_research_supervisor_context_builder_resolves_skill_context(tmp_path) -> None:
+    runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
+
+    context = runtime._build_tool_context(
+        request=ResearchAgentRunRequest(
+            message="请对比这些论文的方法差异",
+            mode="qa",
+        ),
+        graph_runtime=GraphRuntimeStub(),
+    )
+
+    assert context.skill_context is not None
+    assert "Paper Comparison Skill" in context.skill_context
+    assert context.skill_selection is not None
+    assert context.skill_selection.active_skill_names == ["paper-comparison"]
+    assert context.skill_selection.match_reasons["paper-comparison"].startswith("trigger:")
+    assert context.knowledge_access is not None
+
+
 def build_advanced_service(tmp_path) -> LiteratureResearchService:
     return LiteratureResearchService(
         paper_search_service=PaperSearchService(

@@ -383,7 +383,7 @@ def test_unified_serializers_include_agent_descriptors():
 async def test_phase1_registry_can_execute_real_handler_when_bound():
     graph_runtime = _build_runtime_stub()
 
-    async def _execution_handler(task, context, legacy_delegate):
+    async def _execution_handler(task, context, agent_delegate):
         return UnifiedAgentResult(
             task_id=task.task_id,
             agent_name="ResearchKnowledgeAgent",
@@ -392,7 +392,7 @@ async def test_phase1_registry_can_execute_real_handler_when_bound():
             instruction=task.instruction,
             metadata={
                 "execution_engine": "unified_agent_registry",
-                "legacy_delegate_type": legacy_delegate.__class__.__name__ if legacy_delegate is not None else None,
+                "delegate_type": agent_delegate.__class__.__name__ if agent_delegate is not None else None,
                 "context_has_tool_registry": context.tool_registry is not None,
             },
         )
@@ -400,7 +400,7 @@ async def test_phase1_registry_can_execute_real_handler_when_bound():
     registry = build_phase1_unified_agent_registry(
         graph_runtime=graph_runtime,
         research_service=SimpleNamespace(),
-        legacy_delegates={"ResearchKnowledgeAgent": SimpleNamespace(name="knowledge")},
+        agent_delegates={"ResearchKnowledgeAgent": SimpleNamespace(name="knowledge")},
         execution_handlers={"ResearchKnowledgeAgent": _execution_handler},
     )
     executor = registry.get("ResearchKnowledgeAgent")
@@ -423,5 +423,5 @@ async def test_phase1_registry_can_execute_real_handler_when_bound():
 
     assert result.status == "succeeded"
     assert result.metadata["execution_engine"] == "unified_agent_registry"
-    assert result.metadata["legacy_delegate_type"] == "SimpleNamespace"
+    assert result.metadata["delegate_type"] == "SimpleNamespace"
     assert result.metadata["context_has_tool_registry"] is True

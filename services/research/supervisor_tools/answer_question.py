@@ -59,7 +59,7 @@ class AnswerResearchQuestionTool:
                 ask_response=qa_result,
             )
         if context.execution_context is not None and context.execution_context.session_id and qa_result.paper_ids:
-            context.research_service.memory_manager.set_active_papers(
+            context.research_service.memory_gateway.set_active_papers(
                 context.execution_context.session_id,
                 list(qa_result.paper_ids),
             )

@@ -14,9 +14,7 @@ from core.prompt_resolver import PromptResolver
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.retrieval import HybridRetrievalResult
-from reasoning.cot import CoTReasoningAgent
-from reasoning.strategies import ReasoningStrategySet
-from reasoning.style import normalize_reasoning_style
+from agents.research_qa_agent import normalize_reasoning_style
 
 logger = logging.getLogger(__name__)
 
@@ -439,19 +437,11 @@ class AnswerAgent:
         llm_adapter: BaseLLMAdapter | None = None,
         prompt_path: str | Path = "prompts/document/answer_question_with_hybrid_rag.txt",
         prompt_resolver: PromptResolver | None = None,
-        cot_reasoning_agent: CoTReasoningAgent | None = None,
-        reasoning_strategies: ReasoningStrategySet | None = None,
+        **_: Any,
     ) -> None:
         self.llm_adapter = llm_adapter or LocalLLMAdapter()
         self.prompt_path = Path(prompt_path)
         self.prompt_resolver = prompt_resolver or PromptResolver()
-        self.reasoning_strategies = reasoning_strategies or ReasoningStrategySet(
-            answer_synthesis=cot_reasoning_agent,
-        )
-        self.cot_reasoning_agent = (
-            cot_reasoning_agent
-            or self.reasoning_strategies.cot_reasoning_agent
-        )
         self.chain = AnswerChain(
             llm=self.llm_adapter,
             prompt_path=self.prompt_path,
@@ -490,11 +480,6 @@ class AnswerAgent:
             "memory_hints": memory_hints or {},
             "output_style": resolved_output_style,
         }
-        cot_strategy = self.reasoning_strategies.answer_synthesis or self.cot_reasoning_agent
-        use_cot = cot_strategy is not None and (
-            reasoning_style == "cot"
-            or ((metadata or {}).get("qa_mode") == "research_collection" and reasoning_style != "react")
-        )
         if not evidence_bundle.evidences:
             return insufficient_evidence_response(
                 question=question,
@@ -510,18 +495,6 @@ class AnswerAgent:
                 retrieval_result=retrieval_result,
                 metadata=answer_metadata,
             )
-        if use_cot:
-            return await cot_strategy.reason(
-                question=question,
-                evidence_bundle=evidence_bundle,
-                retrieval_result=retrieval_result,
-                metadata=answer_metadata,
-                session_context=session_context,
-                task_context=task_context,
-                preference_context=preference_context,
-                memory_hints=memory_hints,
-            )
-
         try:
             response = await self.chain.ainvoke(
                 question=question,

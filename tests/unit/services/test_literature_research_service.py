@@ -3580,6 +3580,7 @@ async def test_rerun_todo_search_updates_task_report_and_candidates(tmp_path) ->
         "task_todo_2",
         "todo_2",
         ResearchTodoActionRequest(max_papers=5),
+        graph_runtime=GraphRuntimeSuccessStub(),
     )
 
     assert response.papers
@@ -3676,7 +3677,8 @@ async def test_search_papers_does_not_call_legacy_research_runtime(tmp_path) -> 
             max_papers=5,
             sources=["arxiv", "openalex"],
             run_immediately=False,
-        )
+        ),
+        graph_runtime=GraphRuntimeSuccessStub(),
     )
 
     assert response.papers

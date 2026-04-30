@@ -12,6 +12,7 @@ from domain.schemas.research import (
 )
 from services.research.capabilities.paper_chart_analysis import PaperChartAnalyzer
 from services.research.capabilities.visual_anchor import VisualAnchor
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget, PaperFigureTools
 
 
@@ -69,7 +70,8 @@ class ChartAnalysisAgent:
         context: dict[str, Any],
         skill_name: str | None,
     ) -> Any:
-        return await graph_runtime.handle_understand_chart(
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
+        return await knowledge_access.understand_chart(
             image_path=image_path,
             document_id=document_id,
             page_id=page_id,
@@ -105,9 +107,10 @@ class ChartAnalysisAgent:
         if self.paper_figure_tools is None:
             raise RuntimeError("paper figure tools are not configured")
         parsed_document = await parse_imported_paper_document(paper=paper, graph_runtime=graph_runtime)
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         chart_candidates_by_page: dict[str, list[Any]] = {}
         for page in parsed_document.pages:
-            candidates = await graph_runtime.document_tools.locate_chart_candidates(page)
+            candidates = await knowledge_access.locate_chart_candidates(page)
             chart_candidates_by_page[page.id] = list(candidates or [])
         previews, targets, warnings = await self.paper_figure_tools.build_figure_previews(
             paper_id=paper.paper_id,

@@ -41,6 +41,7 @@ class ResearchSupervisorState:
     goal: str
     mode: str = "auto"
     route_mode: str = "research_follow_up"
+    workflow_constraint: str | None = None
     active_thread_id: str | None = None
     active_thread_topic: str | None = None
     topic_continuity_score: float = 0.0
@@ -88,6 +89,7 @@ class ResearchSupervisorState:
     latest_suggested_next_actions: list[str] = field(default_factory=list)
     candidate_papers: list[dict[str, Any]] = field(default_factory=list)
     user_intent: dict[str, Any] = field(default_factory=dict)
+    skill_context: str | None = None
 
 
 @dataclass(slots=True)
@@ -222,6 +224,15 @@ class ResearchSupervisorAgent:
         )
         if intent_guardrail is not None:
             return intent_guardrail
+        constrained_decision = self._workflow_constraint_decision(
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+        )
+        if constrained_decision is not None:
+            return constrained_decision
         guardrail_decision = self._guardrail_decision(
             state=state,
             all_messages=all_messages,
@@ -253,9 +264,7 @@ class ResearchSupervisorAgent:
                 )
             context_slice = self._truncate_context_slice(context_slice)
         available_actions = self._available_actions(state)
-        llm_output = await self.llm_adapter.generate_structured(
-            prompt=self._llm_prompt(),
-            input_data={
+        input_data: dict[str, Any] = {
                 "state": self._state_snapshot(state),
                 "available_actions": available_actions,
                 "recent_tasks": [self._message_snapshot(message) for message in all_messages[-8:]],
@@ -266,7 +275,12 @@ class ResearchSupervisorAgent:
                 "planner_runs": planner_runs,
                 "replan_count": replan_count,
                 "context_slice": self._serialize_context_slice(context_slice),
-            },
+        }
+        if state.skill_context:
+            input_data["active_skill_instructions"] = state.skill_context
+        llm_output = await self.llm_adapter.generate_structured(
+            prompt=self._llm_prompt(),
+            input_data=input_data,
             response_model=ResearchSupervisorLLMDecision,
         )
         return self._decision_from_llm_output(
@@ -488,6 +502,55 @@ class ResearchSupervisorAgent:
                 priority="high",
             )
         return None
+
+    def _workflow_constraint_decision(
+        self,
+        *,
+        state: ResearchSupervisorState,
+        all_messages: list[AgentMessage],
+        results: list[AgentResultMessage],
+        planner_runs: int,
+        replan_count: int,
+    ) -> ResearchSupervisorDecision | None:
+        if state.workflow_constraint != "discovery_only":
+            return None
+        if state.last_action_name == "search_literature":
+            if state.latest_result_status == "succeeded" and (state.has_report or state.paper_count > 0):
+                return self._guardrail_finalize(
+                    state,
+                    all_messages=all_messages,
+                    results=results,
+                    planner_runs=planner_runs,
+                    replan_count=replan_count,
+                    stop_reason="Discovery-only workflow completed after literature search.",
+                )
+            if state.latest_result_status == "failed":
+                return self._guardrail_finalize(
+                    state,
+                    all_messages=all_messages,
+                    results=results,
+                    planner_runs=planner_runs,
+                    replan_count=replan_count,
+                    stop_reason="Discovery-only workflow stopped after literature search failed.",
+                )
+        return self._guardrail_worker_action(
+            action_name="search_literature",
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+            thought="This workflow is constrained to a single discovery pass, so the manager should execute literature search and stop.",
+            rationale="Discovery-only entry points should not branch into review drafting, import, or QA after the search result is produced.",
+            phase="act",
+            estimated_gain=0.96,
+            estimated_cost=0.18,
+            payload_overrides={
+                "trigger": "workflow_constraint",
+                "workflow_constraint": "discovery_only",
+            },
+            priority="high",
+        )
 
     def _decision_from_llm_output(
         self,
@@ -1876,6 +1939,42 @@ class ResearchSupervisorAgent:
                 planner_runs=planner_runs,
                 replan_count=replan_count,
                 clarification_request=clarification_request,
+                state_update=state_update,
+            )
+        if state.workflow_constraint == "discovery_only":
+            if state.last_action_name == "search_literature":
+                if state.latest_result_status == "succeeded" and (state.has_report or state.paper_count > 0):
+                    return self._fallback_finalize(
+                        state,
+                        stop_reason="Discovery-only workflow completed after literature search.",
+                        thought="The constrained discovery pass already produced a usable search result.",
+                        rationale="Search-only entry points should stop once the literature search result is available.",
+                        planner_runs=planner_runs,
+                        replan_count=replan_count,
+                        clarification_request=None,
+                        state_update=state_update,
+                    )
+                if state.latest_result_status == "failed":
+                    return self._fallback_finalize(
+                        state,
+                        stop_reason="Discovery-only workflow stopped after literature search failed.",
+                        thought="The constrained discovery pass cannot continue after the search step failed.",
+                        rationale="Search-only entry points should stop instead of branching into unrelated actions after a failed discovery attempt.",
+                        planner_runs=planner_runs,
+                        replan_count=replan_count,
+                        clarification_request=None,
+                        state_update=state_update,
+                    )
+            return self._fallback_action_decision(
+                action_name="search_literature",
+                state=state,
+                thought="This workflow is constrained to a single discovery pass.",
+                rationale="Search-only entry points should execute literature search directly and stop after the result is produced.",
+                phase="act",
+                estimated_gain=0.96,
+                estimated_cost=0.18,
+                planner_runs=planner_runs,
+                replan_count=replan_count,
                 state_update=state_update,
             )
         if self._needs_goal_clarification(state):

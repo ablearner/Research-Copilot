@@ -9,6 +9,7 @@ from agents.research_knowledge_agent import merge_retrieval_hits
 from agents.research_supervisor_agent import ResearchSupervisorDecision
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
 from services.research.supervisor_tools.base import (
     ResearchAgentToolContext,
     ResearchToolResult,
@@ -104,38 +105,18 @@ class AnalyzePapersTool(_WorkspacePersistenceMixin, _PlannerMessageTool):
         )
         if not document_ids:
             return []
-        retrieval_tools = getattr(context.graph_runtime, "retrieval_tools", None)
-        if retrieval_tools is None:
-            return []
+        knowledge_access = context.knowledge_access or ResearchKnowledgeAccess.from_runtime(context.graph_runtime)
         execution_context = context.execution_context
         scope_filters = {
             "analysis_mode": "paper_analysis",
             "selected_paper_ids": [paper.paper_id for paper in papers],
             "selected_document_ids": document_ids,
         }
-        retrieval_output = await retrieval_tools.retrieve(
-            question=question,
-            document_ids=document_ids,
-            top_k=max(8, min(16, len(document_ids) * 4)),
-            filters={
-                "research_task_id": context.task.task_id if context.task is not None else None,
-                "research_topic": context.task.topic if context.task is not None else "",
-                **scope_filters,
-            },
-            session_id=getattr(execution_context, "session_id", None),
-            task_id=context.task.task_id if context.task is not None else None,
-            memory_hints=getattr(execution_context, "memory_hints", None) or {},
-        )
-        retrieval_hits = [
-            self._attach_paper_id_to_hit(hit=hit, papers=papers)
-            for hit in list(retrieval_output.retrieval_result.hits or [])
-        ]
-        summary_hits: list[RetrievalHit] = []
-        if hasattr(context.graph_runtime, "query_graph_summary"):
-            summary_output = await context.graph_runtime.query_graph_summary(
+        try:
+            retrieval_output = await knowledge_access.retrieve(
                 question=question,
                 document_ids=document_ids,
-                top_k=max(3, min(6, len(document_ids) * 2)),
+                top_k=max(8, min(16, len(document_ids) * 4)),
                 filters={
                     "research_task_id": context.task.task_id if context.task is not None else None,
                     "research_topic": context.task.topic if context.task is not None else "",
@@ -145,10 +126,30 @@ class AnalyzePapersTool(_WorkspacePersistenceMixin, _PlannerMessageTool):
                 task_id=context.task.task_id if context.task is not None else None,
                 memory_hints=getattr(execution_context, "memory_hints", None) or {},
             )
-            summary_hits = [
-                self._attach_paper_id_to_hit(hit=hit, papers=papers)
-                for hit in list(getattr(summary_output, "hits", []) or [])
-            ]
+        except RuntimeError:
+            return []
+        retrieval_hits = [
+            self._attach_paper_id_to_hit(hit=hit, papers=papers)
+            for hit in list(retrieval_output.retrieval_result.hits or [])
+        ]
+        summary_hits: list[RetrievalHit] = []
+        summary_output = await knowledge_access.query_graph_summary(
+            question=question,
+            document_ids=document_ids,
+            top_k=max(3, min(6, len(document_ids) * 2)),
+            filters={
+                "research_task_id": context.task.task_id if context.task is not None else None,
+                "research_topic": context.task.topic if context.task is not None else "",
+                **scope_filters,
+            },
+            session_id=getattr(execution_context, "session_id", None),
+            task_id=context.task.task_id if context.task is not None else None,
+            memory_hints=getattr(execution_context, "memory_hints", None) or {},
+        )
+        summary_hits = [
+            self._attach_paper_id_to_hit(hit=hit, papers=papers)
+            for hit in list(getattr(summary_output, "hits", []) or [])
+        ]
         return merge_retrieval_hits(retrieval_hits, summary_hits)[:12]
 
     def _attach_paper_id_to_hit(

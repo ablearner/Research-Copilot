@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from mcp.mapping import map_tool_specs_to_mcp_tools
 from tooling.schemas import ToolSpec

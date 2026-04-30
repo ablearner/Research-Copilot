@@ -21,3 +21,6 @@ evaluation/datasets/scigraphqa_easy_50/images/
 docs/
 evaluation/
 代码结构.md
+mcp_servers.json
+skills/community/
+skills/.skill_config.json

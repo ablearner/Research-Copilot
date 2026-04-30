@@ -3,18 +3,15 @@ from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import HTTPException, Request, UploadFile, status
 
 from apps.api.exception_handlers import build_error_detail
-from apps.api.security import build_quota_context, require_api_key
 from core.config import get_settings
 from domain.schemas.api import UploadDocumentResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/upload", tags=["upload"])
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
-
 _ALLOWED_CONTENT_TYPES = {
     "application/pdf",
     "image/png",
@@ -24,11 +21,11 @@ _ALLOWED_CONTENT_TYPES = {
 }
 
 
-def _upload_preview_enabled(settings: object) -> bool:
+def upload_preview_enabled(settings: object) -> bool:
     return str(getattr(settings, "app_env", "local")).strip().lower() == "local"
 
 
-async def _read_upload_chunk(file: UploadFile, size: int) -> bytes:
+async def read_upload_chunk(file: UploadFile, size: int) -> bytes:
     raw_file = getattr(file, "file", None)
     if isinstance(raw_file, BytesIO):
         return raw_file.read(size)
@@ -37,7 +34,7 @@ async def _read_upload_chunk(file: UploadFile, size: int) -> bytes:
 
 async def handle_upload_document_request(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile,
 ) -> UploadDocumentResponse:
     if file.content_type not in _ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -62,7 +59,7 @@ async def handle_upload_document_request(
         bytes_written = 0
         with target_path.open("wb") as output:
             while True:
-                chunk = await _read_upload_chunk(file, _UPLOAD_CHUNK_SIZE)
+                chunk = await read_upload_chunk(file, _UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
                 bytes_written += len(chunk)
@@ -81,7 +78,7 @@ async def handle_upload_document_request(
             },
         )
         metadata: dict[str, str] = {}
-        if _upload_preview_enabled(settings):
+        if upload_preview_enabled(settings):
             metadata["preview_url"] = f"/uploads/{target_path.name}"
         return UploadDocumentResponse(
             document_id=document_id,
@@ -95,21 +92,13 @@ async def handle_upload_document_request(
         raise
     except OSError as exc:
         target_path.unlink(missing_ok=True)
-        logger.exception("Failed to persist uploaded document", extra={"uploaded_filename": file.filename})
+        logger.exception(
+            "Failed to persist uploaded document",
+            extra={"uploaded_filename": file.filename},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=build_error_detail(request, fallback="Failed to store uploaded document", exc=exc),
         ) from exc
     finally:
         await file.close()
-
-
-@router.post("/documents", response_model=UploadDocumentResponse, deprecated=True)
-async def upload_document(
-    request: Request,
-    file: UploadFile = File(...),
-    _: None = Depends(require_api_key),
-    quota_context: dict[str, str] = Depends(build_quota_context),
-) -> UploadDocumentResponse:
-    request.state.quota_context = quota_context
-    return await handle_upload_document_request(request=request, file=file)

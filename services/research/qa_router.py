@@ -15,7 +15,6 @@ from typing import Any
 from uuid import uuid4
 
 from agents.research_knowledge_agent import merge_retrieval_hits
-from core.utils import now_iso as _now_iso
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.research import (
@@ -27,6 +26,7 @@ from domain.schemas.research import (
     ResearchTodoItem,
 )
 from services.research.research_context import ResearchExecutionContext
+from services.research.research_knowledge_access import ResearchKnowledgeAccess
 from services.research.research_workspace import build_workspace_from_task
 
 from typing import TYPE_CHECKING
@@ -571,6 +571,7 @@ class QARoutingMixin:
         execution_context: ResearchExecutionContext,
         qa_route_decision: ResearchQARouteDecision,
     ) -> QAResponse:
+        knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         if qa_route_decision.route == "chart_drilldown" and qa_route_decision.visual_anchor is None and not document_ids:
             selected_titles = [
                 str(item).strip()
@@ -600,7 +601,6 @@ class QARoutingMixin:
                 },
             )
         if qa_route_decision.route == "chart_drilldown" and qa_route_decision.visual_anchor is not None:
-            handle_ask_fused = getattr(graph_runtime, "handle_ask_fused", None)
             visual_anchor_figure = self.chart_analysis_agent.resolve_visual_anchor_figure(
                 papers=papers,
                 qa_metadata={"visual_anchor": qa_route_decision.visual_anchor},
@@ -622,107 +622,103 @@ class QARoutingMixin:
                 else {}
             )
             logger.info(
-                "Research QA attempting fused chart drilldown: has_handle_ask_fused=%s image_path=%s chart_id=%s page_id=%s page_number=%s document_count=%s",
-                callable(handle_ask_fused),
+                "Research QA attempting fused chart drilldown: image_path=%s chart_id=%s page_id=%s page_number=%s document_count=%s",
                 str(qa_route_decision.visual_anchor.get("image_path") or ""),
                 str(qa_route_decision.visual_anchor.get("chart_id") or ""),
                 str(qa_route_decision.visual_anchor.get("page_id") or ""),
                 qa_route_decision.visual_anchor.get("page_number"),
                 len(document_ids),
             )
-            if callable(handle_ask_fused):
-                fused_result = await handle_ask_fused(
-                    question=request.question,
-                    doc_id=document_ids[0] if len(document_ids) == 1 else None,
-                    document_ids=document_ids,
-                    top_k=request.top_k,
-                    session_id=execution_context.session_id,
-                    filters={
-                        "research_task_id": task.task_id,
-                        "research_topic": task.topic,
-                        "qa_mode": "research_collection",
-                        "qa_route": qa_route_decision.route,
-                        "qa_scope_mode": request.metadata.get("qa_scope_mode"),
-                        "selected_paper_ids": request.metadata.get("selected_paper_ids", []),
-                        "selected_document_ids": request.metadata.get("selected_document_ids", []),
-                    },
-                    metadata={
-                        **request.metadata,
-                        "qa_route": qa_route_decision.route,
-                        "qa_route_source": "literature_research_service",
-                        "visual_anchor": qa_route_decision.visual_anchor,
-                        "visual_anchor_figure": (
-                            visual_anchor_figure.model_dump(mode="json")
-                            if visual_anchor_figure is not None
-                            else None
-                        ),
-                        "figure_context": figure_context,
-                    },
-                    skill_name=request.skill_name,
-                    reasoning_style=request.reasoning_style,
-                    **qa_route_decision.visual_anchor,
-                )
-                qa = fused_result.qa
-                return qa.model_copy(
-                    update={
-                        "metadata": {
-                            **qa.metadata,
-                            "autonomy_mode": "task_scoped_drilldown",
-                            "agent_architecture": "research_service_to_graph_runtime",
-                            "primary_agents": ["RagRuntime"],
-                            "memory_enabled": execution_context.memory_enabled,
-                            "session_id": execution_context.session_id,
-                            "drilldown_runtime": "fused_chart",
-                        }
+            fused_result = await knowledge_access.ask_fused(
+                question=request.question,
+                image_path=str(qa_route_decision.visual_anchor.get("image_path") or ""),
+                doc_id=document_ids[0] if len(document_ids) == 1 else None,
+                document_ids=document_ids,
+                top_k=request.top_k,
+                session_id=execution_context.session_id,
+                filters={
+                    "research_task_id": task.task_id,
+                    "research_topic": task.topic,
+                    "qa_mode": "research_collection",
+                    "qa_route": qa_route_decision.route,
+                    "qa_scope_mode": request.metadata.get("qa_scope_mode"),
+                    "selected_paper_ids": request.metadata.get("selected_paper_ids", []),
+                    "selected_document_ids": request.metadata.get("selected_document_ids", []),
+                },
+                metadata={
+                    **request.metadata,
+                    "qa_route": qa_route_decision.route,
+                    "qa_route_source": "literature_research_service",
+                    "visual_anchor": qa_route_decision.visual_anchor,
+                    "visual_anchor_figure": (
+                        visual_anchor_figure.model_dump(mode="json")
+                        if visual_anchor_figure is not None
+                        else None
+                    ),
+                    "figure_context": figure_context,
+                },
+                reasoning_style=request.reasoning_style,
+                page_id=str(qa_route_decision.visual_anchor.get("page_id") or "") or None,
+                page_number=int(qa_route_decision.visual_anchor.get("page_number") or 1),
+                chart_id=str(qa_route_decision.visual_anchor.get("chart_id") or "") or None,
+            )
+            qa = fused_result.qa
+            return qa.model_copy(
+                update={
+                    "metadata": {
+                        **qa.metadata,
+                        "autonomy_mode": "task_scoped_drilldown",
+                        "agent_architecture": "research_service_to_graph_runtime",
+                        "primary_agents": ["ResearchKnowledgeAccess"],
+                        "memory_enabled": execution_context.memory_enabled,
+                        "session_id": execution_context.session_id,
+                        "drilldown_runtime": "fused_chart",
                     }
-                )
-            logger.warning("Research QA chart drilldown fell back because graph_runtime.handle_ask_fused is not callable")
+                }
+            )
 
         if qa_route_decision.route in {"document_drilldown", "chart_drilldown"} and document_ids:
-            handle_ask_document = getattr(graph_runtime, "handle_ask_document", None)
-            if callable(handle_ask_document):
-                logger.info(
-                    "Research QA using document drilldown fallback: route=%s document_count=%s has_visual_anchor=%s",
-                    qa_route_decision.route,
-                    len(document_ids),
-                    qa_route_decision.visual_anchor is not None,
-                )
-                qa = await handle_ask_document(
-                    question=request.question,
-                    document_ids=document_ids,
-                    top_k=request.top_k,
-                    filters={
-                        "research_task_id": task.task_id,
-                        "research_topic": task.topic,
-                        "qa_mode": "research_collection",
-                        "qa_route": qa_route_decision.route,
-                        "qa_scope_mode": request.metadata.get("qa_scope_mode"),
-                        "selected_paper_ids": request.metadata.get("selected_paper_ids", []),
-                        "selected_document_ids": request.metadata.get("selected_document_ids", []),
-                    },
-                    session_id=execution_context.session_id,
-                    task_intent=f"research_{qa_route_decision.route}",
-                    metadata={
-                        **request.metadata,
-                        "qa_route": qa_route_decision.route,
-                        "qa_route_source": "literature_research_service",
-                    },
-                    skill_name=request.skill_name,
-                    reasoning_style=request.reasoning_style,
-                )
-                return qa.model_copy(
-                    update={
-                        "metadata": {
-                            **qa.metadata,
-                            "autonomy_mode": "task_scoped_drilldown",
-                            "agent_architecture": "research_service_to_graph_runtime",
-                            "primary_agents": ["RagRuntime"],
-                            "memory_enabled": execution_context.memory_enabled,
-                            "session_id": execution_context.session_id,
-                            "drilldown_runtime": "document",
-                        }
+            logger.info(
+                "Research QA using document drilldown: route=%s document_count=%s has_visual_anchor=%s",
+                qa_route_decision.route,
+                len(document_ids),
+                qa_route_decision.visual_anchor is not None,
+            )
+            qa = await knowledge_access.ask_document(
+                question=request.question,
+                document_ids=document_ids,
+                top_k=request.top_k,
+                filters={
+                    "research_task_id": task.task_id,
+                    "research_topic": task.topic,
+                    "qa_mode": "research_collection",
+                    "qa_route": qa_route_decision.route,
+                    "qa_scope_mode": request.metadata.get("qa_scope_mode"),
+                    "selected_paper_ids": request.metadata.get("selected_paper_ids", []),
+                    "selected_document_ids": request.metadata.get("selected_document_ids", []),
+                },
+                session_id=execution_context.session_id,
+                task_intent=f"research_{qa_route_decision.route}",
+                metadata={
+                    **request.metadata,
+                    "qa_route": qa_route_decision.route,
+                    "qa_route_source": "literature_research_service",
+                },
+                reasoning_style=request.reasoning_style,
+            )
+            return qa.model_copy(
+                update={
+                    "metadata": {
+                        **qa.metadata,
+                        "autonomy_mode": "task_scoped_drilldown",
+                        "agent_architecture": "research_service_to_graph_runtime",
+                        "primary_agents": ["ResearchKnowledgeAccess"],
+                        "memory_enabled": execution_context.memory_enabled,
+                        "session_id": execution_context.session_id,
+                        "drilldown_runtime": "document",
                     }
-                )
+                }
+            )
 
         return await self._run_direct_collection_qa(
             graph_runtime=graph_runtime,
