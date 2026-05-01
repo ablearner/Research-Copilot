@@ -12,6 +12,7 @@ from services.research.capabilities import (
     WritingPolisher,
 )
 from services.research.research_function_service import ResearchFunctionService
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
 from services.research.literature_research_service import LiteratureResearchService
 from services.research.paper_import_service import PaperImportService
 from services.research.paper_search_service import PaperSearchService
@@ -57,22 +58,13 @@ def build_academic_search_mcp_dependencies(settings: Settings) -> AcademicSearch
 
 class ZoteroSearchTool:
     def __init__(self, *, graph_runtime: RagRuntime | None = None) -> None:
-        self.graph_runtime = graph_runtime
-
-    def _get_external_tool_registry(self):
-        if self.graph_runtime is None:
-            return None
-        registry = getattr(self.graph_runtime, "external_tool_registry", None)
-        if registry is not None:
-            return registry
-        return getattr(self.graph_runtime, "mcp_client_registry", None)
+        self.external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
 
     async def search(self, *, query: str, max_results: int, days_back: int) -> list:
         del days_back
-        registry = self._get_external_tool_registry()
-        if registry is None:
+        if not self.external_tool_gateway.is_configured():
             return []
-        result = await registry.call_tool(
+        result = await self.external_tool_gateway.call_tool(
             tool_name="zotero_search_items",
             arguments={
                 "query": query,
@@ -150,11 +142,7 @@ def build_literature_research_service(
     graph_runtime: RagRuntime | None = None,
 ) -> LiteratureResearchService:
     academic_search_dependencies = build_academic_search_mcp_dependencies(settings)
-    external_tool_registry = None
-    if graph_runtime is not None:
-        external_tool_registry = getattr(graph_runtime, "external_tool_registry", None) or getattr(
-            graph_runtime, "mcp_client_registry", None
-        )
+    external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
     llm_adapter = getattr(graph_runtime, "llm_adapter", None) if graph_runtime is not None else None
     writing_polish_skill = WritingPolisher(llm_adapter=llm_adapter)
     review_writing_skill = ReviewWriter(
@@ -169,7 +157,7 @@ def build_literature_research_service(
         semantic_scholar_tool=academic_search_dependencies.semantic_scholar_tool,
         ieee_tool=academic_search_dependencies.ieee_tool,
         zotero_tool=ZoteroSearchTool(graph_runtime=graph_runtime),
-        external_tool_registry=external_tool_registry,
+        external_tool_gateway=external_tool_gateway,
         survey_writer=review_writing_skill,
         code_linking_skill=CodeLinker(enable_remote_lookup=False),
         llm_adapter=llm_adapter,
@@ -192,7 +180,6 @@ def build_literature_research_service(
         report_service=report_service,
         paper_import_service=paper_import_service,
         research_runtime=None,
-        research_qa_runtime=None,
         paper_reading_skill=paper_reading_skill,
         evaluation_skill=evaluation_skill,
         review_writing_skill=review_writing_skill,

@@ -42,6 +42,7 @@ from services.research.capabilities import (
     ResearchEvaluator,
     ReviewWriter,
 )
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
 from services.research.research_knowledge_access import ResearchKnowledgeAccess
 from agents.research_knowledge_agent import merge_retrieval_hits
 from tooling.research_runtime_schemas import (
@@ -55,6 +56,15 @@ from tooling.research_runtime_schemas import (
     WebSearchResultItem,
     WebSearchToolOutput,
 )
+
+
+class _FunctionServiceMemoryGateway:
+    def __init__(self, memory_backend: Any | None) -> None:
+        self.memory_backend = memory_backend
+
+    def get_current_context(self) -> Any:
+        getter = getattr(self.memory_backend, "get_current_context", None)
+        return getter() if callable(getter) else None
 
 
 class ResearchFunctionService:
@@ -76,7 +86,9 @@ class ResearchFunctionService:
         self.graph_runtime = graph_runtime
         self.paper_search_service = research_service.paper_search_service
         self.report_service = research_service.report_service
-        self.memory_manager = research_service.memory_manager
+        self.memory_gateway = getattr(research_service, "memory_gateway", None) or _FunctionServiceMemoryGateway(
+            getattr(research_service, "memory_manager", None)
+        )
         self.paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReader()
         self.paper_analysis_skill = PaperAnalyzer(
             paper_reading_skill=self.paper_reading_skill,
@@ -87,6 +99,7 @@ class ResearchFunctionService:
         )
         self.review_writing_skill = getattr(research_service, "review_writing_skill", None) or ReviewWriter()
         self.evaluation_skill = getattr(research_service, "evaluation_skill", None) or ResearchEvaluator()
+        self.external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
         _llm = None
         if graph_runtime is not None:
             _agent = getattr(graph_runtime, "plan_and_solve_reasoning_agent", None)
@@ -115,18 +128,10 @@ class ResearchFunctionService:
     def _current_topic(self) -> str:
         """Get current research topic from context if available."""
         try:
-            context = self.memory_manager.get_current_context()
+            context = self.memory_gateway.get_current_context()
             return context.topic if context else ""
         except Exception:  # noqa: BLE001
             return ""
-
-    def _get_external_tool_registry(self):
-        if self.graph_runtime is None:
-            return None
-        registry = getattr(self.graph_runtime, "external_tool_registry", None)
-        if registry is not None:
-            return registry
-        return getattr(self.graph_runtime, "mcp_client_registry", None)
 
     def build_function_handlers(self) -> dict[str, Any]:
         return {
@@ -670,8 +675,7 @@ class ResearchFunctionService:
         collection_name: str | None = None,
         ingest_to_workspace: bool = False,
     ) -> SearchOrImportPaperToolOutput:
-        registry = self._get_external_tool_registry()
-        if registry is None:
+        if not self.external_tool_gateway.is_configured():
             return SearchOrImportPaperToolOutput(
                 status="not_configured",
                 action="none",
@@ -1265,8 +1269,7 @@ class ResearchFunctionService:
         self,
         paper: PaperCandidate,
     ) -> tuple[dict[str, Any] | None, str | None]:
-        registry = self._get_external_tool_registry()
-        if registry is None:
+        if not self.external_tool_gateway.is_configured():
             return None, None
         queries = []
         if paper.doi:
@@ -1284,7 +1287,7 @@ class ResearchFunctionService:
             if not normalized_query or normalized_query in seen_queries:
                 continue
             seen_queries.add(normalized_query)
-            result = await registry.call_tool(
+            result = await self.external_tool_gateway.call_tool(
                 tool_name="zotero_search_items",
                 arguments={
                     "query": normalized_query,
@@ -1311,8 +1314,7 @@ class ResearchFunctionService:
         *,
         collection_name: str | None = None,
     ) -> dict[str, Any]:
-        registry = self._get_external_tool_registry()
-        if registry is None:
+        if not self.external_tool_gateway.is_configured():
             return {
                 "status": "not_configured",
                 "action": "none",
@@ -1347,7 +1349,7 @@ class ResearchFunctionService:
                 ],
             }
 
-        import_result = await registry.call_tool(
+        import_result = await self.external_tool_gateway.call_tool(
             tool_name="zotero_import_paper",
             arguments={
                 "title": paper.title,
@@ -1462,10 +1464,9 @@ class ResearchFunctionService:
         paper: PaperCandidate,
         pdf_url: str,
     ) -> tuple[int, list[str]]:
-        registry = self._get_external_tool_registry()
-        if registry is None or not item_key or not pdf_url:
+        if not self.external_tool_gateway.is_configured() or not item_key or not pdf_url:
             return 0, []
-        result = await registry.call_tool(
+        result = await self.external_tool_gateway.call_tool(
             tool_name="zotero_attach_pdf_to_item",
             arguments={
                 "item_key": item_key,

@@ -112,9 +112,9 @@ class ResearchKnowledgeAccess:
         memory_hints: dict[str, Any] | None = None,
         available_tool_names: list[str] | None = None,
     ) -> QAResponse:
-        research_qa_agent = getattr(self.graph_runtime, "research_qa_agent", None)
-        if research_qa_agent is not None:
-            return await research_qa_agent.answer(
+        rag_qa_worker = getattr(self.graph_runtime, "rag_qa_worker", None)
+        if rag_qa_worker is not None:
+            return await rag_qa_worker.answer(
                 question=question,
                 available_tool_names=available_tool_names or ["answer_with_evidence"],
                 metadata=metadata or {},
@@ -141,7 +141,29 @@ class ResearchKnowledgeAccess:
 
         answer_tools = getattr(self.graph_runtime, "answer_tools", None)
         if answer_tools is None:
-            raise RuntimeError("Graph runtime is missing answer_with_evidence knowledge tool")
+            snippets = [
+                str(evidence.snippet or "").strip()
+                for evidence in evidence_bundle.evidences[:5]
+                if str(evidence.snippet or "").strip()
+            ]
+            if snippets:
+                answer = "当前运行环境缺少 answer_with_evidence 工具；根据已检索证据，" + " ".join(snippets)
+                confidence = 0.35
+            else:
+                answer = "证据不足，当前运行环境缺少 answer_with_evidence 工具且没有可用证据。"
+                confidence = 0.0
+            return QAResponse(
+                answer=answer,
+                question=question,
+                evidence_bundle=evidence_bundle,
+                retrieval_result=retrieval_result,
+                confidence=confidence,
+                metadata={
+                    **(metadata or {}),
+                    "answer_runtime": "fallback_without_answer_tools",
+                    "missing_runtime_tool": "answer_with_evidence",
+                },
+            )
         return await answer_tools.answer_with_evidence(**payload)
 
     async def parse_document(

@@ -5,6 +5,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
+from services.research.research_specialist_capabilities import (
+    GeneralAnswerCapability,
+    build_specialist_unified_result,
+)
 
 
 class GeneralAnswerResult(BaseModel):
@@ -20,8 +25,47 @@ class GeneralAnswerAgent:
 
     name = "GeneralAnswerAgent"
 
-    def __init__(self, *, llm_adapter: BaseLLMAdapter | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm_adapter: BaseLLMAdapter | None = None,
+        execution_capability: GeneralAnswerCapability | None = None,
+    ) -> None:
         self.llm_adapter = llm_adapter
+        self.execution_capability = execution_capability or GeneralAnswerCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        if supervisor_context is None or decision is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for GeneralAnswerAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="general_answer_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            decision=decision,
+            general_answer_agent=self,
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "general_answer_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="general_answer_agent",
+            delegate_type=self.__class__.__name__,
+        )
 
     async def answer(
         self,

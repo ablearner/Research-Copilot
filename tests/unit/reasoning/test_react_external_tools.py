@@ -1,7 +1,6 @@
 """Tests for ReAct external MCP tool discovery and routing."""
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -102,7 +101,7 @@ class TestExecuteTool:
             status="not_found",
             tool_name="hybrid_retrieve",
         ))
-        result = await agent._execute_tool(
+        await agent._execute_tool(
             tool_name="hybrid_retrieve",
             tool_input={"query": "test"},
             external_tool_names=["search_scholarly"],

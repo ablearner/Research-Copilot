@@ -94,7 +94,7 @@ class GeneralAnswerRerouteLLMStub(BaseLLMAdapter):
                 return response_model.model_validate(
                     {
                         "action_name": "answer_question",
-                        "worker_agent": "ResearchKnowledgeAgent",
+                        "worker_agent": "ResearchQAAgent",
                         "instruction": "Answer the research question using the current imported evidence and workspace.",
                         "thought": "The prior general answer branch indicated this is actually a research question.",
                         "rationale": "Reroute to the grounded research QA worker.",
@@ -641,7 +641,7 @@ async def test_research_supervisor_graph_answers_existing_research_task(tmp_path
     assert "优先阅读" in response.qa.answer
     assert response.workspace.current_stage == "qa"
     assert response.trace[0].phase in {"reflect", "plan"}
-    assert response.trace[0].agent == "ResearchKnowledgeAgent"
+    assert response.trace[0].agent == "ResearchQAAgent"
     assert any(step.action_name == "answer_question" for step in response.trace)
     assert _find_unified_result_action_output(response, "answer_question")["unified_input_adapter"] == "collection_qa_input"
     assert _find_unified_result_metadata(response, "answer_question")["unified_input_adapter"] == "collection_qa_input"
@@ -802,7 +802,7 @@ async def test_research_supervisor_graph_import_mode_answers_original_question_a
     assert "优先阅读" in response.qa.answer
     assert response.workspace.current_stage == "qa"
     assert response.trace[0].agent == "ResearchKnowledgeAgent"
-    assert response.trace[1].agent == "ResearchKnowledgeAgent"
+    assert response.trace[1].agent == "ResearchQAAgent"
     assert [step.action_name for step in response.trace[:3]] == [
         "import_papers",
         "answer_question",
@@ -885,7 +885,7 @@ async def test_research_supervisor_graph_can_use_document_understanding_tool(tmp
     assert _find_unified_result_action_output(response, "understand_document")["unified_input_adapter"] == "document_understanding_input"
     assert _find_unified_result_metadata(response, "understand_document")["unified_input_adapter"] == "document_understanding_input"
     assert any(
-        step.action_name == "understand_document" and step.agent == "DocumentTools"
+        step.action_name == "understand_document" and step.agent == "ResearchDocumentAgent"
         for step in response.trace
     )
     assert "DocumentRuntime" not in response.metadata["primary_agents"]

@@ -1,13 +1,4 @@
-"""Research QA Agent — unified question answering with internal ReAct loop.
-
-This agent owns the complete QA flow:
-  1. Plan collection queries (via internal plan-and-execute)
-  2. Retrieve evidence
-  3. Synthesize answer (via internal ReAct: Thought → Action → Observation)
-
-It replaces the old scattered path:
-  AnswerQuestionTool → qa_router → KnowledgeAgent + WriterAgent + external ReActReasoningAgent
-"""
+"""Research QA specialist and RAG-layer ReAct QA worker."""
 
 from __future__ import annotations
 
@@ -21,6 +12,8 @@ from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.retrieval import HybridRetrievalResult
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import ToolCallTrace, ToolExecutionResult
@@ -57,7 +50,7 @@ class ReActFinalDraft(BaseModel):
 
 
 class ResearchQAAgentError(RuntimeError):
-    """Raised when the QA agent reasoning flow fails."""
+    """Raised when the RAG ReAct QA worker reasoning flow fails."""
 
 
 # ---------------------------------------------------------------------------
@@ -85,18 +78,178 @@ def normalize_reasoning_style(style: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ResearchQAAgent
+# Task-level ResearchQAAgent
 # ---------------------------------------------------------------------------
 
 class ResearchQAAgent:
-    """Unified research QA agent with an internal ReAct reasoning loop.
+    """Supervisor-delegated QA specialist.
 
-    Replaces the old AnswerQuestionTool → qa_router → scattered-agent path.
-    The supervisor delegates to this agent directly; this agent autonomously
-    plans queries, retrieves evidence, and synthesises an answer.
+    The supervisor owns task understanding and route selection. This specialist
+    executes the selected QA route through the QA executor/toolset and returns a
+    unified worker result.
     """
 
     name = "ResearchQAAgent"
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        from services.research.qa.executor import ResearchQAExecutor
+        from services.research.unified_action_adapters import (
+            build_collection_qa_input,
+            build_collection_qa_output,
+            resolve_active_message,
+        )
+
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        if supervisor_context is None or decision is None:
+            return self._unified_result(
+                task=task,
+                status="failed",
+                observation="missing supervisor runtime context for ResearchQAAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+            )
+        task_response = supervisor_context.task_response
+        if task_response is None:
+            return self._unified_result(
+                task=task,
+                status="skipped",
+                observation="no research task is available for collection QA",
+                metadata={"reason": "missing_task"},
+            )
+
+        request = supervisor_context.request
+        active_message = resolve_active_message(decision)
+        qa_input = build_collection_qa_input(
+            context=supervisor_context,
+            task_id=task_response.task.task_id,
+            active_message=active_message,
+        )
+        qa_result = await ResearchQAExecutor(supervisor_context.research_service).execute(
+            task_response.task.task_id,
+            qa_input.to_research_task_ask_request(),
+            graph_runtime=supervisor_context.graph_runtime,
+        )
+        supervisor_context.qa_result = qa_result
+        supervisor_context.task_response = supervisor_context.research_service.get_task(task_response.task.task_id)
+        supervisor_context.execution_context = supervisor_context.research_service.build_execution_context(
+            graph_runtime=supervisor_context.graph_runtime,
+            conversation_id=request.conversation_id,
+            task=supervisor_context.task_response.task if supervisor_context.task_response else None,
+            report=supervisor_context.task_response.report if supervisor_context.task_response else None,
+            papers=supervisor_context.task_response.papers if supervisor_context.task_response else None,
+            document_ids=list(qa_result.document_ids),
+            selected_paper_ids=list(qa_result.paper_ids),
+            skill_name=request.skill_name,
+            reasoning_style=request.reasoning_style,
+            metadata=qa_result.qa.metadata if isinstance(qa_result.qa.metadata, dict) else request.metadata,
+        )
+        if request.conversation_id:
+            supervisor_context.research_service.record_qa_turn(
+                request.conversation_id,
+                task_response=supervisor_context.task_response,
+                ask_response=qa_result,
+            )
+        if (
+            supervisor_context.execution_context is not None
+            and supervisor_context.execution_context.session_id
+            and qa_result.paper_ids
+        ):
+            supervisor_context.research_service.memory_gateway.set_active_papers(
+                supervisor_context.execution_context.session_id,
+                list(qa_result.paper_ids),
+            )
+
+        output = build_collection_qa_output(qa_result=qa_result)
+        metadata = output.to_metadata()
+        metadata.update(
+            {
+                "executed_by": self.name,
+                "qa_execution_path": "research_qa_agent",
+            }
+        )
+        qa_metadata = qa_result.qa.metadata if isinstance(qa_result.qa.metadata, dict) else {}
+        quality_check = qa_metadata.get("answer_quality_check")
+        if isinstance(quality_check, dict) and quality_check.get("needs_recovery"):
+            recovery_route = str(quality_check.get("suggested_recovery_qa_route") or "").strip()
+            if recovery_route:
+                metadata.update(
+                    {
+                        "reason": "qa_route_replan_requested",
+                        "observation_envelope": {
+                            "progress_made": False,
+                            "confidence": qa_result.qa.confidence,
+                            "suggested_next_actions": ["answer_question"],
+                            "state_delta": {
+                                "preferred_qa_route": recovery_route,
+                                "qa_recovery_reason": quality_check.get("suggested_recovery_rationale"),
+                            },
+                        },
+                    }
+                )
+                return self._unified_result(
+                    task=task,
+                    status="skipped",
+                    observation=(
+                        "research QA produced an under-supported answer; supervisor replan requested "
+                        f"with qa_route={recovery_route}"
+                    ),
+                    metadata=metadata,
+                )
+        return self._unified_result(
+            task=task,
+            status="succeeded",
+            observation=(
+                f"answered research collection question; evidence={len(qa_result.qa.evidence_bundle.evidences)}; "
+                f"confidence={qa_result.qa.confidence if qa_result.qa.confidence is not None else 'empty'}"
+            ),
+            metadata=metadata,
+        )
+
+    def _unified_result(
+        self,
+        *,
+        task: UnifiedAgentTask,
+        status: str,
+        observation: str,
+        metadata: dict[str, Any],
+    ) -> UnifiedAgentResult:
+        return UnifiedAgentResult(
+            task_id=task.task_id,
+            agent_name=self.name,
+            task_type=task.task_type,
+            status=status,  # type: ignore[arg-type]
+            instruction=task.instruction,
+            payload={
+                "observation": observation,
+                "tool_metadata": dict(metadata),
+            },
+            context_slice=task.context_slice,
+            priority=task.priority,
+            expected_output_schema=task.expected_output_schema,
+            depends_on=task.depends_on,
+            retry_count=task.retry_count,
+            action_output=(
+                dict(metadata)
+                if UnifiedAgentResult.is_action_output_payload(metadata)
+                else None
+            ),
+            metadata={
+                "execution_engine": "unified_agent_registry",
+                "execution_adapter": "research_qa_agent",
+                "delegate_type": self.__class__.__name__,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# RAG-layer ReAct QA worker
+# ---------------------------------------------------------------------------
+
+
+class RagReActQAWorker:
+    """Tool-layer ReAct worker used by RAG answer synthesis."""
+
+    name = "RagReActQAWorker"
 
     def __init__(
         self,
@@ -106,13 +259,18 @@ class ResearchQAAgent:
         decision_prompt_path: str | Path = "prompts/reasoning/react_decide_next_step.txt",
         synthesis_prompt_path: str | Path = "prompts/reasoning/react_synthesize_answer.txt",
         mcp_client_registry: Any | None = None,
+        external_tool_gateway: ResearchExternalToolGateway | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
         self.tool_registry = tool_registry
         self.tool_executor = tool_executor
         self.decision_prompt_path = Path(decision_prompt_path)
         self.synthesis_prompt_path = Path(synthesis_prompt_path)
-        self.mcp_client_registry = mcp_client_registry
+        self.external_tool_gateway = external_tool_gateway or (
+            ResearchExternalToolGateway(registry=mcp_client_registry)
+            if mcp_client_registry is not None
+            else None
+        )
 
     # ------------------------------------------------------------------
     # Public entry: full ReAct QA loop
@@ -413,10 +571,10 @@ class ResearchQAAgent:
     # ------------------------------------------------------------------
 
     async def _discover_external_tools(self) -> tuple[list[str], list[dict[str, Any]]]:
-        if self.mcp_client_registry is None:
+        if self.external_tool_gateway is None or not self.external_tool_gateway.is_configured():
             return [], []
         try:
-            ext_tools = await self.mcp_client_registry.discover_tools()
+            ext_tools = await self.external_tool_gateway.discover_tools()
         except Exception:
             logger.warning("Failed to discover external MCP tools", exc_info=True)
             return [], []
@@ -444,8 +602,8 @@ class ResearchQAAgent:
         tool_input: dict[str, Any],
         external_tool_names: list[str],
     ) -> ToolExecutionResult:
-        if tool_name in external_tool_names and self.mcp_client_registry is not None:
-            ext_result = await self.mcp_client_registry.call_tool(
+        if tool_name in external_tool_names and self.external_tool_gateway is not None:
+            ext_result = await self.external_tool_gateway.call_tool(
                 tool_name=tool_name,
                 arguments=tool_input,
             )

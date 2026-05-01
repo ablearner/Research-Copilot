@@ -335,7 +335,7 @@ class ConversationMixin:
         if conversation is None:
             raise KeyError(conversation_id)
         task_id = self._conversation_task_id(conversation)
-        self.memory_manager.clear_session(conversation_id)
+        self.memory_gateway.clear_session(conversation_id)
         self.report_service.delete_jobs(conversation_id=conversation_id)
         if task_id:
             self.report_service.delete_task_artifacts(task_id)

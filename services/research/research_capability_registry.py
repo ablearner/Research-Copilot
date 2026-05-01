@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
+
 
 CapabilityKind = Literal["action", "knowledge", "runtime", "mcp_server"]
 
@@ -56,15 +58,15 @@ class ResearchCapabilityRegistry:
                         metadata={"category": tool.category},
                     )
                 )
-        mcp_registry = getattr(graph_runtime, "mcp_client_registry", None)
-        if mcp_registry is not None:
-            for server_name in mcp_registry.list_servers():
+        external_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
+        if external_gateway.is_configured():
+            for server_name in external_gateway.list_servers():
                 capabilities.append(
                     ResearchCapabilityDescriptor(
                         name=server_name,
                         kind="mcp_server",
                         enabled=True,
-                        source_registry="mcp_client_registry",
+                        source_registry="research_external_tool_gateway",
                         metadata={"server_name": server_name},
                     )
                 )

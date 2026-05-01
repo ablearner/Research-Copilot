@@ -118,7 +118,7 @@ def test_unified_agent_task_roundtrip_to_legacy_result():
     message = AgentMessage(
         task_id="task_1",
         agent_from="ResearchSupervisorAgent",
-        agent_to="ResearchKnowledgeAgent",
+        agent_to="ResearchQAAgent",
         task_type="answer_question",
         instruction="answer the user question",
         metadata={"skill_name": "research_report"},
@@ -128,7 +128,7 @@ def test_unified_agent_task_roundtrip_to_legacy_result():
 
     result = UnifiedAgentResult(
         task_id=task.task_id,
-        agent_name="ResearchKnowledgeAgent",
+        agent_name="ResearchQAAgent",
         task_type=task.task_type,
         status="succeeded",
         instruction=task.instruction,
@@ -141,7 +141,7 @@ def test_unified_agent_task_roundtrip_to_legacy_result():
     )
     legacy = result.to_agent_result_message()
     assert legacy.task_id == "task_1"
-    assert legacy.agent_from == "ResearchKnowledgeAgent"
+    assert legacy.agent_from == "ResearchQAAgent"
     assert legacy.agent_to == "ResearchSupervisorAgent"
     assert legacy.status == "succeeded"
     assert legacy.metadata[UNIFIED_ACTION_OUTPUT_METADATA_KEY]["unified_input_adapter"] == "collection_qa_input"
@@ -160,13 +160,17 @@ def test_build_phase1_blueprint_for_current_repo_shape():
     descriptor_names = {item.name for item in blueprint.agent_descriptors}
     assert "ResearchSupervisorAgent" in descriptor_names
     assert "ResearchKnowledgeAgent" in descriptor_names
+    assert "ResearchQAAgent" in descriptor_names
+    assert "ResearchDocumentAgent" in descriptor_names
     assert "ChartAnalysisAgent" in descriptor_names
+    assert "GeneralAnswerAgent" in descriptor_names
+    assert "PreferenceMemoryAgent" in descriptor_names
     assert "DocumentRuntime" not in descriptor_names
     assert "hybrid_retrieve" in blueprint.tool_names
     assert "parse_document" in blueprint.tool_names
     assert "index_document" in blueprint.tool_names
     assert blueprint.capability_profile_names == []
-    assert blueprint.unresolved_boundaries
+    assert blueprint.unresolved_boundaries == []
     knowledge_descriptor = next(
         item for item in blueprint.agent_descriptors if item.name == "ResearchKnowledgeAgent"
     )
@@ -182,7 +186,7 @@ def test_build_phase1_unified_agent_registry_uses_skeleton_adapters():
     executors = registry.resolve_for_task("answer_question")
     assert executors
     executor_names = {item.descriptor.name for item in executors}
-    assert "ResearchKnowledgeAgent" in executor_names
+    assert executor_names == {"ResearchQAAgent"}
 
 
 def test_unified_execution_inputs_normalize_worker_payloads():
@@ -343,13 +347,13 @@ def test_unified_serializers_include_agent_descriptors():
     message = AgentMessage(
         task_id="task_2",
         agent_from="ResearchSupervisorAgent",
-        agent_to="ResearchKnowledgeAgent",
+        agent_to="ResearchQAAgent",
         task_type="answer_question",
         instruction="answer",
     )
     result = UnifiedAgentResult(
         task_id="task_2",
-        agent_name="ResearchKnowledgeAgent",
+        agent_name="ResearchQAAgent",
         task_type="answer_question",
         status="succeeded",
         action_output={
@@ -364,15 +368,15 @@ def test_unified_serializers_include_agent_descriptors():
     serialized_results = serialize_unified_agent_results([result], registry=registry)
     serialized_plan = serialize_unified_delegation_plan([message], [result], registry=registry)
 
-    assert serialized_messages[0]["agent_descriptor"]["name"] == "ResearchKnowledgeAgent"
+    assert serialized_messages[0]["agent_descriptor"]["name"] == "ResearchQAAgent"
     assert serialized_messages[0]["preferred_skill_name"] == "research_report"
     assert "hybrid_retrieve" in serialized_messages[0]["available_tool_names"]
-    assert serialized_results[0]["agent_descriptor"]["name"] == "ResearchKnowledgeAgent"
+    assert serialized_results[0]["agent_descriptor"]["name"] == "ResearchQAAgent"
     assert serialized_results[0]["preferred_skill_name"] == "research_report"
     assert "hybrid_retrieve" in serialized_results[0]["available_tool_names"]
     assert serialized_results[0]["execution_mode"] == "tool_native"
     assert serialized_results[0]["action_output"]["unified_input_adapter"] == "collection_qa_input"
-    assert serialized_plan[0]["agent_descriptor"]["name"] == "ResearchKnowledgeAgent"
+    assert serialized_plan[0]["agent_descriptor"]["name"] == "ResearchQAAgent"
     assert serialized_plan[0]["preferred_skill_name"] == "research_report"
     assert "hybrid_retrieve" in serialized_plan[0]["available_tool_names"]
     assert serialized_plan[0]["status"] == "succeeded"
@@ -415,8 +419,8 @@ async def test_phase1_registry_can_execute_real_handler_when_bound():
             task_id="task_3",
             agent_from="ResearchSupervisorAgent",
             agent_to="ResearchKnowledgeAgent",
-            task_type="answer_question",
-            instruction="answer",
+            task_type="compress_context",
+            instruction="compress",
         ),
         runtime_context,
     )

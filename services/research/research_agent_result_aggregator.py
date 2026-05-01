@@ -123,6 +123,8 @@ class ResearchAgentResultAggregator:
             if context.skill_selection is not None
             else {}
         )
+        action_tool_trace_count = len(self.runtime.action_tool_executor.get_traces())
+        specialist_execution_trace_count = len(agent_results)
         return ResearchAgentRunResponse(
             status=status,
             task=context.task,
@@ -147,7 +149,8 @@ class ResearchAgentResultAggregator:
                 "supervisor_worker_execution_engine": (
                     "unified_agent_registry" if context.unified_agent_registry is not None else "action_tool_fallback"
                 ),
-                "supervisor_action_trace_count": len(self.runtime.action_tool_executor.get_traces()),
+                "supervisor_action_trace_count": action_tool_trace_count or specialist_execution_trace_count,
+                "specialist_execution_trace_count": specialist_execution_trace_count,
                 "unified_supervisor_mode": "pure_supervisor",
                 "unified_runtime_blueprint": context.unified_blueprint or {},
                 "unified_agent_registry": serialize_unified_agent_registry(context.unified_agent_registry),

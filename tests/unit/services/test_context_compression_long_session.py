@@ -13,24 +13,18 @@ many paper_summaries, bulky metadata) and verify that:
 """
 
 import json
-from copy import deepcopy
-from datetime import datetime, timezone
-from typing import Any
 
 import pytest
 
 from adapters.llm.base import BaseLLMAdapter
 from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
 from domain.schemas.research import (
-    CreateResearchConversationRequest,
     PaperCandidate,
     ResearchAgentRunRequest,
-    ResearchTask,
 )
 from domain.schemas.research_context import (
     CompressedPaperSummary,
     QAPair,
-    ResearchContext,
     ResearchContextSlice,
 )
 from services.research.literature_research_service import LiteratureResearchService
@@ -266,7 +260,6 @@ class TestContextExceedsBudget:
         medium_slice = _build_large_context_slice(
             num_history_turns=5, answer_size=1000, num_papers=3, summary_size=200,
         )
-        chars = _measure_context_chars(medium_slice)
         # With a very tight budget it should exceed
         assert agent._context_exceeds_budget(medium_slice, budget_chars=1000)
         # With a very generous budget it should not exceed
@@ -447,8 +440,7 @@ class TestCompressPapersReducesSize:
             session_history=big_history,
             metadata={"big_blob": "B" * 50_000},
         )
-        big_slice = manager.slice_for_agent(big_context, agent_scope="manager", summary_level="section")
-        big_chars = _measure_context_chars(big_slice)
+        _ = manager.slice_for_agent(big_context, agent_scope="manager", summary_level="section")
 
         # Compress papers
         summaries = manager.compress_papers(
@@ -467,10 +459,9 @@ class TestCompressPapersReducesSize:
                 },
             },
         )
-        compressed_slice = manager.slice_for_agent(
+        _ = manager.slice_for_agent(
             compressed_context, agent_scope="manager", summary_level="section",
         )
-        compressed_chars = _measure_context_chars(compressed_slice)
 
         # The summaries themselves are compact (≤480 chars each); the main size reduction
         # comes from NOT having unbounded metadata or raw text. The compressed context should
@@ -742,7 +733,7 @@ async def test_multi_turn_qa_session_remains_functional(tmp_path) -> None:
 
     # All turns should complete without errors
     for i, resp in enumerate([r1, r2, r3, r4], 1):
-        assert resp.status in {"completed", "partial"}, (
+        assert resp.status in {"completed", "partial", "succeeded"}, (
             f"Turn {i} failed with status={resp.status}"
         )
 
@@ -794,7 +785,6 @@ class TestCompressContextToolReducesSliceSize:
         )
 
         # Build manager slice
-        from services.research.literature_research_service import LiteratureResearchService
         slices_data = {
             "manager": manager.slice_for_agent(compressed, agent_scope="manager", summary_level="section"),
         }
@@ -822,7 +812,7 @@ class TestContextCompressionNeededSignal:
         """With ≥4 papers + a task, context_compression_needed should be True."""
         manager = ResearchContextManager()
         papers = [_make_paper_candidate(i) for i in range(5)]
-        ctx = manager.update_context(
+        _ = manager.update_context(
             topic="Test",
             selected_papers=[p.paper_id for p in papers],
         )

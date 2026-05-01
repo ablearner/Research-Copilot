@@ -1013,11 +1013,11 @@ class GraphRuntimeDocumentDrilldownStub:
         )
 
 
-class ResearchQARuntimeLowConfidenceStub:
+class ResearchCollectionQACapabilityLowConfidenceStub:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def run(
+    async def run_collection_qa(
         self,
         *,
         graph_runtime,
@@ -1027,21 +1027,20 @@ class ResearchQARuntimeLowConfidenceStub:
         papers,
         document_ids,
         execution_context=None,
+        resolved_question=None,
+        original_question=None,
+        primary_agents=None,
     ):
-        del graph_runtime, task, report, papers, document_ids, execution_context
+        del graph_runtime, task, report, papers, document_ids, execution_context, resolved_question, original_question, primary_agents
         self.calls.append({"question": request.question, "metadata": dict(request.metadata or {})})
 
-        class _Result:
-            def __init__(self):
-                self.qa = QAResponse(
-                    answer="我暂时无法确认这篇论文正文里的精确定义，当前证据不足。",
-                    question=request.question,
-                    evidence_bundle=EvidenceBundle(),
-                    confidence=0.22,
-                    metadata={"mode": "collection"},
-                )
-
-        return _Result()
+        return QAResponse(
+            answer="我暂时无法确认这篇论文正文里的精确定义，当前证据不足。",
+            question=request.question,
+            evidence_bundle=EvidenceBundle(),
+            confidence=0.22,
+            metadata={"mode": "collection"},
+        )
 
 
 
@@ -1268,9 +1267,10 @@ async def test_ask_task_collection_updates_report_and_todo(tmp_path) -> None:
     assert response.todo_items
     assert response.todo_items[0].source == "qa_follow_up"
     assert response.todo_items[0].priority == "medium"
-    assert response.qa.metadata["agent_architecture"] == "main_agents_only"
-    assert "ResearchKnowledgeAgent" in response.qa.metadata["primary_agents"]
-    assert "ResearchWriterAgent" in response.qa.metadata["primary_agents"]
+    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
+    assert "ResearchQAAgent" in response.qa.metadata["primary_agents"]
+    assert "ResearchCollectionKnowledgeCapability.plan_collection_queries" in response.qa.metadata["primary_tools"]
+    assert "ResearchCollectionAnswerCapability.answer_collection_question" in response.qa.metadata["primary_tools"]
     assert response.report.workspace.current_stage == "qa"
 
     persisted_task = report_service.load_task("task_qa_1")
@@ -1388,7 +1388,7 @@ async def test_ask_task_collection_adds_gap_todo_when_evidence_is_insufficient(t
 
     assert response.report is not None
     assert response.qa.metadata["autonomy_mode"] == "lead_agent_loop"
-    assert response.qa.metadata["agent_architecture"] == "main_agents_only"
+    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
     assert response.todo_items
     assert response.todo_items[0].source == "evidence_gap"
     assert response.todo_items[0].priority == "high"
@@ -2058,13 +2058,13 @@ async def test_ask_task_collection_can_conservatively_recover_from_collection_qa
         ],
     )
     llm_stub = QARoutingLLMStub(route="collection_qa", confidence=0.88, rationale="LLM kept this broad.")
-    collection_runtime = ResearchQARuntimeLowConfidenceStub()
+    collection_capability = ResearchCollectionQACapabilityLowConfidenceStub()
     service = LiteratureResearchService(
         paper_search_service=PaperSearchServiceWithLLMStub(llm_adapter=llm_stub),
         report_service=report_service,
         paper_import_service=object(),
-        research_qa_runtime=collection_runtime,
     )
+    service.research_collection_qa_capability = collection_capability
     graph_runtime = GraphRuntimeDocumentDrilldownStub()
 
     response = await service.ask_task_collection(
@@ -2082,7 +2082,7 @@ async def test_ask_task_collection_can_conservatively_recover_from_collection_qa
     assert response.qa.metadata["qa_route_recovery_count"] == 1
     assert response.qa.metadata["qa_route_recovered_from"] == "collection_qa"
     assert response.qa.metadata["answer_quality_check"]["route"] == "document_drilldown"
-    assert len(collection_runtime.calls) == 1
+    assert len(collection_capability.calls) == 1
     assert graph_runtime.last_handle_ask_document_kwargs is not None
     assert graph_runtime.last_handle_ask_document_kwargs["filters"]["qa_route"] == "document_drilldown"
 
@@ -3653,11 +3653,6 @@ class LegacyDiscoveryRuntimeShouldNotRun:
         raise AssertionError("legacy research_runtime.run should not be called")
 
 
-class LegacyCollectionQARuntimeShouldNotRun:
-    async def run(self, **kwargs):
-        raise AssertionError("legacy research_qa_runtime.run should not be called")
-
-
 @pytest.mark.asyncio
 async def test_search_papers_does_not_call_legacy_research_runtime(tmp_path) -> None:
     service = LiteratureResearchService(
@@ -3687,7 +3682,7 @@ async def test_search_papers_does_not_call_legacy_research_runtime(tmp_path) -> 
 
 
 @pytest.mark.asyncio
-async def test_ask_task_collection_does_not_call_legacy_qa_runtime_for_collection_qa(tmp_path) -> None:
+async def test_ask_task_collection_uses_collection_qa_capability_for_collection_qa(tmp_path) -> None:
     report_service = ResearchReportService(tmp_path / "research")
     task = ResearchTask(
         task_id="task_direct_qa_1",
@@ -3735,7 +3730,6 @@ async def test_ask_task_collection_does_not_call_legacy_qa_runtime_for_collectio
         ),
         report_service=report_service,
         paper_import_service=object(),
-        research_qa_runtime=LegacyCollectionQARuntimeShouldNotRun(),
     )
     graph_runtime = GraphRuntimeSuccessStub()
 
@@ -3749,7 +3743,7 @@ async def test_ask_task_collection_does_not_call_legacy_qa_runtime_for_collectio
     )
 
     assert response.qa.answer
-    assert response.qa.metadata["qa_execution_path"] == "research_supervisor_direct"
+    assert response.qa.metadata["qa_execution_path"] == "research_collection_qa_capability"
 
 
 def test_record_agent_turn_general_chat_clears_active_research_scope(tmp_path) -> None:

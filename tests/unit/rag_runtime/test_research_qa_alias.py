@@ -5,7 +5,7 @@ class DummyAnswerTools:
     llm_adapter = None
 
 
-def test_rag_runtime_exposes_research_qa_agent_alias() -> None:
+def test_rag_runtime_exposes_rag_qa_worker_alias() -> None:
     react_agent = object()
     runtime = RagRuntime(
         document_tools=object(),
@@ -19,4 +19,5 @@ def test_rag_runtime_exposes_research_qa_agent_alias() -> None:
     )
 
     assert runtime.react_reasoning_agent is react_agent
-    assert runtime.research_qa_agent is react_agent
+    assert runtime.rag_qa_worker is react_agent
+    assert not hasattr(runtime, "research_qa_agent")

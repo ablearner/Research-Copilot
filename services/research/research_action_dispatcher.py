@@ -237,6 +237,7 @@ class ResearchActionDispatcher:
                 "supervisor_decision": decision,
                 "supervisor_worker_agent": worker_agent,
                 "supervisor_action_name": decision.action_name,
+                "supervisor_runtime": self.runtime,
             }
         )
         task = UnifiedAgentTask.from_agent_message(

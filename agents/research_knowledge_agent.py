@@ -5,8 +5,13 @@ from typing import Any
 
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from agents.research_qa_agent import normalize_reasoning_style
 from services.research.research_knowledge_access import ResearchKnowledgeAccess
+from services.research.research_specialist_capabilities import (
+    KnowledgeOpsCapability,
+    build_specialist_unified_result,
+)
 
 _TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _STOPWORDS = {
@@ -82,8 +87,43 @@ class ResearchKnowledgeAgent:
         self,
         *,
         llm_adapter: Any | None = None,
+        execution_capability: KnowledgeOpsCapability | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
+        self.execution_capability = execution_capability or KnowledgeOpsCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        if supervisor_context is None or decision is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for ResearchKnowledgeAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="research_knowledge_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            decision=decision,
+            task_type=task.task_type,
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "research_knowledge_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="research_knowledge_agent",
+            delegate_type=self.__class__.__name__,
+        )
 
     def decide(self, state: Any) -> tuple[str, str]:
         if not state.queries:

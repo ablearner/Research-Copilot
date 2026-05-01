@@ -28,6 +28,7 @@ from retrieval.sparse_retriever import SparseRetriever
 from retrieval.vector_retriever import VectorRetriever
 from rag_runtime.services.embedding_index_service import EmbeddingIndexService
 from rag_runtime.services.graph_index_service import GraphIndexService
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import (
@@ -78,6 +79,7 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
     prompt_resolver = _build_prompt_resolver(settings)
     tool_registry = ToolRegistry()
     tool_executor = ToolExecutor(tool_registry)
+    external_tool_gateway = ResearchExternalToolGateway()
     reasoning_strategies = ReasoningStrategySet(
         answer_synthesis=CoTReasoningAgent(llm_adapter=llm_adapter),
         query_planning=PlanAndSolveReasoningAgent(llm_adapter=llm_adapter),
@@ -85,6 +87,7 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
             llm_adapter=llm_adapter,
             tool_registry=tool_registry,
             tool_executor=tool_executor,
+            external_tool_gateway=external_tool_gateway,
         ),
     )
     graph_runtime = RagRuntime(
@@ -119,11 +122,12 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
         react_reasoning_agent=None,
     )
     _register_runtime_tools(graph_runtime)
+    external_tool_gateway.bind_runtime(graph_runtime)
     graph_runtime.reasoning_strategies = reasoning_strategies
     graph_runtime.cot_reasoning_agent = reasoning_strategies.cot_reasoning_agent
     graph_runtime.plan_and_solve_reasoning_agent = reasoning_strategies.plan_and_solve_reasoning_agent
     graph_runtime.react_reasoning_agent = reasoning_strategies.react_reasoning_agent
-    graph_runtime.research_qa_agent = reasoning_strategies.react_reasoning_agent
+    graph_runtime.rag_qa_worker = reasoning_strategies.react_reasoning_agent
     graph_runtime.answer_tools.reasoning_strategies = reasoning_strategies
     graph_runtime.answer_tools.cot_reasoning_agent = reasoning_strategies.cot_reasoning_agent
     logger.info(

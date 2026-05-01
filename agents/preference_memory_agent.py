@@ -13,8 +13,13 @@ from pydantic import BaseModel, Field
 from domain.schemas.research import PaperCandidate, PaperSource
 from domain.schemas.research_functions import RecommendPapersFunctionOutput, RecommendedPaper
 from domain.schemas.research_memory import InterestTopic, UserResearchProfile
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from memory.memory_manager import MemoryManager
 from services.research.paper_search_service import PaperSearchService
+from services.research.research_specialist_capabilities import (
+    PreferenceRecommendationCapability,
+    build_specialist_unified_result,
+)
 from tooling.research_runtime_schemas import NotificationItem
 
 
@@ -143,10 +148,47 @@ class PreferenceMemoryAgent:
         memory_manager: MemoryManager,
         paper_search_service: PaperSearchService,
         storage_root: str | Path | None = None,
+        memory_gateway: Any | None = None,
+        execution_capability: PreferenceRecommendationCapability | None = None,
     ) -> None:
-        self.memory_manager = memory_manager
+        self._memory_backend = memory_manager
+        self.memory_gateway = memory_gateway
         self.paper_search_service = paper_search_service
         self.storage_root = Path(storage_root) if storage_root is not None else None
+        self.execution_capability = execution_capability or PreferenceRecommendationCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        if supervisor_context is None or decision is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for PreferenceMemoryAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="preference_memory_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            decision=decision,
+            preference_memory_agent=self,
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "preference_memory_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="preference_memory_agent",
+            delegate_type=self.__class__.__name__,
+        )
 
     def observe_user_message(
         self,
@@ -158,9 +200,9 @@ class PreferenceMemoryAgent:
         metadata: dict[str, Any] | None = None,
     ) -> UserResearchProfile:
         signal = self.extract_preference_signal(message)
-        profile = self.memory_manager.load_user_profile(user_id=user_id)
+        profile = self._load_user_profile(user_id=user_id)
         if signal["topics"] or signal["keywords"] or signal["sources"]:
-            profile = self.memory_manager.observe_user_query(
+            profile = self._observe_user_query(
                 user_id=user_id,
                 topics=list(signal["topics"]),
                 sources=list(signal["sources"]),
@@ -174,7 +216,7 @@ class PreferenceMemoryAgent:
                 },
             )
         if answer_language:
-            profile = self.memory_manager.update_user_profile(
+            profile = self._update_user_profile(
                 user_id=user_id,
                 answer_language=answer_language,
             )
@@ -217,7 +259,7 @@ class PreferenceMemoryAgent:
         sources: list[PaperSource] | None = None,
         include_notification: bool = True,
     ) -> RecommendPapersFunctionOutput:
-        profile = self.memory_manager.load_user_profile(user_id=user_id)
+        profile = self._load_user_profile(user_id=user_id)
         explicit_topics = self._extract_topics(question)
         preferred_days_back = self._extract_recency_days(question)
         effective_days_back = max(
@@ -311,7 +353,7 @@ class PreferenceMemoryAgent:
                 "generated_at": _now_iso(),
             },
         )
-        self.memory_manager.record_user_recommendations(
+        self._record_user_recommendations(
             user_id=user_id,
             topics_used=topics_used,
             recommendation_ids=[item.paper_id for item in recommendations],
@@ -323,6 +365,85 @@ class PreferenceMemoryAgent:
                 output=output,
             )
         return output
+
+    def _load_user_profile(self, *, user_id: str = "local-user") -> UserResearchProfile:
+        gateway = self.memory_gateway
+        if gateway is not None and hasattr(gateway, "load_user_profile"):
+            return gateway.load_user_profile(user_id=user_id)
+        return self._memory_backend.load_user_profile(user_id=user_id)
+
+    def _observe_user_query(
+        self,
+        *,
+        user_id: str,
+        topics: list[str],
+        sources: list[str],
+        keywords: list[str],
+        preferred_recency_days: int | None,
+        signal_strength: float,
+        metadata: dict[str, Any],
+    ) -> UserResearchProfile:
+        gateway = self.memory_gateway
+        if gateway is not None and hasattr(gateway, "observe_user_query"):
+            return gateway.observe_user_query(
+                user_id=user_id,
+                topics=topics,
+                sources=sources,
+                keywords=keywords,
+                preferred_recency_days=preferred_recency_days,
+                signal_strength=signal_strength,
+                metadata=metadata,
+            )
+        return self._memory_backend.observe_user_query(
+            user_id=user_id,
+            topics=topics,
+            sources=sources,
+            keywords=keywords,
+            preferred_recency_days=preferred_recency_days,
+            signal_strength=signal_strength,
+            metadata=metadata,
+        )
+
+    def _update_user_profile(
+        self,
+        *,
+        user_id: str,
+        answer_language: str | None = None,
+    ) -> UserResearchProfile:
+        gateway = self.memory_gateway
+        if gateway is not None and hasattr(gateway, "update_user_profile"):
+            return gateway.update_user_profile(
+                user_id=user_id,
+                answer_language=answer_language,
+            )
+        return self._memory_backend.update_user_profile(
+            user_id=user_id,
+            answer_language=answer_language,
+        )
+
+    def _record_user_recommendations(
+        self,
+        *,
+        user_id: str,
+        topics_used: list[str],
+        recommendation_ids: list[str],
+        query: str,
+    ) -> None:
+        gateway = self.memory_gateway
+        if gateway is not None and hasattr(gateway, "record_user_recommendations"):
+            gateway.record_user_recommendations(
+                user_id=user_id,
+                topics_used=topics_used,
+                recommendation_ids=recommendation_ids,
+                query=query,
+            )
+            return
+        self._memory_backend.record_user_recommendations(
+            user_id=user_id,
+            topics_used=topics_used,
+            recommendation_ids=recommendation_ids,
+            query=query,
+        )
 
     def _extract_sources(self, message: str) -> list[str]:
         normalized = message.lower()

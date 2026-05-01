@@ -6,8 +6,13 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from domain.schemas.research import PaperCandidate, ResearchTopicPlan
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from agents.research_qa_agent import normalize_reasoning_style
 from services.research.paper_search_service import format_search_warning
+from services.research.research_specialist_capabilities import (
+    LiteratureDiscoveryCapability,
+    build_specialist_unified_result,
+)
 
 if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
@@ -135,9 +140,49 @@ class LiteratureScoutAgent:
         paper_search_service: PaperSearchService | None = None,
         *,
         llm_adapter: Any | None = None,
+        execution_capability: LiteratureDiscoveryCapability | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
+        self.execution_capability = execution_capability or LiteratureDiscoveryCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        runtime = runtime_context.metadata.get("supervisor_runtime")
+        if supervisor_context is None or decision is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for LiteratureScoutAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="literature_scout_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            decision=decision,
+            literature_scout_agent=self,
+            research_writer_agent=getattr(runtime, "research_writer_agent", None)
+            or getattr(supervisor_context.research_service, "research_writer_agent", None),
+            curation_skill=getattr(runtime, "paper_curation_skill", None)
+            or getattr(supervisor_context.research_service, "paper_curation_skill", None),
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "literature_scout_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="literature_scout_agent",
+            delegate_type=self.__class__.__name__,
+        )
 
     async def plan(self, state: Any) -> ResearchTopicPlan:
         paper_search_service = self._require_search_service()

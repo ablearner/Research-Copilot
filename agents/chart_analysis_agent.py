@@ -10,9 +10,14 @@ from domain.schemas.research import (
     ResearchPaperFigureListResponse,
     ResearchPaperFigurePreview,
 )
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from services.research.capabilities.paper_chart_analysis import PaperChartAnalyzer
 from services.research.capabilities.visual_anchor import VisualAnchor
 from services.research.research_knowledge_access import ResearchKnowledgeAccess
+from services.research.research_specialist_capabilities import (
+    ChartAnalysisCapability,
+    build_specialist_unified_result,
+)
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget, PaperFigureTools
 
 
@@ -21,12 +26,53 @@ class ChartAnalysisAgent:
 
     name = "ChartAnalysisAgent"
 
-    def __init__(self, *, llm_adapter: Any | None = None, storage_root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm_adapter: Any | None = None,
+        storage_root: str | Path | None = None,
+        execution_capability: ChartAnalysisCapability | None = None,
+    ) -> None:
         self.llm_adapter = llm_adapter
         self.visual_anchor_skill = VisualAnchor(llm_adapter=llm_adapter)
         self.paper_chart_analysis_skill = PaperChartAnalyzer(llm_adapter=llm_adapter)
         self.paper_figure_tools = (
             PaperFigureTools(storage_root=storage_root) if storage_root is not None else None
+        )
+        self.execution_capability = execution_capability or ChartAnalysisCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        decision = runtime_context.metadata.get("supervisor_decision")
+        if supervisor_context is None or decision is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for ChartAnalysisAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="chart_analysis_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            decision=decision,
+            chart_analysis_agent=self,
+            task_type=task.task_type,
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "chart_analysis_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="chart_analysis_agent",
+            delegate_type=self.__class__.__name__,
         )
 
     async def infer_cached_visual_anchor(

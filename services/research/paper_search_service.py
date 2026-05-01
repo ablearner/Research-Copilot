@@ -15,6 +15,7 @@ from domain.schemas.research import (
     ResearchTopicPlan,
 )
 from services.research.capabilities import CodeLinker, PaperRanker, SurveyWriter, TopicPlanner
+from services.research.research_external_tool_gateway import ResearchExternalToolGateway
 from tools.research import (
     ArxivSearchTool,
     IEEEMetadataSearchTool,
@@ -67,6 +68,7 @@ class PaperSearchService:
         semantic_scholar_tool: SemanticScholarSearchTool | None = None,
         ieee_tool: IEEEMetadataSearchTool | None = None,
         zotero_tool: Any | None = None,
+        external_tool_gateway: ResearchExternalToolGateway | None = None,
         external_tool_registry: Any | None = None,
         topic_planner: TopicPlanner | None = None,
         paper_ranker: PaperRanker | None = None,
@@ -80,7 +82,9 @@ class PaperSearchService:
         self.semantic_scholar_tool = semantic_scholar_tool
         self.ieee_tool = ieee_tool
         self.zotero_tool = zotero_tool
-        self.external_tool_registry = external_tool_registry
+        self.external_tool_gateway = external_tool_gateway or ResearchExternalToolGateway(
+            registry=external_tool_registry
+        )
         self.llm_adapter = llm_adapter
         self.topic_planner = topic_planner or TopicPlanner(llm_adapter=llm_adapter)
         self.paper_ranker = paper_ranker or PaperRanker(
@@ -212,8 +216,8 @@ class PaperSearchService:
         days_back: int,
     ) -> list[PaperCandidate]:
         mcp_tool_name = self._academic_mcp_tool_name(source)
-        if mcp_tool_name and self.external_tool_registry is not None:
-            result = await self.external_tool_registry.call_tool(
+        if mcp_tool_name and self.external_tool_gateway.is_configured():
+            result = await self.external_tool_gateway.call_tool(
                 tool_name=mcp_tool_name,
                 arguments={
                     "query": query,

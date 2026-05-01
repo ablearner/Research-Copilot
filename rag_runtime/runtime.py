@@ -116,7 +116,7 @@ class RagRuntime:
             react_reasoning_agent
             or self.reasoning_strategies.react_reasoning_agent
         )
-        self.research_qa_agent = self.react_reasoning_agent
+        self.rag_qa_worker = self.react_reasoning_agent
         self.graph_execution_mode = graph_execution_mode
         self.router_planner_agent = None
         self.retrieval_planner_agent = RetrievalPlanner(self.llm_adapter)

@@ -22,21 +22,68 @@ class ResearchMemoryGateway:
         self.paper_reading_skill = paper_reading_skill
         self.compact_text = compact_text
 
-    def load_user_profile(self):
-        return self.memory_manager.load_user_profile()
+    def load_user_profile(self, *, user_id: str = "local-user"):
+        return self.memory_manager.load_user_profile(user_id=user_id)
 
     def update_user_profile(
         self,
         *,
-        topic: str,
+        topic: str | None = None,
+        user_id: str = "local-user",
         answer_language: str | None = None,
         note: str | None = None,
     ) -> Any:
-        return self.memory_manager.update_user_profile(
-            topic=topic,
-            answer_language=answer_language,
-            note=note,
+        kwargs: dict[str, Any] = {
+            "user_id": user_id,
+            "answer_language": answer_language,
+            "note": note,
+        }
+        if topic is not None:
+            kwargs["topic"] = topic
+        return self.memory_manager.update_user_profile(**kwargs)
+
+    def observe_user_query(
+        self,
+        *,
+        user_id: str,
+        topics: list[str],
+        sources: list[str],
+        keywords: list[str],
+        preferred_recency_days: int | None,
+        signal_strength: float,
+        metadata: dict[str, Any],
+    ) -> Any:
+        return self.memory_manager.observe_user_query(
+            user_id=user_id,
+            topics=topics,
+            sources=sources,
+            keywords=keywords,
+            preferred_recency_days=preferred_recency_days,
+            signal_strength=signal_strength,
+            metadata=metadata,
         )
+
+    def record_user_recommendations(
+        self,
+        *,
+        user_id: str,
+        topics_used: list[str],
+        recommendation_ids: list[str],
+        query: str,
+    ) -> Any:
+        return self.memory_manager.record_user_recommendations(
+            user_id=user_id,
+            topics_used=topics_used,
+            recommendation_ids=recommendation_ids,
+            query=query,
+        )
+
+    def get_current_context(self) -> Any:
+        getter = getattr(self.memory_manager, "get_current_context", None)
+        return getter() if callable(getter) else None
+
+    def clear_session(self, session_id: str) -> Any:
+        return self.memory_manager.clear_session(session_id)
 
     def hydrate_context(
         self,
@@ -89,6 +136,28 @@ class ResearchMemoryGateway:
 
     def update_paper_knowledge(self, record: PaperKnowledgeRecord) -> Any:
         return self.memory_manager.update_paper_knowledge(record)
+
+    def promote_conclusion_to_long_term(
+        self,
+        session_id: str,
+        *,
+        conclusion: str,
+        topic: str,
+        keywords: list[str],
+        related_paper_ids: list[str],
+        metadata: dict[str, Any],
+    ) -> Any:
+        promoter = getattr(self.memory_manager, "promote_conclusion_to_long_term", None)
+        if callable(promoter):
+            return promoter(
+                session_id,
+                conclusion=conclusion,
+                topic=topic,
+                keywords=keywords,
+                related_paper_ids=related_paper_ids,
+                metadata=metadata,
+            )
+        return None
 
     def persist_research_update(
         self,

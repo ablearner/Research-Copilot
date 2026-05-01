@@ -9,7 +9,9 @@ from agents.general_answer_agent import GeneralAnswerAgent
 from agents.literature_scout_agent import LiteratureScoutAgent
 from agents.paper_analysis_agent import PaperAnalysisAgent
 from agents.preference_memory_agent import PreferenceMemoryAgent
+from agents.research_document_agent import ResearchDocumentAgent
 from agents.research_knowledge_agent import ResearchKnowledgeAgent
+from agents.research_qa_agent import ResearchQAAgent
 from agents.research_supervisor_agent import (
     ResearchSupervisorAgent,
     ResearchSupervisorDecision,
@@ -111,6 +113,8 @@ class ResearchRuntimeBase:
         self.research_knowledge_agent = ResearchKnowledgeAgent(
             llm_adapter=llm_adapter,
         )
+        self.research_document_agent = ResearchDocumentAgent()
+        self.research_qa_agent = ResearchQAAgent()
         self.research_writer_agent = ResearchWriterAgent(
             research_service.paper_search_service,
             llm_adapter=llm_adapter,
@@ -125,6 +129,7 @@ class ResearchRuntimeBase:
         self.general_answer_agent = GeneralAnswerAgent(llm_adapter=llm_adapter)
         self.preference_memory_agent = getattr(research_service, "preference_memory_agent", None) or PreferenceMemoryAgent(
             memory_manager=research_service.memory_manager,
+            memory_gateway=getattr(research_service, "memory_gateway", None),
             paper_search_service=research_service.paper_search_service,
             storage_root=research_service.report_service.storage_root,
         )
@@ -496,6 +501,8 @@ class ResearchRuntimeBase:
             "ResearchSupervisorAgent": self.manager_agent,
             "LiteratureScoutAgent": self.literature_scout_agent,
             "ResearchKnowledgeAgent": self.research_knowledge_agent,
+            "ResearchDocumentAgent": self.research_document_agent,
+            "ResearchQAAgent": self.research_qa_agent,
             "ResearchWriterAgent": self.research_writer_agent,
             "PaperAnalysisAgent": self.paper_analysis_agent,
             "PreferenceMemoryAgent": self.preference_memory_agent,
@@ -505,37 +512,298 @@ class ResearchRuntimeBase:
 
     def _build_unified_execution_handlers(self) -> dict[str, Any]:
         return {
-            "LiteratureScoutAgent": self._build_unified_execution_handler(
+            "LiteratureScoutAgent": self._build_specialist_execution_handler(
                 agent_name="LiteratureScoutAgent",
                 supported_task_types={"search_literature"},
             ),
-            "ResearchKnowledgeAgent": self._build_unified_execution_handler(
+            "ResearchKnowledgeAgent": self._build_specialist_execution_handler(
                 agent_name="ResearchKnowledgeAgent",
-                supported_task_types={"import_papers", "sync_to_zotero", "answer_question", "compress_context"},
+                supported_task_types={"import_papers", "sync_to_zotero", "compress_context"},
             ),
-            "ResearchWriterAgent": self._build_unified_execution_handler(
+            "ResearchDocumentAgent": self._build_research_document_execution_handler(),
+            "ResearchQAAgent": self._build_research_qa_execution_handler(),
+            "ResearchWriterAgent": self._build_specialist_execution_handler(
                 agent_name="ResearchWriterAgent",
                 supported_task_types={"write_review"},
             ),
-            "PaperAnalysisAgent": self._build_unified_execution_handler(
+            "PaperAnalysisAgent": self._build_specialist_execution_handler(
                 agent_name="PaperAnalysisAgent",
                 supported_task_types={"analyze_papers"},
             ),
-            "ChartAnalysisAgent": self._build_unified_execution_handler(
+            "ChartAnalysisAgent": self._build_specialist_execution_handler(
                 agent_name="ChartAnalysisAgent",
                 supported_task_types={"understand_chart", "analyze_paper_figures"},
             ),
-            "GeneralAnswerAgent": self._build_unified_execution_handler(
+            "GeneralAnswerAgent": self._build_specialist_execution_handler(
                 agent_name="GeneralAnswerAgent",
                 supported_task_types={"general_answer"},
             ),
-            "PreferenceMemoryAgent": self._build_unified_execution_handler(
+            "PreferenceMemoryAgent": self._build_specialist_execution_handler(
                 agent_name="PreferenceMemoryAgent",
                 supported_task_types={"recommend_from_preferences"},
             ),
         }
 
-    def _build_unified_execution_handler(
+    def _build_research_qa_execution_handler(self):
+        async def handler(task: UnifiedAgentTask, runtime_context, agent_delegate):
+            supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+            if supervisor_context is None:
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchQAAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": "missing supervisor runtime context for ResearchQAAgent",
+                        "tool_metadata": {"reason": "missing_supervisor_runtime_context"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_qa_agent",
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
+                        ),
+                    },
+                )
+            if task.task_type != "answer_question":
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchQAAgent",
+                    task_type=task.task_type,
+                    status="skipped",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": f"ResearchQAAgent does not support task_type={task.task_type}",
+                        "tool_metadata": {"reason": "unsupported_task_type"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_qa_agent",
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
+                        ),
+                    },
+                )
+            if agent_delegate is None or not hasattr(agent_delegate, "execute"):
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchQAAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": "ResearchQAAgent delegate is missing",
+                        "tool_metadata": {"reason": "missing_agent_delegate"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_qa_agent",
+                        "delegate_type": None,
+                    },
+                )
+            try:
+                result = await agent_delegate.execute(task, runtime_context)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ResearchQAAgent specialist execution failed", exc_info=True)
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchQAAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": str(exc) or "ResearchQAAgent execution failed",
+                        "tool_metadata": {
+                            "reason": "tool_execution_failed",
+                            "specialist_error_type": exc.__class__.__name__,
+                        },
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_qa_agent",
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                )
+            payload = dict(result.payload)
+            metadata = payload.get("tool_metadata")
+            tool_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            standardized = self.action_dispatcher.with_standardized_observation(
+                action_name="answer_question",
+                context=supervisor_context,
+                status=result.status,
+                metadata=tool_metadata,
+            )
+            payload["tool_metadata"] = standardized
+            action_output = result.action_output
+            if action_output is None and UnifiedAgentResult.is_action_output_payload(standardized):
+                action_output = dict(standardized)
+            return result.model_copy(
+                update={
+                    "payload": payload,
+                    "action_output": action_output,
+                    "metadata": {
+                        **result.metadata,
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_qa_agent",
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                }
+            )
+
+        return handler
+
+    def _build_research_document_execution_handler(self):
+        async def handler(task: UnifiedAgentTask, runtime_context, agent_delegate):
+            supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+            if supervisor_context is None:
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchDocumentAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": "missing supervisor runtime context for ResearchDocumentAgent",
+                        "tool_metadata": {"reason": "missing_supervisor_runtime_context"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_document_agent",
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
+                        ),
+                    },
+                )
+            if task.task_type != "understand_document":
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchDocumentAgent",
+                    task_type=task.task_type,
+                    status="skipped",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": f"ResearchDocumentAgent does not support task_type={task.task_type}",
+                        "tool_metadata": {"reason": "unsupported_task_type"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_document_agent",
+                        "delegate_type": (
+                            agent_delegate.__class__.__name__ if agent_delegate is not None else None
+                        ),
+                    },
+                )
+            if agent_delegate is None or not hasattr(agent_delegate, "execute"):
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchDocumentAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": "ResearchDocumentAgent delegate is missing",
+                        "tool_metadata": {"reason": "missing_agent_delegate"},
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_document_agent",
+                        "delegate_type": None,
+                    },
+                )
+            try:
+                result = await agent_delegate.execute(task, runtime_context)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ResearchDocumentAgent specialist execution failed", exc_info=True)
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name="ResearchDocumentAgent",
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": str(exc) or "ResearchDocumentAgent execution failed",
+                        "tool_metadata": {
+                            "reason": "tool_execution_failed",
+                            "specialist_error_type": exc.__class__.__name__,
+                        },
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_document_agent",
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                )
+            payload = dict(result.payload)
+            metadata = payload.get("tool_metadata")
+            tool_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            standardized = self.action_dispatcher.with_standardized_observation(
+                action_name="understand_document",
+                context=supervisor_context,
+                status=result.status,
+                metadata=tool_metadata,
+            )
+            payload["observation"] = standardized.get("observation", payload.get("observation", ""))
+            payload["tool_metadata"] = dict(standardized)
+            action_output = result.action_output
+            if action_output is None and UnifiedAgentResult.is_action_output_payload(standardized):
+                action_output = dict(standardized)
+            return result.model_copy(
+                update={
+                    "payload": payload,
+                    "action_output": action_output,
+                    "metadata": {
+                        **result.metadata,
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": "research_document_agent",
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                }
+            )
+
+        return handler
+
+    def _build_specialist_execution_handler(
         self,
         *,
         agent_name: str,
@@ -543,8 +811,8 @@ class ResearchRuntimeBase:
     ):
         async def handler(task: UnifiedAgentTask, runtime_context, agent_delegate):
             supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-            decision = runtime_context.metadata.get("supervisor_decision")
-            if supervisor_context is None or decision is None:
+            adapter_name = self._specialist_execution_adapter(agent_name)
+            if supervisor_context is None:
                 return UnifiedAgentResult(
                     task_id=task.task_id,
                     agent_name=agent_name,
@@ -562,7 +830,7 @@ class ResearchRuntimeBase:
                     retry_count=task.retry_count,
                     metadata={
                         "execution_engine": "unified_agent_registry",
-                        "execution_adapter": "phase1_wrapped_action_tool",
+                        "execution_adapter": adapter_name,
                         "delegate_type": (
                             agent_delegate.__class__.__name__ if agent_delegate is not None else None
                         ),
@@ -586,27 +854,13 @@ class ResearchRuntimeBase:
                     retry_count=task.retry_count,
                     metadata={
                         "execution_engine": "unified_agent_registry",
-                        "execution_adapter": "phase1_wrapped_action_tool",
+                        "execution_adapter": adapter_name,
                         "delegate_type": (
                             agent_delegate.__class__.__name__ if agent_delegate is not None else None
                         ),
                     },
                 )
-            execution_result = await self._execute_action_tool(
-                action_name=task.task_type,
-                context=supervisor_context,
-                decision=decision,
-            )
-            result = self._action_tool_result_from_execution(execution_result)
-            execution_metadata = {
-                "execution_engine": "unified_agent_registry",
-                "execution_adapter": "phase1_wrapped_action_tool",
-                "delegate_type": (
-                    agent_delegate.__class__.__name__ if agent_delegate is not None else None
-                ),
-                **self._action_tool_execution_metadata(execution_result),
-            }
-            if result is None:
+            if agent_delegate is None or not hasattr(agent_delegate, "execute"):
                 return UnifiedAgentResult(
                     task_id=task.task_id,
                     agent_name=agent_name,
@@ -614,40 +868,87 @@ class ResearchRuntimeBase:
                     status="failed",
                     instruction=task.instruction,
                     payload={
-                        "observation": execution_result.error_message or f"tool execution failed: {task.task_type}",
-                        "tool_metadata": {"reason": "tool_execution_failed"},
+                        "observation": f"{agent_name} delegate is missing",
+                        "tool_metadata": {"reason": "missing_agent_delegate"},
                     },
                     context_slice=task.context_slice,
                     priority=task.priority,
                     expected_output_schema=task.expected_output_schema,
                     depends_on=task.depends_on,
                     retry_count=task.retry_count,
-                    metadata=execution_metadata,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": adapter_name,
+                        "delegate_type": None,
+                    },
                 )
-            return UnifiedAgentResult(
-                task_id=task.task_id,
-                agent_name=agent_name,
-                task_type=task.task_type,
-                status=result.status,  # type: ignore[arg-type]
-                instruction=task.instruction,
-                payload={
-                    "observation": result.observation,
-                    "tool_metadata": dict(result.metadata),
-                },
-                context_slice=task.context_slice,
-                priority=task.priority,
-                expected_output_schema=task.expected_output_schema,
-                depends_on=task.depends_on,
-                retry_count=task.retry_count,
-                action_output=(
-                    dict(result.metadata)
-                    if UnifiedAgentResult.is_action_output_payload(result.metadata)
-                    else None
-                ),
-                metadata=execution_metadata,
+            try:
+                result = await agent_delegate.execute(task, runtime_context)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s specialist execution failed", agent_name, exc_info=True)
+                return UnifiedAgentResult(
+                    task_id=task.task_id,
+                    agent_name=agent_name,
+                    task_type=task.task_type,
+                    status="failed",
+                    instruction=task.instruction,
+                    payload={
+                        "observation": str(exc) or f"{agent_name} execution failed",
+                        "tool_metadata": {
+                            "reason": "tool_execution_failed",
+                            "specialist_error_type": exc.__class__.__name__,
+                        },
+                    },
+                    context_slice=task.context_slice,
+                    priority=task.priority,
+                    expected_output_schema=task.expected_output_schema,
+                    depends_on=task.depends_on,
+                    retry_count=task.retry_count,
+                    metadata={
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": adapter_name,
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                )
+            payload = dict(result.payload)
+            raw_tool_metadata = payload.get("tool_metadata")
+            tool_metadata = dict(raw_tool_metadata) if isinstance(raw_tool_metadata, dict) else {}
+            action_name = str(runtime_context.metadata.get("supervisor_action_name") or task.task_type)
+            standardized = self.action_dispatcher.with_standardized_observation(
+                action_name=action_name,
+                context=supervisor_context,
+                status=result.status,
+                metadata=tool_metadata,
+            )
+            payload["tool_metadata"] = standardized
+            action_output = result.action_output
+            if action_output is None and UnifiedAgentResult.is_action_output_payload(standardized):
+                action_output = dict(standardized)
+            return result.model_copy(
+                update={
+                    "payload": payload,
+                    "action_output": action_output,
+                    "metadata": {
+                        **result.metadata,
+                        "execution_engine": "unified_agent_registry",
+                        "execution_adapter": adapter_name,
+                        "delegate_type": agent_delegate.__class__.__name__,
+                    },
+                }
             )
 
         return handler
+
+    def _specialist_execution_adapter(self, agent_name: str) -> str:
+        return {
+            "LiteratureScoutAgent": "literature_scout_agent",
+            "ResearchKnowledgeAgent": "research_knowledge_agent",
+            "ResearchWriterAgent": "research_writer_agent",
+            "PaperAnalysisAgent": "paper_analysis_agent",
+            "ChartAnalysisAgent": "chart_analysis_agent",
+            "GeneralAnswerAgent": "general_answer_agent",
+            "PreferenceMemoryAgent": "preference_memory_agent",
+        }.get(agent_name, "specialist_agent")
 
     def _build_action_tool_handlers(self) -> dict[str, Any]:
         return self.action_dispatcher.build_action_tool_handlers()
@@ -726,7 +1027,7 @@ class ResearchRuntimeBase:
         )
 
     async def _decide_next_action(self, state: ResearchAgentGraphState) -> ResearchSupervisorDecision:
-        return await self.manager_agent.decide_next_action_async(
+        decision = await self.manager_agent.decide_next_action_async(
             await self._state_from_context(state["context"], trace=state.get("trace", [])),
             pending_messages=state.get("pending_agent_messages", []),
             agent_messages=state.get("agent_messages", []),
@@ -740,6 +1041,55 @@ class ResearchRuntimeBase:
             clarification_request=state.get("clarification_request"),
             active_plan_id=state.get("active_plan_id"),
         )
+        return self._inject_skill_metadata_into_decision(decision, context=state["context"])
+
+    def _inject_skill_metadata_into_decision(
+        self,
+        decision: ResearchSupervisorDecision,
+        *,
+        context: ResearchAgentToolContext,
+    ) -> ResearchSupervisorDecision:
+        selection = context.skill_selection
+        if selection is None or not selection.active_skill_names:
+            return decision
+        active_skill_names = list(selection.active_skill_names)
+        skill_payload = {
+            "active_skill_names": active_skill_names,
+            "skill_context": context.skill_context,
+        }
+        decision.metadata.setdefault("active_skill_names", active_skill_names)
+        decision.metadata.setdefault("skill_context", context.skill_context)
+        if active_skill_names:
+            decision.metadata.setdefault(
+                "skill_name",
+                (context.request.skill_name or "").strip() or active_skill_names[0],
+            )
+        active_message = self._active_message(decision)
+        if active_message is None:
+            return decision
+        preferred_skill_name = (context.request.skill_name or "").strip() or active_skill_names[0]
+        message_metadata = {
+            **active_message.metadata,
+            **skill_payload,
+            "skill_name": active_message.metadata.get("skill_name") or preferred_skill_name,
+        }
+        enriched_message = active_message.model_copy(update={"metadata": message_metadata})
+        decision.metadata["active_message"] = enriched_message
+        state_update = decision.metadata.get("state_update")
+        if isinstance(state_update, dict):
+            state_update["pending_agent_messages"] = [
+                enriched_message
+                if getattr(message, "task_id", None) == enriched_message.task_id
+                else message
+                for message in state_update.get("pending_agent_messages", [])
+            ]
+            state_update["agent_messages"] = [
+                enriched_message
+                if getattr(message, "task_id", None) == enriched_message.task_id
+                else message
+                for message in state_update.get("agent_messages", [])
+            ]
+        return decision
 
     def _route_decision(self, decision: ResearchSupervisorDecision) -> str:
         return "finalize" if decision.action_name in {"finalize", "clarify_request"} else decision.action_name
@@ -1298,8 +1648,8 @@ class ResearchRuntimeBase:
         if request_skill_name:
             return request_skill_name
         descriptor = self._unified_agent_descriptor(context, agent_name=worker_agent)
-        if descriptor is not None and descriptor.skill_binding.profile_name:
-            return descriptor.skill_binding.profile_name
+        if descriptor is not None and descriptor.capability_binding.profile_name:
+            return descriptor.capability_binding.profile_name
         return None
 
     def _available_tool_names_for_agent(
@@ -1569,7 +1919,7 @@ class ResearchRuntimeBase:
                 or 3
             ),
         )
-        user_profile = context.research_service.memory_manager.load_user_profile()
+        user_profile = context.research_service.memory_gateway.load_user_profile()
         force_context_compression = bool(
             context.request.force_context_compression
             or request_metadata.get("force_context_compression")

@@ -45,6 +45,7 @@ from services.research.capabilities import (
     WritingPolisher,
     PaperCurator,
 )
+from services.research.research_collection_qa_capability import ResearchCollectionQACapability
 from services.research.research_context import ResearchExecutionContext
 from services.research.research_context_manager import ResearchContextManager
 from services.research.research_discovery_capability import ResearchDiscoveryCapability
@@ -80,7 +81,6 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         report_service: ResearchReportService,
         paper_import_service: PaperImportService,
         research_runtime: Any | None = None,
-        research_qa_runtime: Any | None = None,
         research_context_manager: ResearchContextManager | None = None,
         memory_manager: MemoryManager | None = None,
         paper_selector_service: PaperSelectorService | None = None,
@@ -94,9 +94,8 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         self.report_service = report_service
         self.paper_import_service = paper_import_service
         # Legacy compatibility only. Main business paths no longer depend on
-        # the old discovery/QA manager runtimes by default.
+        # the old discovery manager runtime by default.
         self.research_runtime = research_runtime
-        self.research_qa_runtime = research_qa_runtime
         self._agent_runtime: Any | None = None
         self.research_context_manager = research_context_manager or ResearchContextManager()
         self.memory_manager = memory_manager or MemoryManager(
@@ -123,6 +122,10 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             paper_search_service,
             llm_adapter=llm_adapter,
         )
+        self.research_collection_qa_capability = ResearchCollectionQACapability(
+            llm_adapter=llm_adapter,
+            paper_analysis_skill=self.research_writer_agent.paper_analysis_skill,
+        )
         self.research_discovery_capability = ResearchDiscoveryCapability(
             literature_scout_agent=self.literature_scout_agent,
             research_writer_agent=self.research_writer_agent,
@@ -134,16 +137,17 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             llm_adapter=llm_adapter,
             storage_root=report_service.storage_root / "assets",
         )
-        self.preference_memory_agent = PreferenceMemoryAgent(
-            memory_manager=self.memory_manager,
-            paper_search_service=self.paper_search_service,
-            storage_root=report_service.storage_root,
-        )
         self.memory_gateway = ResearchMemoryGateway(
             memory_manager=self.memory_manager,
             research_context_manager=self.research_context_manager,
             paper_reading_skill=self.paper_reading_skill,
             compact_text=lambda value: self._compact_text(value, limit=280),
+        )
+        self.preference_memory_agent = PreferenceMemoryAgent(
+            memory_manager=self.memory_manager,
+            memory_gateway=self.memory_gateway,
+            paper_search_service=self.paper_search_service,
+            storage_root=report_service.storage_root,
         )
         self.evaluation_skill = evaluation_skill or ResearchEvaluator()
         self.review_writing_skill = review_writing_skill or ReviewWriter()
@@ -153,6 +157,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         self.observability_service = ResearchObservabilityService(
             report_service.storage_root / "observability"
         )
+        self.external_tool_gateway = getattr(self.paper_search_service, "external_tool_gateway", None)
 
     def _find_conversation_id_for_task(self, task_id: str | None) -> str | None:
         if not task_id:

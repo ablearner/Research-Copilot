@@ -64,13 +64,41 @@ class AnswerResearchQuestionTool:
                 list(qa_result.paper_ids),
             )
         output = build_collection_qa_output(qa_result=qa_result)
+        metadata = output.to_metadata()
+        qa_metadata = qa_result.qa.metadata if isinstance(qa_result.qa.metadata, dict) else {}
+        quality_check = qa_metadata.get("answer_quality_check")
+        if isinstance(quality_check, dict) and quality_check.get("needs_recovery"):
+            recovery_route = str(quality_check.get("suggested_recovery_qa_route") or "").strip()
+            if recovery_route:
+                metadata.update(
+                    {
+                        "reason": "qa_route_replan_requested",
+                        "observation_envelope": {
+                            "progress_made": False,
+                            "confidence": qa_result.qa.confidence,
+                            "suggested_next_actions": ["answer_question"],
+                            "state_delta": {
+                                "preferred_qa_route": recovery_route,
+                                "qa_recovery_reason": quality_check.get("suggested_recovery_rationale"),
+                            },
+                        },
+                    }
+                )
+                return ResearchToolResult(
+                    status="skipped",
+                    observation=(
+                        "research QA produced an under-supported answer; supervisor replan requested "
+                        f"with qa_route={recovery_route}"
+                    ),
+                    metadata=metadata,
+                )
         return ResearchToolResult(
             status="succeeded",
             observation=(
                 f"answered research collection question; evidence={len(qa_result.qa.evidence_bundle.evidences)}; "
                 f"confidence={qa_result.qa.confidence if qa_result.qa.confidence is not None else 'empty'}"
             ),
-            metadata=output.to_metadata(),
+            metadata=metadata,
         )
 
 

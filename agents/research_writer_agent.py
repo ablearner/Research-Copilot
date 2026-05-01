@@ -8,9 +8,14 @@ from core.utils import now_iso as _now_iso
 from domain.schemas.api import QAResponse
 from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from retrieval.evidence_builder import build_evidence_bundle
 from services.research.capabilities import PaperAnalyzer
 from services.research.research_knowledge_access import ResearchKnowledgeAccess
+from services.research.research_specialist_capabilities import (
+    ReviewWritingCapability,
+    build_specialist_unified_result,
+)
 
 if TYPE_CHECKING:
     from services.research.paper_search_service import PaperSearchService
@@ -31,10 +36,43 @@ class ResearchWriterAgent:
         *,
         llm_adapter: Any | None = None,
         paper_analysis_skill: PaperAnalyzer | None = None,
+        execution_capability: ReviewWritingCapability | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
         self.paper_analysis_skill = paper_analysis_skill or PaperAnalyzer(llm_adapter=self.llm_adapter)
+        self.execution_capability = execution_capability or ReviewWritingCapability()
+
+    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
+        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
+        if supervisor_context is None:
+            return build_specialist_unified_result(
+                task=task,
+                agent_name=self.name,
+                status="failed",
+                observation="missing supervisor runtime context for ResearchWriterAgent",
+                metadata={"reason": "missing_supervisor_runtime_context"},
+                execution_adapter="research_writer_agent",
+                delegate_type=self.__class__.__name__,
+            )
+        result = await self.execution_capability.run(
+            context=supervisor_context,
+            writer_agent=self,
+        )
+        metadata = {
+            **dict(result.metadata),
+            "executed_by": self.name,
+            "specialist_execution_path": "research_writer_agent",
+        }
+        return build_specialist_unified_result(
+            task=task,
+            agent_name=self.name,
+            status=result.status,
+            observation=result.observation,
+            metadata=metadata,
+            execution_adapter="research_writer_agent",
+            delegate_type=self.__class__.__name__,
+        )
 
     def synthesize(self, state: Any) -> ResearchReport:
         paper_search_service = self._require_search_service()

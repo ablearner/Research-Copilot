@@ -215,6 +215,27 @@ class ResearchSupervisorAgent:
         all_messages = list(agent_messages or [])
         results = self._evaluate_results(results=list(agent_results or []), agent_messages=all_messages)
         state = self._state_with_recent_result_signal(state, results=results)
+        context_oversize = self._context_exceeds_budget(context_slice)
+        if context_oversize:
+            already_compressed = any(
+                r.task_type == "compress_context" for r in results
+            )
+            if not already_compressed and not state.context_compressed:
+                return self._guardrail_worker_action(
+                    action_name="compress_context",
+                    state=state,
+                    all_messages=all_messages,
+                    results=results,
+                    planner_runs=planner_runs,
+                    replan_count=replan_count,
+                    thought="Context slice is too large for the LLM decision call; compressing now.",
+                    rationale="The serialized context exceeds the safe token budget. Running compress_context will shrink it so the supervisor LLM can make decisions.",
+                    phase="act",
+                    estimated_gain=0.7,
+                    estimated_cost=0.1,
+                    priority="high",
+                )
+            context_slice = self._truncate_context_slice(context_slice)
         intent_guardrail = self._intent_guardrail_decision(
             state=state,
             all_messages=all_messages,
@@ -242,27 +263,6 @@ class ResearchSupervisorAgent:
         )
         if guardrail_decision is not None:
             return guardrail_decision
-        context_oversize = self._context_exceeds_budget(context_slice)
-        if context_oversize:
-            already_compressed = any(
-                r.task_type == "compress_context" for r in results
-            )
-            if not already_compressed and not state.context_compressed:
-                return self._guardrail_worker_action(
-                    action_name="compress_context",
-                    state=state,
-                    all_messages=all_messages,
-                    results=results,
-                    planner_runs=planner_runs,
-                    replan_count=replan_count,
-                    thought="Context slice is too large for the LLM decision call; compressing now.",
-                    rationale="The serialized context exceeds the safe token budget. Running compress_context will shrink it so the supervisor LLM can make decisions.",
-                    phase="act",
-                    estimated_gain=0.7,
-                    estimated_cost=0.1,
-                    priority="high",
-                )
-            context_slice = self._truncate_context_slice(context_slice)
         available_actions = self._available_actions(state)
         input_data: dict[str, Any] = {
                 "state": self._state_snapshot(state),
@@ -303,7 +303,12 @@ class ResearchSupervisorAgent:
         replan_count: int,
     ) -> ResearchSupervisorDecision | None:
         intent_name = str(state.user_intent.get("intent") or "").strip()
-        if state.user_intent.get("needs_clarification"):
+        if (
+            state.user_intent.get("needs_clarification")
+            and not state.has_document_input
+            and not state.has_chart_input
+            and state.mode not in {"document", "chart"}
+        ):
             clarification = str(
                 state.user_intent.get("clarification_question")
                 or "当前追问的目标还不够明确，请补充你想继续哪个主题、哪篇论文或哪张图。"
@@ -323,6 +328,63 @@ class ResearchSupervisorAgent:
                 if str(item).strip()
             ]
         )
+        if (state.has_chart_input or state.mode == "chart") and not state.chart_understood:
+            return self._guardrail_worker_action(
+                action_name="understand_chart",
+                state=state,
+                all_messages=all_messages,
+                results=results,
+                planner_runs=planner_runs,
+                replan_count=replan_count,
+                thought=(
+                    "The request includes an explicit chart input, so the manager should first "
+                    "route it to the chart specialist before considering clarification or finalization."
+                ),
+                rationale=(
+                    "A concrete chart image is already available; asking for another paper or chart "
+                    "identifier would bypass the provided visual evidence."
+                ),
+                phase="act",
+                estimated_gain=0.9,
+                estimated_cost=0.18,
+                payload_overrides={
+                    "trigger": "chart_input_guardrail",
+                    "intent": intent_name or "chart_qa",
+                },
+                priority="high",
+            )
+        if (state.has_chart_input or state.mode == "chart") and state.chart_understood:
+            return self._decision(
+                action_name="finalize",
+                thought="The provided chart has already been understood by the chart specialist.",
+                rationale=(
+                    "The visual evidence was processed successfully, so the manager should stop without "
+                    "turning the stale figure-clarification intent into a user-facing warning."
+                ),
+                phase="commit",
+                estimated_gain=0.0,
+                estimated_cost=0.0,
+                stop_reason="Chart understanding completed.",
+                metadata={
+                    "decision_source": "manager_guardrail",
+                    "worker_agent": "ResearchSupervisorAgent",
+                    "state_update": {
+                        "pending_agent_messages": [],
+                        "agent_messages": all_messages,
+                        "agent_results": results,
+                        "completed_agent_task_ids": [
+                            result.task_id for result in results if result.status in {"succeeded", "skipped"}
+                        ],
+                        "failed_agent_task_ids": [result.task_id for result in results if result.status == "failed"],
+                        "replanned_failure_task_ids": [],
+                        "planner_runs": planner_runs,
+                        "replan_count": replan_count,
+                        "clarification_request": None,
+                        "active_plan_id": None,
+                        "new_topic_detected": state.new_topic_detected,
+                    },
+                },
+            )
         if intent_name == "literature_search":
             action_name: ResearchSupervisorActionName = "search_literature"
             rationale = "The parsed user intent indicates literature discovery rather than a direct general answer."
@@ -471,6 +533,48 @@ class ResearchSupervisorAgent:
                 phase="act",
                 estimated_gain=0.92,
                 estimated_cost=0.2,
+                payload_overrides=payload_overrides,
+                priority="high",
+            )
+        latest_result = results[-1] if results else None
+        qa_recovery_in_progress = bool(
+            latest_result
+            and latest_result.task_type in {"answer_question", "general_answer"}
+            and latest_result.status == "skipped"
+        )
+        if (
+            state.mode == "qa"
+            and state.has_task
+            and not state.answer_attempted
+            and not state.has_document_input
+            and not (state.has_chart_input and not state.chart_understood)
+            and not qa_recovery_in_progress
+        ):
+            payload_overrides = {
+                "trigger": "qa_mode_guardrail",
+                "intent": intent_name or "research_qa",
+            }
+            if resolved_paper_ids:
+                payload_overrides["paper_ids"] = resolved_paper_ids
+            return self._guardrail_worker_action(
+                action_name="answer_question",
+                state=state,
+                all_messages=all_messages,
+                results=results,
+                planner_runs=planner_runs,
+                replan_count=replan_count,
+                thought=(
+                    "The user explicitly selected QA mode, so the manager should route the turn "
+                    "to the task-level ResearchQAAgent instead of letting adjacent analysis or import "
+                    "actions steal the question."
+                ),
+                rationale=(
+                    "ResearchQAAgent is the canonical QA specialist under Supervisor; PaperAnalysisAgent "
+                    "remains available through explicit analysis actions, not as the default QA-mode worker."
+                ),
+                phase="act",
+                estimated_gain=0.82,
+                estimated_cost=0.18,
                 payload_overrides=payload_overrides,
                 priority="high",
             )
@@ -626,6 +730,7 @@ class ResearchSupervisorAgent:
             **dict(llm_output.payload),
         }
         payload = self._normalize_payload_paper_scope(action_name=action_name, payload=payload, state=state)
+        payload = self._normalize_supervisor_route_payload(action_name=action_name, payload=payload, state=state)
         instruction = llm_output.instruction.strip() or self._default_instruction_for_action(action_name, state, payload)
         active_message = AgentMessage(
             task_id=f"llm_task_{uuid4().hex[:12]}",
@@ -760,6 +865,74 @@ class ResearchSupervisorAgent:
                 normalized["paper_ids"] = self._dedupe_ids(intent_resolved_paper_ids)
                 normalized["paper_scope_source"] = "user_intent_resolver"
         return normalized
+
+    def _normalize_supervisor_route_payload(
+        self,
+        *,
+        action_name: ResearchSupervisorActionName,
+        payload: dict[str, Any],
+        state: ResearchSupervisorState,
+    ) -> dict[str, Any]:
+        if action_name != "answer_question":
+            return payload
+        normalized = dict(payload)
+        normalized["routing_authority"] = "supervisor_llm"
+        qa_route = str(normalized.get("qa_route") or "").strip()
+        if qa_route not in {"collection_qa", "document_drilldown", "chart_drilldown"}:
+            qa_route = self._infer_answer_question_route(state=state, payload=normalized)
+        normalized["qa_route"] = qa_route
+        return normalized
+
+    def _infer_answer_question_route(
+        self,
+        *,
+        state: ResearchSupervisorState,
+        payload: dict[str, Any],
+    ) -> str:
+        intent_name = str(state.user_intent.get("intent") or "").strip()
+        has_visual_payload = any(
+            str(payload.get(key) or "").strip()
+            for key in ("image_path", "chart_id", "page_id", "figure_id")
+        )
+        if state.has_chart_input or intent_name == "figure_qa" or has_visual_payload:
+            return "chart_drilldown"
+        route_text = f"{state.goal} {payload.get('question') or payload.get('goal') or ''}".lower()
+        collection_markers = (
+            "哪篇",
+            "哪些",
+            "优先",
+            "值得",
+            "推荐",
+            "对比",
+            "比较",
+            "which",
+            "recommend",
+            "compare",
+        )
+        if any(marker in route_text for marker in collection_markers):
+            return "collection_qa"
+        document_ids = [
+            str(item).strip()
+            for item in (payload.get("document_ids") or [])
+            if str(item).strip()
+        ]
+        paper_ids = [
+            str(item).strip()
+            for item in (payload.get("paper_ids") or [])
+            if str(item).strip()
+        ]
+        if document_ids:
+            return "document_drilldown"
+        if (
+            state.imported_document_count > 0
+            and (
+                state.route_mode == "paper_follow_up"
+                or intent_name in {"single_paper_qa", "document_qa"}
+                or len(paper_ids) == 1
+            )
+        ):
+            return "document_drilldown"
+        return "collection_qa"
 
     def _best_title_match(self, normalized_value: str, by_title: dict[str, str]) -> str | None:
         value_terms = set(normalized_value.split())
@@ -920,6 +1093,19 @@ class ResearchSupervisorAgent:
                 )
             if suggestion == "search_literature" and latest.task_type == "search_literature":
                 continue
+            payload_overrides = {
+                "trigger": "observation_envelope_suggestion",
+                "suggested_by": latest.task_type,
+            }
+            state_delta = observation.get("state_delta")
+            if suggestion == "answer_question" and isinstance(state_delta, dict):
+                recovery_route = str(state_delta.get("preferred_qa_route") or "").strip()
+                if recovery_route in {"collection_qa", "document_drilldown", "chart_drilldown"}:
+                    payload_overrides["qa_route"] = recovery_route
+                    payload_overrides["qa_route_source"] = "worker_observation"
+                    recovery_reason = state_delta.get("qa_recovery_reason")
+                    if recovery_reason:
+                        payload_overrides["qa_recovery_reason"] = recovery_reason
             return self._guardrail_worker_action(
                 action_name=suggestion,  # type: ignore[arg-type]
                 state=state,
@@ -932,10 +1118,7 @@ class ResearchSupervisorAgent:
                 phase="act",
                 estimated_gain=0.72,
                 estimated_cost=0.18,
-                payload_overrides={
-                    "trigger": "observation_envelope_suggestion",
-                    "suggested_by": latest.task_type,
-                },
+                payload_overrides=payload_overrides,
                 priority="high",
             )
         return None
@@ -1166,6 +1349,11 @@ class ResearchSupervisorAgent:
             payload=payload,
             state=state,
         )
+        payload = self._normalize_supervisor_route_payload(
+            action_name=action_name,
+            payload=payload,
+            state=state,
+        )
         instruction = self._default_instruction_for_action(action_name, state, payload)
         active_message = AgentMessage(
             task_id=f"guardrail_task_{uuid4().hex[:12]}",
@@ -1229,7 +1417,7 @@ class ResearchSupervisorAgent:
                 )
             )
         if state.has_document_input and not state.document_understood:
-            actions.append(self._action_descriptor("understand_document", "DocumentTools", "Parse and ground the uploaded document before other research actions.", state=state))
+            actions.append(self._action_descriptor("understand_document", "ResearchDocumentAgent", "Parse and ground the uploaded document before other research actions.", state=state))
         intent_name = str(state.user_intent.get("intent") or "").strip()
         if (state.has_chart_input and not state.chart_understood) or intent_name == "figure_qa":
             actions.append(self._action_descriptor("understand_chart", "ChartAnalysisAgent", "Understand or analyze a chart, figure, or diagram from an uploaded image.", state=state))
@@ -1241,7 +1429,7 @@ class ResearchSupervisorAgent:
                 self._action_descriptor("write_review", "ResearchWriterAgent", "Synthesize the current research workspace into a grounded review or progress report.", state=state),
                 self._action_descriptor("import_papers", "ResearchKnowledgeAgent", "Import promising papers into the local research workspace when the user wants grounded QA, evidence retrieval, or local ingestion.", state=state),
                 self._action_descriptor("sync_to_zotero", "ResearchKnowledgeAgent", "Sync targeted candidate papers to Zotero when the user asks to import, save, or add papers into their Zotero library.", state=state),
-                self._action_descriptor("answer_question", "ResearchKnowledgeAgent", "Answer a text-based collection question using the current imported evidence and workspace.", state=state),
+                self._action_descriptor("answer_question", "ResearchQAAgent", "Answer a collection, document, or chart question using the selected QA route and current workspace.", state=state),
                 self._action_descriptor("analyze_papers", "PaperAnalysisAgent", "Analyze the selected papers and answer comparison, explanation, or recommendation questions.", state=state),
                 self._action_descriptor("compress_context", "ResearchKnowledgeAgent", "Compress a large workspace into reusable summaries before deeper reasoning.", state=state),
             ]
@@ -1509,16 +1697,18 @@ class ResearchSupervisorAgent:
             "write_review": "ResearchWriterAgent",
             "import_papers": "ResearchKnowledgeAgent",
             "sync_to_zotero": "ResearchKnowledgeAgent",
-            "answer_question": "ResearchKnowledgeAgent",
+            "answer_question": "ResearchQAAgent",
             "general_answer": "GeneralAnswerAgent",
             "recommend_from_preferences": "PreferenceMemoryAgent",
             "analyze_papers": "PaperAnalysisAgent",
             "compress_context": "ResearchKnowledgeAgent",
-            "understand_document": "DocumentTools",
+            "understand_document": "ResearchDocumentAgent",
             "understand_chart": "ChartAnalysisAgent",
             "analyze_paper_figures": "ChartAnalysisAgent",
             "finalize": "ResearchSupervisorAgent",
         }
+        if action_name == "answer_question":
+            return "ResearchQAAgent"
         if worker_agent and worker_agent.strip():
             return worker_agent.strip()
         return defaults[action_name]
@@ -2188,6 +2378,8 @@ class ResearchSupervisorAgent:
         worker_agent = self._worker_for_action(action_name, None)
         plan_id = f"fallback_plan_{uuid4().hex[:12]}"
         payload = self._default_payload_for_action(action_name, state)
+        payload = self._normalize_payload_paper_scope(action_name=action_name, payload=payload, state=state)
+        payload = self._normalize_supervisor_route_payload(action_name=action_name, payload=payload, state=state)
         instruction = self._default_instruction_for_action(action_name, state, payload)
         active_message = AgentMessage(
             task_id=f"fallback_task_{uuid4().hex[:12]}",
@@ -2442,9 +2634,9 @@ class ResearchSupervisorAgent:
         if message.task_type == "answer_question":
             return {
                 "action_name": "answer_question",
-                "worker_agent": "ResearchKnowledgeAgent",
-                "thought": "Manager 将问答交给 ResearchKnowledgeAgent，让它在当前研究空间内完成检索与 grounded QA。",
-                "rationale": "Collection QA should be owned by the knowledge worker so evidence retrieval and answer composition remain coupled without a sub-manager.",
+                "worker_agent": "ResearchQAAgent",
+                "thought": "Manager 将问答交给 ResearchQAAgent，让它按 Supervisor 选择的 QA route 完成 grounded QA。",
+                "rationale": "Task-level QA should be owned by the QA specialist while RAG and retrieval remain tool-layer capabilities.",
                 "phase": "reflect",
                 "estimated_gain": 0.78,
                 "estimated_cost": 0.28,
@@ -2486,7 +2678,7 @@ class ResearchSupervisorAgent:
         if message.task_type == "understand_document":
             return {
                 "action_name": "understand_document",
-                "worker_agent": "DocumentTools",
+                "worker_agent": "ResearchDocumentAgent",
                 "thought": "Planner 把文档理解排在最前面，先解析用户提供的文档证据。",
                 "rationale": "Document understanding turns a raw file into indexed evidence that the research loop can reuse.",
                 "phase": "act",
