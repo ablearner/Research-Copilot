@@ -120,7 +120,7 @@ class PaperImportService:
             timeout=self.timeout_seconds,
             follow_redirects=True,
             headers=self._browser_headers(),
-            trust_env=False,
+            trust_env=True,
         ) as client:
             candidate_urls: list[str] = []
             if pdf_url:

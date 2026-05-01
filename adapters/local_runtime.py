@@ -498,13 +498,19 @@ class LocalDocumentParser(PdfService, OcrService, LayoutService):
         except Exception:
             return None, None
 
-    def _chunks(self, text: str, size: int = 900) -> list[str]:
+    def _chunks(self, text: str, size: int = 1500, overlap: int = 200) -> list[str]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
         chunks: list[str] = []
         for paragraph in paragraphs or [text.strip()]:
-            while paragraph:
-                chunks.append(paragraph[:size].strip())
-                paragraph = paragraph[size:].strip()
+            start = 0
+            while start < len(paragraph):
+                end = start + size
+                chunk = paragraph[start:end].strip()
+                if chunk:
+                    chunks.append(chunk)
+                if end >= len(paragraph):
+                    break
+                start = end - overlap
         return chunks or [""]
 
     def _content_type(self, path: Path) -> str:

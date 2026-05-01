@@ -98,7 +98,7 @@ Browser (http://localhost:3000)
 - `services/research/`
   research 主业务、workspace 持久化和 supervisor orchestration
 - `agents/`
-  高层 specialist agents（9 个：Supervisor、Writer、PreferenceMemory、Knowledge、LiteratureScout、ChartAnalysis、GeneralAnswer、PaperAnalysis、ResearchKnowledge）
+  高层 specialist agents（10 个：Supervisor、Writer、PreferenceMemory、Knowledge、LiteratureScout、ChartAnalysis、GeneralAnswer、PaperAnalysis、ResearchQA、ResearchDocument）
 - `rag_runtime/`
   底层 RAG runtime
 - `tools/`
@@ -345,14 +345,13 @@ requires:
 # 1. 启动 Milvus（Docker Compose，含 etcd + minio + milvus）
 cd /home/myc/Research-Copilot
 docker-compose -f docker-compose.milvus.yml up -d
-# 等待端口 19530 就绪（约 15-30 秒）
-# 检查：curl -s http://localhost:9091/healthz  →  应返回 "OK"
+# 等待端口 19531 就绪（约 15-30 秒）
+# 检查：curl -s http://localhost:9092/healthz  →  应返回 "OK"
 
-# 2. 启动 Neo4j
-export JAVA_HOME=/home/myc/miniconda3/envs/Research-Copilot/lib/jvm
-/home/myc/neo4j/bin/neo4j start
-# 等待端口 7687 就绪
-# 检查：ss -tlnp | grep 7687
+# 2. 启动 Neo4j（Docker 容器，数据挂载在 .data/neo4j/）
+docker start kepler-neo4j
+# 等待端口 7687 就绪（约 10-15 秒）
+# 检查：docker exec kepler-neo4j cypher-shell -u neo4j -p neo4j1234 'RETURN 1'
 
 # 3. 启动 Zotero Bridge（WSL 环境，需要 Windows 上先打开 Zotero 桌面程序）
 bash scripts/wsl_zotero_bridge.sh start
@@ -385,8 +384,8 @@ npm run dev
 
 | 服务 | 端口 | 启动方式 |
 |------|------|------|
-| Milvus | 19530 | `docker-compose -f docker-compose.milvus.yml up -d`（在 Research-Copilot 目录下） |
-| Neo4j | 7474/7687 | `/home/myc/neo4j/bin/neo4j start` |
+| Milvus | 19531 (映射到容器内 19530) | `docker-compose -f docker-compose.milvus.yml up -d`（在 Research-Copilot 目录下） |
+| Neo4j | 7474/7687 | `docker start kepler-neo4j`（Docker 容器，数据在 `.data/neo4j/`） |
 | Zotero Bridge | 23119 | `bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
 | 前端 (Next.js) | 3000 | `cd web && npm run dev` |
@@ -431,9 +430,8 @@ npm run dev
 
 - [docs/系统运行指南.md](docs/系统运行指南.md)
 - [docs/系统完整运行流程说明.md](docs/系统完整运行流程说明.md)
-- [docs/项目学习和使用文档.md](docs/项目学习和使用文档.md)
-- [docs/系统学习与面试指南.md](docs/系统学习与面试指南.md)
 - [docs/Milvus学习文档.md](docs/Milvus学习文档.md)
-- [docs/MySQL数据库使用说明.md](docs/MySQL数据库使用说明.md)
+- [docs/rag流程详解.md](docs/rag流程详解.md)
+- [docs/Zotero本地连接指南.md](docs/Zotero本地连接指南.md)
 - [docs/当前项目结构图.md](docs/当前项目结构图.md)
 - [docs/CLI终端使用文档.md](docs/CLI终端使用文档.md)

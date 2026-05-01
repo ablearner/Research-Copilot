@@ -179,7 +179,10 @@ async def run_research_agent_stream(
             while not task.done():
                 try:
                     event = await asyncio.wait_for(progress_queue.get(), timeout=2.0)
-                    yield f"event: progress\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if event.get("type") == "token":
+                        yield f"event: token\ndata: {json.dumps({'text': event['text']}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"event: progress\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: heartbeat\ndata: {}\n\n"
             result = task.result()

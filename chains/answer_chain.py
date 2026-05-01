@@ -56,9 +56,10 @@ class AnswerChain:
             "retrieval_result": compact_retrieval_result,
             "rules": {
                 "answer_only_from_evidence": True,
-                "return_insufficient_when_unsupported": True,
+                "return_insufficient_when_unsupported": False,
                 "do_not_use_external_knowledge": True,
                 "cite_text_chart_and_graph_evidence_when_relevant": True,
+                "synthesize_partial_evidence_into_comprehensive_answer": True,
             },
             "memory_context": {
                 "session_context": session_context or {},
@@ -86,7 +87,7 @@ class AnswerChain:
 
     def _compact_evidence_bundle(self, evidence_bundle: EvidenceBundle) -> dict[str, Any]:
         evidences: list[dict[str, Any]] = []
-        for evidence in evidence_bundle.evidences[:5]:
+        for evidence in evidence_bundle.evidences[:10]:
             evidences.append(
                 {
                     "id": evidence.id,
@@ -95,7 +96,7 @@ class AnswerChain:
                     "page_number": evidence.page_number,
                     "source_type": evidence.source_type,
                     "source_id": evidence.source_id,
-                    "snippet": (evidence.snippet or "")[:800],
+                    "snippet": (evidence.snippet or "")[:1500],
                     "score": evidence.score,
                     "metadata": {
                         key: value
@@ -150,7 +151,7 @@ class AnswerChain:
                     "source_type": hit.source_type,
                     "source_id": hit.source_id,
                     "document_id": hit.document_id,
-                    "content": (hit.content or "")[:500],
+                    "content": (hit.content or "")[:1000],
                     "vector_score": hit.vector_score,
                     "graph_score": hit.graph_score,
                     "merged_score": hit.merged_score,

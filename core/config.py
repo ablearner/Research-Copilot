@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     dashscope_api_key: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
-    openai_timeout_seconds: float = 60.0
+    openai_timeout_seconds: float = 180.0
     openai_max_retries: int = 2
     google_api_key: str | None = None
     llm_provider: str = "local"
@@ -33,12 +33,12 @@ class Settings(BaseSettings):
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_text_batch_size: int = 16
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
     reranker_batch_size: int = 16
     reranker_max_length: int = 512
-    reranker_allow_download: bool = False
+    reranker_allow_download: bool = True
     reranker_cache_dir: str | None = None
-    reranker_unavailable_policy: str = "error"
+    reranker_unavailable_policy: str = "heuristic"
     vision_model: str | None = None
     chart_vision_provider: str | None = None
     chart_vision_model: str | None = None

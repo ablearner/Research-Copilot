@@ -191,7 +191,7 @@ class ResearchIntentResolver:
     name = "ResearchIntentResolver"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
-        self.llm_adapter = llm_adapter
+        pass
 
     async def resolve_async(
         self,
@@ -206,7 +206,7 @@ class ResearchIntentResolver:
         has_document_input: bool = False,
         session_topic: str | None = None,
     ) -> ResearchUserIntentResult:
-        heuristic_result = self.resolve(
+        return self.resolve(
             message=message,
             has_task=has_task,
             candidate_paper_count=candidate_paper_count,
@@ -217,44 +217,6 @@ class ResearchIntentResolver:
             has_document_input=has_document_input,
             session_topic=session_topic,
         )
-        if self.llm_adapter is None or heuristic_result.confidence >= 0.8:
-            return heuristic_result
-        try:
-            llm_result = await self.llm_adapter.generate_structured(
-                prompt=(
-                    "你是科研助手的轻量意图解析器。请根据用户输入、当前任务上下文、已选论文、活动论文焦点、"
-                    "图像/文档输入情况，判断最可能的用户意图。"
-                    "如果用户用“这篇”“第一篇”“p1”“标题简称”等方式引用候选论文，请结合 candidate_papers、"
-                    "active_paper_ids、selected_paper_ids 解析出 resolved_paper_ids。"
-                    "主路径依赖你的语义理解，不要机械依赖关键词或固定映射。"
-                    "关键词和 marker 只能作为弱信号，不能机械匹配；请优先理解用户真实语义。"
-                    "重要：如果用户提到数据源（如 arxiv、ieee、semantic scholar 等），"
-                    "将其放入 source_constraints 列表，并在 extracted_topic 中剥离这些来源名称，"
-                    "只保留纯粹的研究主题。例如“在arxiv上找LLM agent论文”→ extracted_topic='LLM agent', source_constraints=['arxiv']。"
-                    "重要：session_topic 是当前会话正在研究的主题。如果用户的新请求与 session_topic 是完全不同的研究领域，"
-                    "请将 is_new_topic 设为 true。例如会话主题是“自然语言处理”而用户现在问“医学图像处理”→ is_new_topic=true。"
-                    "如果 session_topic 为空或用户在追问同一主题的不同方面，is_new_topic 应为 false。"
-                    "重要：如果用户明确提到了想要的论文数量（如“找10篇”“20 papers”“三十篇论文”），"
-                    "请将 requested_paper_count 设为该数字。如果用户没有提到具体数量，requested_paper_count 应为 null。"
-                    "只返回结构化字段，不要执行任务。"
-                ),
-                input_data={
-                    "message": message,
-                    "has_task": has_task,
-                    "candidate_paper_count": candidate_paper_count,
-                    "candidate_papers": list(candidate_papers or [])[:20],
-                    "active_paper_ids": active_paper_ids,
-                    "selected_paper_ids": selected_paper_ids,
-                    "has_visual_anchor": has_visual_anchor,
-                    "has_document_input": has_document_input,
-                    "session_topic": session_topic or "",
-                    "heuristic_hint": heuristic_result.model_dump(mode="json"),
-                },
-                response_model=ResearchUserIntentResult,
-            )
-            return llm_result.model_copy(update={"source": "llm"})
-        except Exception:
-            return heuristic_result
 
     def resolve(
         self,
@@ -384,7 +346,10 @@ class ResearchIntentResolver:
                     else None
                 ),
             )
-        if has_any(_SEARCH_MARKERS):
+        _has_single_paper_ref = bool(resolved_ordinal_ids) or any(
+            m in normalized for m in _SINGLE_PAPER_MARKERS
+        )
+        if has_any(_SEARCH_MARKERS) and not _has_single_paper_ref:
             return self._result(
                 "literature_search", "collection", 0.78, markers,
                 "Question appears to need literature discovery.",

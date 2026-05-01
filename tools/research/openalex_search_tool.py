@@ -48,7 +48,7 @@ class OpenAlexSearchTool:
         }
         if self.mailto:
             params["mailto"] = self.mailto
-        async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=True) as client:
             response = await client.get(f"{self.base_url}/works", params=params)
             response.raise_for_status()
         payload = response.json()

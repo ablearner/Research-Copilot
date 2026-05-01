@@ -56,7 +56,7 @@ class DashScopeLLMAdapter(BaseLLMAdapter):
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": content},
             ],
-            json_mode=True,
+            json_mode=False,
         )
         return self._validate_response(self._extract_structured_payload(payload, response_model), response_model)
 
@@ -87,7 +87,7 @@ class DashScopeLLMAdapter(BaseLLMAdapter):
                     ],
                 },
             ],
-            json_mode=True,
+            json_mode=False,
         )
         return self._validate_response(self._extract_structured_payload(payload, response_model), response_model)
 

@@ -95,7 +95,7 @@ class IEEEMetadataSearchTool:
             "start_year": max(1900, cutoff.year),
             "end_year": now.year,
         }
-        async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=True) as client:
             response = await client.get(self.base_url, params=params)
             response.raise_for_status()
         payload = response.json()

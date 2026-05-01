@@ -53,7 +53,7 @@ class ArxivSearchTool:
             timeout=self.timeout_seconds,
             headers={"User-Agent": self.user_agent},
             follow_redirects=True,
-            trust_env=False,
+            trust_env=True,
         ) as client:
             response = await self._get_with_retry(client, params=params)
         papers = self._parse_feed(response.text, days_back=days_back)

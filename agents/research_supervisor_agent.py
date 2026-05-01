@@ -106,6 +106,8 @@ class ResearchSupervisorDecision:
 
 
 class ResearchSupervisorLLMDecision(BaseModel):
+    resolved_intent: str = ""
+    resolved_paper_ids: list[str] = Field(default_factory=list)
     action_name: str
     worker_agent: str | None = None
     instruction: str = ""
@@ -236,6 +238,7 @@ class ResearchSupervisorAgent:
                     priority="high",
                 )
             context_slice = self._truncate_context_slice(context_slice)
+        guardrail_hints: list[dict[str, Any]] = []
         intent_guardrail = self._intent_guardrail_decision(
             state=state,
             all_messages=all_messages,
@@ -244,7 +247,12 @@ class ResearchSupervisorAgent:
             replan_count=replan_count,
         )
         if intent_guardrail is not None:
-            return intent_guardrail
+            guardrail_hints.append({
+                "source": "intent_guardrail",
+                "suggested_action": intent_guardrail.action_name,
+                "thought": intent_guardrail.thought,
+                "rationale": intent_guardrail.rationale,
+            })
         constrained_decision = self._workflow_constraint_decision(
             state=state,
             all_messages=all_messages,
@@ -253,7 +261,12 @@ class ResearchSupervisorAgent:
             replan_count=replan_count,
         )
         if constrained_decision is not None:
-            return constrained_decision
+            guardrail_hints.append({
+                "source": "workflow_constraint",
+                "suggested_action": constrained_decision.action_name,
+                "thought": constrained_decision.thought,
+                "rationale": constrained_decision.rationale,
+            })
         guardrail_decision = self._guardrail_decision(
             state=state,
             all_messages=all_messages,
@@ -262,7 +275,12 @@ class ResearchSupervisorAgent:
             replan_count=replan_count,
         )
         if guardrail_decision is not None:
-            return guardrail_decision
+            guardrail_hints.append({
+                "source": "post_execution_guardrail",
+                "suggested_action": guardrail_decision.action_name,
+                "thought": guardrail_decision.thought,
+                "rationale": guardrail_decision.rationale,
+            })
         available_actions = self._available_actions(state)
         input_data: dict[str, Any] = {
                 "state": self._state_snapshot(state),
@@ -275,14 +293,21 @@ class ResearchSupervisorAgent:
                 "planner_runs": planner_runs,
                 "replan_count": replan_count,
                 "context_slice": self._serialize_context_slice(context_slice),
+                "guardrail_hints": guardrail_hints,
         }
         if state.skill_context:
             input_data["active_skill_instructions"] = state.skill_context
-        llm_output = await self.llm_adapter.generate_structured(
-            prompt=self._llm_prompt(),
-            input_data=input_data,
-            response_model=ResearchSupervisorLLMDecision,
-        )
+        try:
+            llm_output = await self.llm_adapter.generate_structured(
+                prompt=self._llm_prompt(),
+                input_data=input_data,
+                response_model=ResearchSupervisorLLMDecision,
+            )
+        except (LLMAdapterError, ValueError):
+            for _gr in (intent_guardrail, constrained_decision, guardrail_decision):
+                if _gr is not None:
+                    return _gr
+            raise
         return self._decision_from_llm_output(
             llm_output=llm_output,
             state=state,
@@ -725,6 +750,10 @@ class ResearchSupervisorAgent:
         worker_agent = self._worker_for_action(action_name, llm_output.worker_agent)
         plan_id = f"llm_plan_{uuid4().hex[:12]}"
         task_type = self._task_type_for_action(action_name)
+        if llm_output.resolved_paper_ids:
+            existing = list(state.user_intent.get("resolved_paper_ids") or [])
+            merged = self._dedupe_ids(llm_output.resolved_paper_ids + existing)
+            state.user_intent["resolved_paper_ids"] = merged
         payload = {
             **self._default_payload_for_action(action_name, state),
             **dict(llm_output.payload),
@@ -982,6 +1011,15 @@ class ResearchSupervisorAgent:
         )
         if reroute_decision is not None:
             return reroute_decision
+        general_answer_done = self._general_answer_completion_decision(
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+        )
+        if general_answer_done is not None:
+            return general_answer_done
         suggested_action_decision = self._suggested_next_action_decision(
             state=state,
             all_messages=all_messages,
@@ -1160,6 +1198,58 @@ class ResearchSupervisorAgent:
                 "reroute_from": "general_answer",
             },
             priority="high",
+        )
+
+    def _general_answer_completion_decision(
+        self,
+        *,
+        state: ResearchSupervisorState,
+        all_messages: list[AgentMessage],
+        results: list[AgentResultMessage],
+        planner_runs: int,
+        replan_count: int,
+    ) -> ResearchSupervisorDecision | None:
+        if not results:
+            return None
+        latest = results[-1]
+        if latest.task_type != "general_answer" or latest.status == "skipped":
+            return None
+        payload = dict(latest.payload or {})
+        answer_type = str(payload.get("answer_type") or "").strip()
+        if latest.status == "failed" or answer_type in {"provider_timeout", "provider_error"}:
+            stop_reason = "通用回答模型暂时不可用，请稍后重试。"
+            thought = "The general-answer provider did not produce a normal answer, so the manager should stop this chat turn without replanning it as research."
+            rationale = "Provider unavailability in a general chat branch is not evidence that the user has a broad research goal."
+        else:
+            stop_reason = "General answer completed."
+            thought = "The general-answer worker already handled the user request."
+            rationale = "A completed general chat turn should not call the manager LLM again or branch into research tools."
+        return self._decision(
+            action_name="finalize",
+            thought=thought,
+            rationale=rationale,
+            phase="commit",
+            estimated_gain=0.0,
+            estimated_cost=0.0,
+            stop_reason=stop_reason,
+            metadata={
+                "decision_source": "manager_guardrail",
+                "worker_agent": "ResearchSupervisorAgent",
+                "state_update": {
+                    "pending_agent_messages": [],
+                    "agent_messages": all_messages,
+                    "agent_results": results,
+                    "completed_agent_task_ids": [
+                        result.task_id for result in results if result.status in {"succeeded", "skipped"}
+                    ],
+                    "failed_agent_task_ids": [result.task_id for result in results if result.status == "failed"],
+                    "replanned_failure_task_ids": [],
+                    "planner_runs": planner_runs,
+                    "replan_count": replan_count,
+                    "clarification_request": None,
+                    "active_plan_id": None,
+                },
+            },
         )
 
     def _evidence_gap_search_decision(
@@ -1522,7 +1612,16 @@ class ResearchSupervisorAgent:
             "You are the autonomous research manager for a multi-agent literature research system.\n"
             "Choose exactly one next action. Prefer worker autonomy over fixed pipelines.\n"
             "Use the available actions, current workspace state, recent task outcomes, and evidence gaps.\n"
-            "Use state.user_intent as a hint, not as a hard rule. If it says needs_clarification, prefer clarify_request with a clear clarification question.\n"
+            "You will receive guardrail_hints from the rule-based pre-screening layer. "
+            "These are keyword-based suggestions that may be semantically incorrect. "
+            "Always interpret the user's message holistically and override any guardrail hint "
+            "when the true semantic intent of the user's request disagrees with the suggested action.\n"
+            "Use state.user_intent as a hint, not as a hard rule. "
+            "If it says needs_clarification, evaluate whether clarification is truly needed "
+            "based on the full context — for example, if there is exactly 1 imported document and the user says '这篇论文', "
+            "it almost certainly refers to that document rather than requiring clarification; "
+            "if the user says '讲解导入论文的方法', the word '导入' is part of the noun phrase meaning 'the imported paper', "
+            "not an import command.\n"
             "Use state.route_mode, state.active_thread_topic, state.topic_continuity_score, and state.new_topic_detected to decide whether to continue the current research thread or start a fresh discovery path.\n"
             "Use state.latest_result_task_type, state.latest_progress_made, state.latest_result_confidence, state.latest_missing_inputs, and state.latest_suggested_next_actions as strong feedback from the most recent worker execution.\n"
             "When state.route_mode is general_chat or state.should_ignore_research_context is true, avoid inheriting the previous paper scope unless the user explicitly re-enters it.\n"
@@ -1543,61 +1642,80 @@ class ResearchSupervisorAgent:
             "leave it empty only when the user clearly asks about the whole collection or a new search.\n"
             "For answer_question, you must also decide payload.qa_route as one of collection_qa, document_drilldown, or chart_drilldown. "
             "Downstream services should execute your route instead of deciding it again.\n"
-            "Keep payload fields compact and directly actionable."
+            "Keep payload fields compact and directly actionable.\n"
+            "Before choosing an action, first resolve the user's true intent from their message. "
+            "The heuristic intent in state.user_intent is a hint but may be inaccurate — "
+            "override it with resolved_intent if you disagree. "
+            "If the user refers to papers by ordinal, title, or phrases like '这篇'/'第一篇'/'p1', "
+            "resolve the actual paper_ids from state.candidate_papers into resolved_paper_ids."
         )
 
     def _state_snapshot(self, state: ResearchSupervisorState) -> dict[str, Any]:
-        return {
+        snapshot: dict[str, Any] = {
             "goal": state.goal,
             "mode": state.mode,
             "route_mode": state.route_mode,
-            "active_thread_id": state.active_thread_id,
-            "active_thread_topic": state.active_thread_topic,
-            "topic_continuity_score": state.topic_continuity_score,
-            "new_topic_detected": state.new_topic_detected,
-            "should_ignore_research_context": state.should_ignore_research_context,
-            "task_id": state.task_id,
             "has_task": state.has_task,
             "has_report": state.has_report,
             "paper_count": state.paper_count,
             "imported_document_count": state.imported_document_count,
             "has_document_input": state.has_document_input,
             "has_chart_input": state.has_chart_input,
-            "document_understood": state.document_understood,
-            "chart_understood": state.chart_understood,
-            "has_import_candidates": state.has_import_candidates,
-            "importable_paper_count": state.importable_paper_count,
-            "selected_paper_count": state.selected_paper_count,
+            "workspace_stage": state.workspace_stage,
+            "last_action_name": state.last_action_name,
+            "latest_result_task_type": state.latest_result_task_type,
+            "latest_result_status": state.latest_result_status,
+            "user_intent": dict(state.user_intent),
+        }
+        _conditional = {
+            "active_thread_topic": state.active_thread_topic,
+            "topic_continuity_score": state.topic_continuity_score,
+            "new_topic_detected": state.new_topic_detected,
+            "should_ignore_research_context": state.should_ignore_research_context,
             "active_paper_ids": list(state.active_paper_ids),
-            "auto_import": state.auto_import,
-            "import_top_k": state.import_top_k,
             "import_attempted": state.import_attempted,
             "answer_attempted": state.answer_attempted,
-            "open_todo_count": state.open_todo_count,
-            "evidence_gap_count": state.evidence_gap_count,
-            "workspace_stage": state.workspace_stage,
-            "workspace_ready": state.workspace_ready,
-            "paper_analysis_requested": state.paper_analysis_requested,
-            "preference_recommendation_requested": state.preference_recommendation_requested,
-            "known_interest_count": state.known_interest_count,
-            "analysis_focus": state.analysis_focus,
-            "comparison_dimensions": list(state.comparison_dimensions),
-            "recommendation_goal": state.recommendation_goal,
-            "recommendation_top_k": state.recommendation_top_k,
             "context_compression_needed": state.context_compression_needed,
             "context_compressed": state.context_compressed,
             "paper_analysis_completed": state.paper_analysis_completed,
-            "last_action_name": state.last_action_name,
+            "paper_analysis_requested": state.paper_analysis_requested,
+            "preference_recommendation_requested": state.preference_recommendation_requested,
+            "analysis_focus": state.analysis_focus,
             "failed_actions": list(state.failed_actions),
-            "latest_result_task_type": state.latest_result_task_type,
-            "latest_result_status": state.latest_result_status,
             "latest_progress_made": state.latest_progress_made,
             "latest_result_confidence": state.latest_result_confidence,
             "latest_missing_inputs": list(state.latest_missing_inputs),
             "latest_suggested_next_actions": list(state.latest_suggested_next_actions),
-            "candidate_papers": list(state.candidate_papers),
-            "user_intent": dict(state.user_intent),
         }
+        _defaults: dict[str, Any] = {
+            "active_thread_topic": None,
+            "topic_continuity_score": None,
+            "new_topic_detected": False,
+            "should_ignore_research_context": False,
+            "active_paper_ids": [],
+            "import_attempted": False,
+            "answer_attempted": False,
+            "context_compression_needed": False,
+            "context_compressed": False,
+            "paper_analysis_completed": False,
+            "paper_analysis_requested": False,
+            "preference_recommendation_requested": False,
+            "analysis_focus": None,
+            "failed_actions": [],
+            "latest_progress_made": None,
+            "latest_result_confidence": None,
+            "latest_missing_inputs": [],
+            "latest_suggested_next_actions": [],
+        }
+        for key, value in _conditional.items():
+            if value != _defaults.get(key):
+                snapshot[key] = value
+        if state.candidate_papers:
+            snapshot["candidate_papers"] = [
+                {"index": i + 1, "paper_id": p.get("paper_id", ""), "title": p.get("title", "")}
+                for i, p in enumerate(list(state.candidate_papers)[:10])
+            ]
+        return snapshot
 
     def _message_snapshot(self, message: AgentMessage) -> dict[str, Any]:
         return {
@@ -1848,14 +1966,23 @@ class ResearchSupervisorAgent:
         }
         return schemas[action_name]
 
+    _SERIALIZE_MAX_HISTORY_TURNS: int = 3
+    _SERIALIZE_MAX_SUMMARIES: int = 5
+
     def _serialize_context_slice(self, context_slice: ResearchContextSlice | None) -> dict[str, Any]:
         if context_slice is None:
             return {}
         if hasattr(context_slice, "model_dump"):
-            return context_slice.model_dump(mode="json")
-        if isinstance(context_slice, dict):
-            return dict(context_slice)
-        return {}
+            data = context_slice.model_dump(mode="json")
+        elif isinstance(context_slice, dict):
+            data = dict(context_slice)
+        else:
+            return {}
+        if "session_history" in data:
+            data["session_history"] = data["session_history"][-self._SERIALIZE_MAX_HISTORY_TURNS:]
+        if "relevant_summaries" in data:
+            data["relevant_summaries"] = data["relevant_summaries"][:self._SERIALIZE_MAX_SUMMARIES]
+        return data
 
     def _llm_unavailable_decision(
         self,
@@ -1891,6 +2018,37 @@ class ResearchSupervisorAgent:
             "active_plan_id": active_plan_id,
             "new_topic_detected": state.new_topic_detected,
         }
+        latest_result = results[-1] if results else None
+        intent_name = str(state.user_intent.get("intent") or "").strip()
+        is_auto_general_chat = state.mode == "auto" and (
+            state.route_mode == "general_chat"
+            or intent_name == "general_answer"
+        )
+        latest_general_answer_result = (
+            latest_result is not None
+            and latest_result.task_type == "general_answer"
+            and latest_result.status != "skipped"
+        )
+        if is_auto_general_chat or latest_general_answer_result:
+            return self._decision(
+                action_name="finalize",
+                thought="The general-answer provider is unavailable, so the manager should stop without converting the turn into a research clarification.",
+                rationale="A failed general chat turn is not evidence that the user has a broad research goal.",
+                phase="commit",
+                estimated_gain=0.0,
+                estimated_cost=0.0,
+                stop_reason="通用回答模型暂时不可用，请稍后重试。",
+                metadata={
+                    "decision_source": "guardrail",
+                    "worker_agent": "ResearchSupervisorAgent",
+                    "llm_error": reason,
+                    "state_update": {
+                        **state_update,
+                        "pending_agent_messages": [],
+                        "clarification_request": None,
+                    },
+                },
+            )
         fallback = self._fallback_rule_decision(
             state,
             planner_runs=planner_runs,

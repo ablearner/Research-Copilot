@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -10,6 +13,8 @@ from services.research.research_specialist_capabilities import (
     GeneralAnswerCapability,
     build_specialist_unified_result,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GeneralAnswerResult(BaseModel):
@@ -24,15 +29,18 @@ class GeneralAnswerAgent:
     """Worker agent for general non-research questions."""
 
     name = "GeneralAnswerAgent"
+    _STREAMING_DEFAULT_CONFIDENCE: float = 0.7
 
     def __init__(
         self,
         *,
         llm_adapter: BaseLLMAdapter | None = None,
         execution_capability: GeneralAnswerCapability | None = None,
+        llm_timeout_seconds: float = 30.0,
     ) -> None:
         self.llm_adapter = llm_adapter
         self.execution_capability = execution_capability or GeneralAnswerCapability()
+        self.llm_timeout_seconds = llm_timeout_seconds
 
     async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
         supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
@@ -72,6 +80,7 @@ class GeneralAnswerAgent:
         *,
         question: str,
         conversation_context: dict[str, Any] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
     ) -> GeneralAnswerResult:
         if self.llm_adapter is None:
             return GeneralAnswerResult(
@@ -79,26 +88,66 @@ class GeneralAnswerAgent:
                     "这是一个通用问题，但当前没有可用的通用回答模型。"
                     "配置 LLM 后，GeneralAnswerAgent 就可以直接回答这类问题。"
                 ),
-                confidence=0.18,
+                confidence=0.5,
                 answer_type="fallback",
                 warnings=["missing_llm_adapter"],
             )
+        prompt = (
+            "你是 GeneralAnswerAgent，负责回答不需要论文检索、RAG、本地文档、图表解析或研究工作区操作的通用问题。\n"
+            "请直接回答用户问题，语言尽量跟随用户输入。\n"
+            "如果问题明显更适合科研检索、论文问答、文档理解或图表理解，请在 warnings 中加入 route_mismatch，"
+            "并把 answer_type 设为 reroute_hint，同时给出一个简短帮助性回答。\n"
+            "不要伪造论文证据、网页检索结果或本地已导入内容。"
+        )
+        input_data = {
+            "question": question,
+            "conversation_context": conversation_context or {},
+        }
+        if on_token is not None:
+            try:
+                full_text = await asyncio.wait_for(
+                    self.llm_adapter.generate_streaming(
+                        prompt=prompt,
+                        input_data=input_data,
+                        on_token=on_token,
+                    ),
+                    timeout=max(1.0, float(self.llm_timeout_seconds)),
+                )
+                return GeneralAnswerResult(answer=full_text, confidence=self._STREAMING_DEFAULT_CONFIDENCE, answer_type="streaming")
+            except TimeoutError:
+                logger.warning("GeneralAnswerAgent streaming LLM call timed out")
+                return GeneralAnswerResult(
+                    answer="通用回答模型暂时没有响应，请稍后重试。",
+                    confidence=0.5,
+                    answer_type="provider_timeout",
+                    warnings=["llm_timeout"],
+                )
+            except Exception:
+                logger.warning("GeneralAnswerAgent streaming failed, falling back to structured", exc_info=True)
         try:
-            return await self.llm_adapter.generate_structured(
-                prompt=(
-                    "你是 GeneralAnswerAgent，负责回答不需要论文检索、RAG、本地文档、图表解析或研究工作区操作的通用问题。\n"
-                    "请直接回答用户问题，语言尽量跟随用户输入。\n"
-                    "如果问题明显更适合科研检索、论文问答、文档理解或图表理解，请在 warnings 中加入 route_mismatch，"
-                    "并把 answer_type 设为 reroute_hint，同时给出一个简短帮助性回答。\n"
-                    "不要伪造论文证据、网页检索结果或本地已导入内容。"
+            return await asyncio.wait_for(
+                self.llm_adapter.generate_structured(
+                    prompt=prompt,
+                    input_data=input_data,
+                    response_model=GeneralAnswerResult,
                 ),
-                input_data={
-                    "question": question,
-                    "conversation_context": conversation_context or {},
-                },
-                response_model=GeneralAnswerResult,
+                timeout=max(1.0, float(self.llm_timeout_seconds)),
+            )
+        except TimeoutError:
+            logger.warning("GeneralAnswerAgent LLM call timed out")
+            return GeneralAnswerResult(
+                answer="通用回答模型暂时没有响应，请稍后重试。",
+                confidence=0.5,
+                answer_type="provider_timeout",
+                warnings=["llm_timeout"],
             )
         except LLMAdapterError:
-            raise
+            logger.warning("GeneralAnswerAgent LLM provider failed", exc_info=True)
+            return GeneralAnswerResult(
+                answer="通用回答模型暂时不可用，请稍后重试。",
+                confidence=0.5,
+                answer_type="provider_error",
+                warnings=["llm_provider_error"],
+            )
         except Exception as exc:
             raise LLMAdapterError(f"GeneralAnswerAgent failed: {exc}") from exc

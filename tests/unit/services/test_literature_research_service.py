@@ -224,7 +224,9 @@ async def test_visual_anchor_prefers_explicit_figure_number_before_llm() -> None
 
 
 @pytest.mark.asyncio
-async def test_user_intent_prefers_llm_over_marker_hint_when_available() -> None:
+async def test_user_intent_resolve_async_returns_heuristic() -> None:
+    """After optimization 3, resolve_async always returns heuristic result
+    (LLM intent refinement moved to supervisor)."""
     llm = UserIntentLLMStub(
         {
             "intent": "general_answer",
@@ -249,9 +251,8 @@ async def test_user_intent_prefers_llm_over_marker_hint_when_available() -> None
     )
 
     assert result.intent == "general_answer"
-    assert result.source == "llm"
-    assert llm.calls
-    assert "heuristic_hint" in llm.calls[0]["input_data"]
+    assert result.source == "heuristic"
+    assert not llm.calls
 
 
 def test_user_intent_resolves_p1_style_reference_from_candidate_pool() -> None:
@@ -901,9 +902,11 @@ async def test_start_import_job_records_tool_called_event(tmp_path) -> None:
 class RecordingRetrievalAgentStub(RetrievalAgentSuccessStub):
     def __init__(self) -> None:
         self.last_question = ""
+        self.all_questions: list[str] = []
 
     async def retrieve(self, *, question: str, document_ids: list[str], top_k: int, **kwargs):
         self.last_question = question
+        self.all_questions.append(question)
         return await super().retrieve(question=question, document_ids=document_ids, top_k=top_k, **kwargs)
 
 
@@ -1345,7 +1348,7 @@ async def test_ask_task_collection_rewrites_vague_effect_question_to_collection_
     assert response.qa.question == "效果怎么样"
     assert "综合评价" in graph_runtime.answer_tools.last_question
     assert "不要只回答单篇论文" in graph_runtime.answer_tools.last_question
-    assert "无人机路径规划" in graph_runtime.retrieval_tools.last_question
+    assert any("无人机路径规划" in q for q in graph_runtime.retrieval_tools.all_questions)
     assert response.qa.metadata["original_question"] == "效果怎么样"
     assert response.qa.metadata["resolved_question"] == graph_runtime.answer_tools.last_question
 

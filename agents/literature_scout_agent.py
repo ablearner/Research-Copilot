@@ -186,12 +186,21 @@ class LiteratureScoutAgent:
 
     async def plan(self, state: Any) -> ResearchTopicPlan:
         paper_search_service = self._require_search_service()
-        base_plan = paper_search_service.topic_planner.plan(
-            topic=state.topic,
-            days_back=state.days_back,
-            max_papers=state.max_papers,
-            sources=state.sources,
-        )
+        planner = paper_search_service.topic_planner
+        if hasattr(planner, "plan_async"):
+            base_plan = await planner.plan_async(
+                topic=state.topic,
+                days_back=state.days_back,
+                max_papers=state.max_papers,
+                sources=state.sources,
+            )
+        else:
+            base_plan = planner.plan(
+                topic=state.topic,
+                days_back=state.days_back,
+                max_papers=state.max_papers,
+                sources=state.sources,
+            )
         plan_metadata = {
             **base_plan.metadata,
             "planner": self.name,
@@ -309,13 +318,21 @@ class LiteratureScoutAgent:
         if not cleaned:
             return []
 
-        english_queries = [query for query in cleaned if re.search(r"[A-Za-z]", query)]
+        english_queries = [query for query in cleaned if re.search(r"[A-Za-z]", query) and not re.search(r"[\u4e00-\u9fff]", query)]
         if source in {"arxiv", "semantic_scholar"}:
-            selected = english_queries or cleaned
+            if not english_queries:
+                # Extract English tokens from mixed-language queries as a fallback
+                for query in cleaned:
+                    en_tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", query)
+                    en_only = " ".join(t for t in en_tokens if len(t) > 1)
+                    if en_only.strip():
+                        english_queries.append(en_only.strip())
+            if not english_queries:
+                return []
             # Semantic Scholar's public endpoint is aggressively rate limited;
             # prefer one strong English query over fanning out weak variants.
             limit = 1 if source == "semantic_scholar" else 2
-            return _dedupe_queries(selected[:limit])
+            return _dedupe_queries(english_queries[:limit])
 
         if source == "openalex" and english_queries:
             return _dedupe_queries(english_queries[:3])
@@ -405,7 +422,9 @@ class LiteratureScoutAgent:
                 prompt=(
                     "You are a Plan-and-Execute query planner. "
                     "First plan the subproblems privately, then return only structured output. "
-                    "Produce a short list of plan_steps, a deduplicated query set, and a concise reasoning_summary."
+                    "Produce a short list of plan_steps, a deduplicated query set, and a concise reasoning_summary. "
+                    "IMPORTANT: All queries MUST be in English (translate non-English topics into English academic keywords), "
+                    "because the target sources (arXiv, OpenAlex, Semantic Scholar) only index English-language papers."
                 ),
                 input_data=payload,
                 response_model=None,

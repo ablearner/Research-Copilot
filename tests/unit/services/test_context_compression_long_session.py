@@ -110,7 +110,8 @@ def _build_large_context_slice(
 
 def _measure_context_chars(context_slice: ResearchContextSlice) -> int:
     """Return the serialized character count of a context slice (same logic as _context_exceeds_budget)."""
-    data = context_slice.model_dump(mode="json")
+    agent = ResearchSupervisorAgent()
+    data = agent._serialize_context_slice(context_slice)
     return len(json.dumps(data, ensure_ascii=False, default=str))
 
 
@@ -222,38 +223,42 @@ class TestContextExceedsBudget:
             answer_size=3000,
             num_papers=8,
             summary_size=1000,
-            extra_metadata_size=30_000,
+            extra_metadata_size=120_000,
         )
         assert agent._context_exceeds_budget(large_slice)
-        chars = _measure_context_chars(large_slice)
-        assert chars > 120_000, f"Expected large context, got {chars} chars"
 
     def test_none_context_does_not_exceed_budget(self):
         agent = ResearchSupervisorAgent()
         assert not agent._context_exceeds_budget(None)
 
     def test_boundary_detection_at_120k(self):
-        """Find the approximate turn count that crosses the 120K char boundary."""
+        """Find the approximate metadata size that crosses the 120K char boundary.
+
+        Session history is now truncated to 3 turns by _serialize_context_slice,
+        so we grow via extra_metadata_size instead of turn count.
+        """
         agent = ResearchSupervisorAgent()
-        for turns in range(1, 80):
+        for meta_kb in range(10, 200, 10):
+            extra = meta_kb * 1000
             slice_ = _build_large_context_slice(
-                num_history_turns=turns, answer_size=3000, num_papers=6, summary_size=800,
+                num_history_turns=5, answer_size=3000, num_papers=6, summary_size=800,
+                extra_metadata_size=extra,
             )
             chars = _measure_context_chars(slice_)
             if chars > 120_000:
                 assert agent._context_exceeds_budget(slice_), (
-                    f"Expected exceed at {turns} turns ({chars} chars)"
+                    f"Expected exceed at extra_metadata={extra} ({chars} chars)"
                 )
-                # Verify previous turn was under budget
-                if turns > 1:
+                if meta_kb > 10:
                     prev = _build_large_context_slice(
-                        num_history_turns=turns - 1, answer_size=3000, num_papers=6, summary_size=800,
+                        num_history_turns=5, answer_size=3000, num_papers=6, summary_size=800,
+                        extra_metadata_size=(meta_kb - 10) * 1000,
                     )
                     prev_chars = _measure_context_chars(prev)
                     assert prev_chars < chars
                 break
         else:
-            pytest.fail("Could not find a turn count that exceeds 120K chars within 80 turns")
+            pytest.fail("Could not find a metadata size that exceeds 120K chars within 200KB")
 
     def test_custom_budget_parameter(self):
         agent = ResearchSupervisorAgent()
@@ -280,7 +285,7 @@ class TestReactiveGuardrailTriggersCompression:
         agent = ResearchSupervisorAgent(llm_adapter=llm_stub)
         large_slice = _build_large_context_slice(
             num_history_turns=20, answer_size=3000, num_papers=8, summary_size=1000,
-            extra_metadata_size=30_000,
+            extra_metadata_size=120_000,
         )
         assert agent._context_exceeds_budget(large_slice), "precondition: context must be oversize"
 
@@ -307,7 +312,7 @@ class TestReactiveGuardrailTriggersCompression:
         agent = ResearchSupervisorAgent(llm_adapter=llm_stub)
         large_slice = _build_large_context_slice(
             num_history_turns=20, answer_size=3000, num_papers=8, summary_size=1000,
-            extra_metadata_size=30_000,
+            extra_metadata_size=120_000,
         )
         assert agent._context_exceeds_budget(large_slice)
 

@@ -301,7 +301,7 @@ def fallback_answer_response(
 ) -> QAResponse:
     snippets = [
         (evidence.snippet or "").strip()
-        for evidence in evidence_bundle.evidences[:3]
+        for evidence in evidence_bundle.evidences[:5]
         if (evidence.snippet or "").strip()
     ]
     if not snippets:
@@ -318,10 +318,9 @@ def fallback_answer_response(
             reason="fallback_without_snippets",
         )
 
-    answer_lines = ["当前模型回答失败，下面仅列出可能相关的证据片段供参考："]
-    for index, snippet in enumerate(snippets, start=1):
-        answer_lines.append(f"{index}. {snippet[:240]}")
-    answer_lines.append("这些片段不一定能直接回答当前问题；如果问题与文档无关，请忽略这些证据。")
+    answer_lines = []
+    for snippet in snippets:
+        answer_lines.append(snippet)
     return QAResponse(
         answer="\n".join(answer_lines),
         question=question,

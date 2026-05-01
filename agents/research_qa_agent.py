@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -90,6 +91,7 @@ class ResearchQAAgent:
     """
 
     name = "ResearchQAAgent"
+    _STREAMING_DEFAULT_CONFIDENCE: float = 0.7
 
     async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
         from services.research.qa.executor import ResearchQAExecutor
@@ -287,6 +289,7 @@ class RagReActQAWorker:
         preference_context: dict[str, Any] | None = None,
         initial_retrieval_result: HybridRetrievalResult | None = None,
         initial_evidence_bundle: EvidenceBundle | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
     ) -> QAResponse:
         tool_specs = self.tool_registry.filter_tools(
             enabled_only=True,
@@ -368,6 +371,7 @@ class RagReActQAWorker:
                 session_context=session_context,
                 task_context=task_context,
                 preference_context=preference_context,
+                on_token=on_token,
             )
             return QAResponse(
                 answer=final.answer,
@@ -533,6 +537,7 @@ class RagReActQAWorker:
                 session_context=session_context,
                 task_context=task_context,
                 preference_context=preference_context,
+                on_token=on_token,
             )
             final_answer = final.answer
             final_confidence = final.confidence
@@ -770,25 +775,37 @@ class RagReActQAWorker:
         session_context: dict[str, Any] | None,
         task_context: dict[str, Any] | None,
         preference_context: dict[str, Any] | None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
     ) -> ReActFinalDraft:
         if not evidence_bundle.evidences:
             return ReActFinalDraft(answer="证据不足", confidence=0.0, warnings=["empty_evidence_bundle"])
 
         prompt = self._load_prompt(self.synthesis_prompt_path, "ReAct synthesis")
+        input_data = {
+            "question": question,
+            "steps": [step.model_dump(mode="json") for step in steps],
+            "retrieval_result": retrieval_result.model_dump(mode="json") if retrieval_result else None,
+            "evidence_bundle": evidence_bundle.model_dump(mode="json"),
+            "memory_context": {
+                "session_context": session_context or {},
+                "task_context": task_context or {},
+                "preference_context": preference_context or {},
+            },
+        }
+        if on_token is not None:
+            try:
+                full_text = await self.llm_adapter.generate_streaming(
+                    prompt=prompt,
+                    input_data=input_data,
+                    on_token=on_token,
+                )
+                return ReActFinalDraft(answer=full_text, confidence=self._STREAMING_DEFAULT_CONFIDENCE)
+            except Exception:
+                logger.warning("ResearchQAAgent streaming synthesis failed, falling back to structured", exc_info=True)
         try:
             return await self.llm_adapter.generate_structured(
                 prompt=prompt,
-                input_data={
-                    "question": question,
-                    "steps": [step.model_dump(mode="json") for step in steps],
-                    "retrieval_result": retrieval_result.model_dump(mode="json") if retrieval_result else None,
-                    "evidence_bundle": evidence_bundle.model_dump(mode="json"),
-                    "memory_context": {
-                        "session_context": session_context or {},
-                        "task_context": task_context or {},
-                        "preference_context": preference_context or {},
-                    },
-                },
+                input_data=input_data,
                 response_model=ReActFinalDraft,
             )
         except (LLMAdapterError, OSError, ValueError) as exc:

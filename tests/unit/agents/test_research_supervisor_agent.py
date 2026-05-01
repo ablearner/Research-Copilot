@@ -1,6 +1,6 @@
 import pytest
 
-from adapters.llm.base import BaseLLMAdapter
+from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
 from domain.schemas.agent_message import AgentResultMessage
 
@@ -21,6 +21,14 @@ class ManagerDecisionLLMStub(BaseLLMAdapter):
 
     async def _extract_graph_triples(self, prompt: str, input_data: dict, response_model: type):
         raise NotImplementedError
+
+
+class FailingManagerDecisionLLMStub(ManagerDecisionLLMStub):
+    def __init__(self) -> None:
+        super().__init__({})
+
+    async def _generate_structured(self, prompt: str, input_data: dict, response_model: type):
+        raise LLMAdapterError("relay timeout")
 
 
 @pytest.mark.asyncio
@@ -93,13 +101,13 @@ async def test_research_supervisor_agent_keeps_qa_mode_on_qa_specialist() -> Non
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "analyze_papers",
-                "worker_agent": "PaperAnalysisAgent",
-                "instruction": "Analyze the selected paper instead.",
-                "thought": "The question mentions paper details.",
-                "rationale": "This should be overridden in explicit QA mode.",
-                "phase": "reflect",
-                "payload": {"analysis_focus": "explain"},
+                "action_name": "answer_question",
+                "worker_agent": "ResearchQAAgent",
+                "instruction": "Answer the user's research question using imported evidence.",
+                "thought": "The user is in QA mode with an imported document.",
+                "rationale": "ResearchQAAgent should handle this scoped question.",
+                "phase": "act",
+                "payload": {"goal": "这篇论文的方法是什么？", "mode": "qa"},
             }
         )
     )
@@ -118,7 +126,7 @@ async def test_research_supervisor_agent_keeps_qa_mode_on_qa_specialist() -> Non
     assert decision.action_name == "answer_question"
     assert decision.metadata["worker_agent"] == "ResearchQAAgent"
     assert decision.metadata["active_message"].task_type == "answer_question"
-    assert decision.metadata["active_message"].payload["trigger"] == "qa_mode_guardrail"
+    assert decision.metadata["decision_source"] == "llm"
 
 
 @pytest.mark.asyncio
@@ -190,13 +198,16 @@ async def test_research_supervisor_agent_replans_qa_route_from_worker_observatio
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "write_review",
-                "worker_agent": "ResearchWriterAgent",
-                "instruction": "Ignored because guardrail should use observation.",
-                "thought": "Ignored.",
-                "rationale": "Ignored.",
+                "action_name": "answer_question",
+                "worker_agent": "ResearchQAAgent",
+                "instruction": "Re-answer with document drilldown route.",
+                "thought": "The previous answer was under-supported, retrying with document drilldown.",
+                "rationale": "Worker observation suggested answer_question with document_drilldown.",
                 "phase": "act",
-                "payload": {},
+                "payload": {
+                    "qa_route": "document_drilldown",
+                    "qa_route_source": "worker_observation",
+                },
             }
         )
     )
@@ -310,13 +321,13 @@ async def test_research_supervisor_agent_guardrail_routes_sync_to_zotero_intent_
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "write_review",
-                "worker_agent": "ResearchWriterAgent",
-                "instruction": "Write a report.",
-                "thought": "Fallback LLM output that should be ignored by the guardrail.",
-                "rationale": "The guardrail should intercept before this.",
+                "action_name": "sync_to_zotero",
+                "worker_agent": "ResearchKnowledgeAgent",
+                "instruction": "Sync the targeted paper to Zotero.",
+                "thought": "The user is asking to sync to Zotero.",
+                "rationale": "The heuristic intent correctly identified sync_to_zotero.",
                 "phase": "act",
-                "payload": {},
+                "payload": {"paper_ids": ["paper-1"]},
             }
         )
     )
@@ -335,7 +346,7 @@ async def test_research_supervisor_agent_guardrail_routes_sync_to_zotero_intent_
     )
 
     assert decision.action_name == "sync_to_zotero"
-    assert decision.metadata["decision_source"] == "manager_guardrail"
+    assert decision.metadata["decision_source"] == "llm"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-1"]
 
 
@@ -344,13 +355,13 @@ async def test_research_supervisor_agent_guardrail_routes_workspace_import_inten
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "write_review",
-                "worker_agent": "ResearchWriterAgent",
-                "instruction": "Write a report.",
-                "thought": "Fallback LLM output that should be ignored by the guardrail.",
-                "rationale": "The guardrail should intercept before this.",
+                "action_name": "import_papers",
+                "worker_agent": "ResearchKnowledgeAgent",
+                "instruction": "Import the targeted paper into the workspace.",
+                "thought": "The user wants to import a paper for grounded QA.",
+                "rationale": "The heuristic intent correctly identified paper_import.",
                 "phase": "act",
-                "payload": {},
+                "payload": {"paper_ids": ["paper-1"]},
             }
         )
     )
@@ -369,7 +380,7 @@ async def test_research_supervisor_agent_guardrail_routes_workspace_import_inten
     )
 
     assert decision.action_name == "import_papers"
-    assert decision.metadata["decision_source"] == "manager_guardrail"
+    assert decision.metadata["decision_source"] == "llm"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-1"]
 
 
@@ -378,13 +389,13 @@ async def test_research_supervisor_agent_guardrail_routes_figure_question_to_cha
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "general_answer",
-                "worker_agent": "GeneralAnswerAgent",
-                "instruction": "Fallback LLM output that should be ignored by the guardrail.",
-                "thought": "Ignored.",
-                "rationale": "Ignored.",
+                "action_name": "analyze_paper_figures",
+                "worker_agent": "ChartAnalysisAgent",
+                "instruction": "Extract and analyze figures from the paper.",
+                "thought": "The user is asking about a figure in an imported paper.",
+                "rationale": "analyze_paper_figures can extract the actual visual from the PDF.",
                 "phase": "act",
-                "payload": {},
+                "payload": {"paper_ids": ["paper-2"]},
             }
         )
     )
@@ -404,7 +415,7 @@ async def test_research_supervisor_agent_guardrail_routes_figure_question_to_cha
     )
 
     assert decision.action_name == "analyze_paper_figures"
-    assert decision.metadata["decision_source"] == "manager_guardrail"
+    assert decision.metadata["decision_source"] == "llm"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-2"]
 
 
@@ -413,11 +424,11 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "finalize",
-                "worker_agent": "ResearchSupervisorAgent",
-                "instruction": "Stop and ask for clarification.",
-                "thought": "Ignored fallback output.",
-                "rationale": "The guardrail should use the provided image.",
+                "action_name": "understand_chart",
+                "worker_agent": "ChartAnalysisAgent",
+                "instruction": "Understand the uploaded chart.",
+                "thought": "A chart image was provided and should be processed.",
+                "rationale": "The chart should be understood before further reasoning.",
                 "phase": "act",
                 "payload": {},
             }
@@ -435,7 +446,7 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
 
     assert decision.action_name == "understand_chart"
     assert decision.metadata["worker_agent"] == "ChartAnalysisAgent"
-    assert decision.metadata["active_message"].payload["trigger"] == "chart_input_guardrail"
+    assert decision.metadata["decision_source"] == "llm"
 
 
 @pytest.mark.asyncio
@@ -443,13 +454,14 @@ async def test_research_supervisor_agent_finalizes_after_explicit_chart_input_is
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "clarify_request",
+                "action_name": "finalize",
                 "worker_agent": "ResearchSupervisorAgent",
-                "instruction": "Ask which paper figure the user means.",
-                "thought": "Ignored fallback output.",
-                "rationale": "The chart was already processed.",
-                "phase": "act",
-                "payload": {"clarification_question": "你想看哪篇论文里的图？"},
+                "instruction": "The chart has already been understood.",
+                "thought": "No further action needed for the chart.",
+                "rationale": "The visual evidence was already processed.",
+                "phase": "commit",
+                "payload": {},
+                "stop_reason": "Chart understanding completed.",
             }
         )
     )
@@ -466,7 +478,7 @@ async def test_research_supervisor_agent_finalizes_after_explicit_chart_input_is
 
     assert decision.action_name == "finalize"
     assert decision.stop_reason == "Chart understanding completed."
-    assert decision.metadata["state_update"]["clarification_request"] is None
+    assert decision.metadata["decision_source"] == "llm"
 
 
 @pytest.mark.asyncio
@@ -474,13 +486,14 @@ async def test_research_supervisor_agent_guardrail_keeps_explicit_figure_scope_w
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "general_answer",
-                "worker_agent": "GeneralAnswerAgent",
-                "instruction": "Ignored fallback output.",
-                "thought": "Ignored.",
-                "rationale": "Ignored.",
+                "action_name": "analyze_paper_figures",
+                "worker_agent": "ChartAnalysisAgent",
+                "instruction": "Extract and analyze figures from the paper.",
+                "thought": "The user asks about figures in a specific paper.",
+                "rationale": "Use analyze_paper_figures for the resolved paper.",
                 "phase": "act",
-                "payload": {},
+                "payload": {"paper_ids": ["paper-2"]},
+                "resolved_paper_ids": ["paper-2"],
             }
         )
     )
@@ -519,3 +532,61 @@ def test_research_supervisor_agent_stops_without_llm_instead_of_using_legacy_rul
     assert decision.action_name == "finalize"
     assert decision.metadata["decision_source"] == "guardrail"
     assert "Rule-based planning has been removed" in (decision.stop_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_research_supervisor_agent_does_not_turn_general_answer_timeout_into_research_clarification() -> None:
+    manager = ResearchSupervisorAgent(llm_adapter=FailingManagerDecisionLLMStub())
+    latest_result = AgentResultMessage(
+        task_id="general-1",
+        agent_from="GeneralAnswerAgent",
+        agent_to="ResearchSupervisorAgent",
+        task_type="general_answer",
+        status="failed",
+        payload={"observation": "OpenAI relay chat completion call failed (ReadTimeout)"},
+    )
+
+    decision = await manager.decide_next_action_async(
+        ResearchSupervisorState(
+            goal="你好",
+            mode="auto",
+            route_mode="general_chat",
+            user_intent={"intent": "general_answer"},
+        ),
+        agent_results=[latest_result],
+    )
+
+    assert decision.action_name == "finalize"
+    assert decision.stop_reason == "通用回答模型暂时不可用，请稍后重试。"
+    assert decision.metadata["state_update"]["clarification_request"] is None
+
+
+@pytest.mark.asyncio
+async def test_research_supervisor_agent_finalizes_general_answer_without_manager_llm_roundtrip() -> None:
+    manager = ResearchSupervisorAgent(llm_adapter=FailingManagerDecisionLLMStub())
+    latest_result = AgentResultMessage(
+        task_id="general-2",
+        agent_from="GeneralAnswerAgent",
+        agent_to="ResearchSupervisorAgent",
+        task_type="general_answer",
+        status="succeeded",
+        payload={
+            "answer": "通用回答模型暂时没有响应，请稍后重试。",
+            "answer_type": "provider_timeout",
+            "warnings": ["llm_timeout"],
+        },
+    )
+
+    decision = await manager.decide_next_action_async(
+        ResearchSupervisorState(
+            goal="你好",
+            mode="auto",
+            route_mode="general_chat",
+            user_intent={"intent": "general_answer"},
+        ),
+        agent_results=[latest_result],
+    )
+
+    assert decision.action_name == "finalize"
+    assert decision.metadata["decision_source"] == "manager_guardrail"
+    assert decision.stop_reason == "通用回答模型暂时不可用，请稍后重试。"

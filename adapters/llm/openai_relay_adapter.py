@@ -39,6 +39,8 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
         timeout_seconds: float = 90.0,
         max_retries: int = 2,
         retry_delay_seconds: float = 0.5,
+        max_connections: int = 10,
+        max_keepalive_connections: int = 5,
     ) -> None:
         super().__init__(max_retries=max_retries, retry_delay_seconds=retry_delay_seconds)
         self.api_key = api_key
@@ -48,13 +50,24 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
         self.base_url = normalized.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self._timeout = httpx.Timeout(
-            connect=30.0,
+            connect=10.0,
             read=timeout_seconds,
             write=max(timeout_seconds, 120.0),
             pool=timeout_seconds,
         )
         self._uploaded_file_url_cache: dict[str, str] = {}
         self._trust_env = self._should_trust_env_for_base_url(self.base_url)
+        self._client = httpx.AsyncClient(
+            timeout=self._timeout,
+            trust_env=self._trust_env,
+            limits=httpx.Limits(
+                max_connections=max_connections,
+                max_keepalive_connections=max_keepalive_connections,
+            ),
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     async def _generate_structured(
         self,
@@ -79,6 +92,63 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
             json_mode=True,
         )
         return self._validate_response(self._extract_structured_payload(payload, response_model), response_model)
+
+    async def _generate_streaming(
+        self,
+        prompt: str,
+        input_data: dict[str, Any],
+        on_token: "Callable[[str], Awaitable[None]]",
+    ) -> str:
+        if self._is_anthropic_provider():
+            messages = apply_anthropic_cache_control([
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": json.dumps(input_data, ensure_ascii=False)},
+            ])
+        else:
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": json.dumps(input_data, ensure_ascii=False)},
+            ]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.1,
+            "stream": True,
+        }
+        return await self._stream_chat_completion(payload, on_token)
+
+    async def _stream_chat_completion(
+        self,
+        payload: dict[str, Any],
+        on_token: "Callable[[str], Awaitable[None]]",
+    ) -> str:
+        full_text: list[str] = []
+        async with self._client.stream(
+            "POST",
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    delta = chunk["choices"][0].get("delta", {})
+                    token = delta.get("content", "")
+                    if token:
+                        full_text.append(token)
+                        await on_token(token)
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+        return "".join(full_text)
 
     async def _analyze_image_structured(
         self,
@@ -218,24 +288,23 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
             raise LLMAdapterError(self._format_relay_error("OpenAI relay chat completion call failed", exc)) from exc
 
     async def _post_chat_completion(self, payload: dict[str, Any]) -> str:
-        async with httpx.AsyncClient(timeout=self._timeout, trust_env=self._trust_env) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            normalized = self._normalize_content(content)
-            if not normalized:
-                reason = data["choices"][0].get("finish_reason")
-                logger.warning("OpenAI relay returned empty content", extra={"finish_reason": reason})
-                raise LLMAdapterError(f"OpenAI relay returned empty content; finish_reason={reason}")
-            return normalized
+        response = await self._client.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        normalized = self._normalize_content(content)
+        if not normalized:
+            reason = data["choices"][0].get("finish_reason")
+            logger.warning("OpenAI relay returned empty content", extra={"finish_reason": reason})
+            raise LLMAdapterError(f"OpenAI relay returned empty content; finish_reason={reason}")
+        return normalized
 
     def _format_relay_error(self, message: str, exc: Exception) -> str:
         if isinstance(exc, httpx.HTTPStatusError):
@@ -321,14 +390,13 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
             return cached
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout, trust_env=self._trust_env) as client:
-                response = await client.post(
-                    f"{self.base_url}/files",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    files={"file": (path.name, path.read_bytes(), mime_type)},
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await self._client.post(
+                f"{self.base_url}/files",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                files={"file": (path.name, path.read_bytes(), mime_type)},
+            )
+            response.raise_for_status()
+            data = response.json()
         except Exception as exc:
             logger.warning("OpenAI relay file upload fallback failed: %s", exc.__class__.__name__)
             return None
@@ -340,11 +408,6 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
         return None
 
     def _should_trust_env_for_base_url(self, base_url: str) -> bool:
-        hostname = (urlparse(base_url).hostname or "").lower()
-        # The BLTCY relay is reachable directly in this environment, while the system
-        # proxy intermittently breaks CONNECT/TLS for long-lived LLM calls.
-        if hostname == "api.bltcy.ai":
-            return False
         return True
 
     def _describe_image_input(self, file_path: str) -> dict[str, Any]:
@@ -629,11 +692,19 @@ class OpenAIRelayAdapter(BaseLLMAdapter):
                 }
             )
         )
+        repaired = self._quote_unquoted_keys(repaired)
         repaired = self._remove_trailing_commas(repaired)
         repaired = self._close_open_json_structures(repaired)
         repaired = self._insert_missing_commas(repaired)
         repaired = self._remove_trailing_commas(repaired)
         return repaired
+
+    def _quote_unquoted_keys(self, candidate: str) -> str:
+        return re.sub(
+            r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:',
+            r' "\1":',
+            candidate,
+        )
 
     def _remove_trailing_commas(self, candidate: str) -> str:
         return re.sub(r",(\s*[}\]])", r"\1", candidate)

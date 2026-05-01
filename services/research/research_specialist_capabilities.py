@@ -1215,6 +1215,10 @@ class GeneralAnswerCapability:
         active_message = resolve_active_message(decision)
         payload = dict(active_message.payload or {}) if active_message is not None else {}
         question = str(payload.get("goal") or context.request.message or "").strip()
+        on_token = None
+        if context.progress_callback is not None:
+            async def on_token(text: str) -> None:
+                await context.progress_callback({"type": "token", "text": text})
         result = await general_answer_agent.answer(
             question=question,
             conversation_context={
@@ -1224,17 +1228,21 @@ class GeneralAnswerCapability:
                 "selected_paper_ids": [] if payload.get("ignore_research_context") else list(context.request.selected_paper_ids),
                 "ignore_research_context": bool(payload.get("ignore_research_context")),
             },
+            on_token=on_token,
         )
         warnings = list(result.warnings)
-        should_reroute = "route_mismatch" in warnings or (
-            result.answer_type == "reroute_hint"
-        ) or (
-            result.confidence < 0.45 and (
-                context.request.task_id is not None
-                or bool(context.request.selected_paper_ids)
-                or bool(context.request.selected_document_ids)
-                or bool(context.request.chart_image_path)
-                or bool(context.request.document_file_path)
+        provider_fallback = result.answer_type in {"fallback", "provider_timeout", "provider_error"}
+        should_reroute = (not provider_fallback) and (
+            "route_mismatch" in warnings or (
+                result.answer_type == "reroute_hint"
+            ) or (
+                result.confidence < 0.45 and (
+                    context.request.task_id is not None
+                    or bool(context.request.selected_paper_ids)
+                    or bool(context.request.selected_document_ids)
+                    or bool(context.request.chart_image_path)
+                    or bool(context.request.document_file_path)
+                )
             )
         )
         if should_reroute:

@@ -71,9 +71,9 @@ class ResearchCollectionKnowledgeCapability:
                 "paper_titles": [paper.title for paper in state.papers[:5]],
                 "memory_hints": self._memory_hints(state),
             },
-            max_queries=3,
+            max_queries=5,
         )
-        return self._normalize_queries([*reasoning_plan["queries"], *planned], limit=3)
+        return self._normalize_queries([*reasoning_plan["queries"], *planned], limit=5)
 
     async def retrieve_collection_evidence(self, *, graph_runtime: Any, state: Any, query: str) -> list[RetrievalHit]:
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
@@ -174,12 +174,56 @@ class ResearchCollectionKnowledgeCapability:
         memory_focus = str(memory_hints.get("current_task_intent") or "").strip()
         if memory_focus and memory_focus not in state.question:
             candidates.append(f"{state.question} {memory_focus}")
+        candidates.extend(self._cross_lingual_queries(state))
         planned: list[str] = []
         for item in candidates:
             normalized = " ".join(item.strip().split())
             if normalized and normalized not in planned:
                 planned.append(normalized)
-        return planned[:3]
+        return planned[:5]
+
+    def _cross_lingual_queries(self, state: Any) -> list[str]:
+        question = state.question
+        has_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in question)
+        if not has_cjk:
+            return []
+        papers = getattr(state, "papers", []) or []
+        if not papers:
+            return []
+        en_titles = [
+            paper.title for paper in papers[:3]
+            if paper.title and not any("\u4e00" <= ch <= "\u9fff" for ch in paper.title)
+        ]
+        if not en_titles:
+            return []
+        keyword_map = {
+            "实验": "experiment results",
+            "方法": "method approach",
+            "结果": "results evaluation",
+            "实现": "implementation method",
+            "模型": "model architecture",
+            "数据集": "dataset benchmark",
+            "评估": "evaluation metrics",
+            "对比": "comparison baseline",
+            "框架": "framework architecture",
+            "训练": "training procedure",
+            "性能": "performance",
+            "消融": "ablation study",
+            "贡献": "contribution",
+            "局限": "limitation",
+            "创新": "novelty contribution",
+        }
+        en_keywords = []
+        for zh_key, en_val in keyword_map.items():
+            if zh_key in question:
+                en_keywords.append(en_val)
+        queries: list[str] = []
+        for title in en_titles[:2]:
+            if en_keywords:
+                queries.append(f"{title} {' '.join(en_keywords[:3])}")
+            else:
+                queries.append(title)
+        return queries
 
     def _scope_filters(self, state: Any) -> dict[str, Any]:
         metadata = dict(getattr(state.request, "metadata", {}) or {})

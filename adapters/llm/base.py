@@ -152,6 +152,27 @@ class BaseLLMAdapter(ABC):
             lambda: self._analyze_pdf_structured(prompt, file_path, response_model),
         )
 
+    async def generate_streaming(
+        self,
+        prompt: str,
+        input_data: dict[str, Any],
+        on_token: Callable[[str], Awaitable[None]],
+    ) -> str:
+        """Stream LLM output token-by-token, return full text when done.
+
+        Default implementation falls back to non-streaming structured call.
+        Subclasses should override ``_stream_chat_completion`` for real streaming.
+        """
+        return await self._generate_streaming(prompt, input_data, on_token)
+
+    async def _generate_streaming(
+        self,
+        prompt: str,
+        input_data: dict[str, Any],
+        on_token: Callable[[str], Awaitable[None]],
+    ) -> str:
+        raise NotImplementedError
+
     async def extract_graph_triples(
         self,
         prompt: str,

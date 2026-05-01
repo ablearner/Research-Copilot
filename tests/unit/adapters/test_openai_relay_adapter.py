@@ -136,20 +136,13 @@ class DummyStructuredResponse(BaseModel):
 
 
 @pytest.mark.asyncio
-async def test_generate_structured_retries_without_response_format_when_relay_rejects_it(monkeypatch) -> None:
+async def test_generate_structured_does_not_send_response_format(monkeypatch) -> None:
+    """generate_structured uses json_mode=True to ensure valid JSON output."""
     adapter = build_adapter()
     sent_payloads: list[dict] = []
 
     async def fake_post_chat_completion(payload: dict) -> str:
         sent_payloads.append(dict(payload))
-        if len(sent_payloads) == 1:
-            request = httpx.Request("POST", "https://relay.invalid/v1/chat/completions")
-            response = httpx.Response(
-                400,
-                request=request,
-                text='{"error":{"message":"response_format is not supported"}}',
-            )
-            raise httpx.HTTPStatusError("Bad Request", request=request, response=response)
         return '{"answer":"ok"}'
 
     monkeypatch.setattr(adapter, "_post_chat_completion", fake_post_chat_completion)
@@ -161,8 +154,8 @@ async def test_generate_structured_retries_without_response_format_when_relay_re
     )
 
     assert response.answer == "ok"
-    assert "response_format" in sent_payloads[0]
-    assert "response_format" not in sent_payloads[1]
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0].get("response_format") == {"type": "json_object"}
 
 
 @pytest.mark.asyncio

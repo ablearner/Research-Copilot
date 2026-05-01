@@ -61,7 +61,7 @@ class SemanticScholarSearchTool:
                 ]
             ),
         }
-        async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers, trust_env=True) as client:
             payload = await self._fetch_payload(client=client, query=query, params=params)
         cutoff = datetime.now(UTC) - timedelta(days=days_back)
         papers: list[PaperCandidate] = []

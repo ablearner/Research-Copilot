@@ -621,19 +621,16 @@ class RagRuntime:
 
         snippets = [
             (evidence.snippet or "").strip()
-            for evidence in bundle.evidences[:3]
+            for evidence in bundle.evidences[:5]
             if (evidence.snippet or "").strip()
         ]
         if not snippets:
             return answer
 
-        fallback_lines = ["根据当前检索到的证据，可以确认以下信息："]
-        for index, snippet in enumerate(snippets, start=1):
-            fallback_lines.append(f"{index}. {snippet[:240]}")
-        fallback_lines.append("以上回答基于当前证据自动整理，如需更精确结论可继续追问。")
+        joined = "\n\n".join(snippets)
         return answer.model_copy(
             update={
-                "answer": "\n".join(fallback_lines),
+                "answer": joined,
                 "question": question,
                 "evidence_bundle": bundle,
                 "retrieval_result": retrieval_result,
