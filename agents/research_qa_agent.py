@@ -186,7 +186,11 @@ class ResearchQAAgent:
         metadata = output.to_metadata()
         qa_metadata = qa_result.qa.metadata if isinstance(qa_result.qa.metadata, dict) else {}
         quality_check = qa_metadata.get("answer_quality_check")
-        if isinstance(quality_check, dict) and quality_check.get("needs_recovery"):
+        if (
+            isinstance(quality_check, dict)
+            and quality_check.get("needs_recovery")
+            and not self._is_local_fallback_answer(qa_metadata)
+        ):
             recovery_route = str(quality_check.get("suggested_recovery_qa_route") or "").strip()
             if recovery_route:
                 metadata.update(
@@ -221,6 +225,17 @@ class ResearchQAAgent:
             metadata=metadata,
             state_delta=delta,
         )
+
+    @staticmethod
+    def _is_local_fallback_answer(metadata: dict[str, Any]) -> bool:
+        """Return True when answer synthesis already fell back after provider failure.
+
+        Such answers are low-confidence by design. Asking the supervisor to
+        re-run the same QA route usually repeats the same provider timeout and
+        can trap the graph in an answer_question loop.
+        """
+
+        return bool(metadata.get("fallback"))
 
     # ------------------------------------------------------------------
     # Core QA execution (inlined from ResearchQAExecutor)

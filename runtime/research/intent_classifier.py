@@ -368,6 +368,11 @@ def should_force_finalize(
         return True
     if stagnant_count >= 2 or repeated_count >= 2:
         return True
+    if (
+        latest_task_type == "answer_question"
+        and (has_qa_result or latest_status == "failed")
+    ):
+        return True
     if mode == "qa" and has_qa_result:
         return True
     has_latest = latest_task_type is not None
