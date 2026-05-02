@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from services.research.zotero_local_mcp import ZoteroLocalGateway
+from adapters.mcp.zotero_local import ZoteroLocalGateway
 
 
 class AsyncClientStub:

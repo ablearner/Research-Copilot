@@ -18,14 +18,14 @@ from domain.schemas.unified_runtime import (
     UnifiedPaperAnalysisInput,
     UnifiedReviewDraftInput,
 )
-from services.research.unified_action_adapters import (
+from runtime.research.unified_action_adapters import (
     build_context_compression_input,
     build_context_compression_output,
     build_literature_search_input,
     build_literature_search_output,
     resolve_active_message,
 )
-from services.research.unified_runtime import (
+from runtime.research.unified_runtime import (
     build_phase1_unified_agent_registry,
     build_phase1_unified_blueprint,
     build_phase1_unified_runtime_context,

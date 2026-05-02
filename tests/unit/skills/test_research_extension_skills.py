@@ -1,7 +1,7 @@
 import pytest
 
 from domain.schemas.research import PaperCandidate
-from services.research.capabilities import (
+from tools.research import (
     PaperAnalyzer,
     PaperReader,
     ResearchEvaluator,

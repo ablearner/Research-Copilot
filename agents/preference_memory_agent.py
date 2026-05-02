@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from core.utils import now_iso as _now_iso
@@ -13,14 +13,15 @@ from pydantic import BaseModel, Field
 from domain.schemas.research import PaperCandidate, PaperSource
 from domain.schemas.research_functions import RecommendPapersFunctionOutput, RecommendedPaper
 from domain.schemas.research_memory import InterestTopic, UserResearchProfile
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from memory.memory_manager import MemoryManager
-from services.research.paper_search_service import PaperSearchService
-from services.research.research_specialist_capabilities import (
-    PreferenceRecommendationCapability,
-    build_specialist_unified_result,
-)
+from tools.research.paper_search import PaperSearchService
 from tooling.research_runtime_schemas import NotificationItem
+
+if TYPE_CHECKING:
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
 
 
 _EN_STOPWORDS = {
@@ -149,46 +150,98 @@ class PreferenceMemoryAgent:
         paper_search_service: PaperSearchService,
         storage_root: str | Path | None = None,
         memory_gateway: Any | None = None,
-        execution_capability: PreferenceRecommendationCapability | None = None,
     ) -> None:
         self._memory_backend = memory_manager
         self.memory_gateway = memory_gateway
         self.paper_search_service = paper_search_service
         self.storage_root = Path(storage_root) if storage_root is not None else None
-        self.execution_capability = execution_capability or PreferenceRecommendationCapability()
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        if supervisor_context is None or decision is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for PreferenceMemoryAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="preference_memory_agent",
-                delegate_type=self.__class__.__name__,
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import MemoryOp, ResearchStateDelta, ResearchToolResult
+        from runtime.research.unified_action_adapters import resolve_active_message
+
+        active_message = resolve_active_message(decision)
+        payload = dict(active_message.payload or {}) if active_message is not None else {}
+        question = str(payload.get("goal") or context.request.message or "").strip()
+        top_k = max(
+            1,
+            min(
+                10,
+                int(
+                    payload.get("top_k")
+                    or context.request.recommendation_top_k
+                    or 6
+                ),
+            ),
+        )
+        days_back = max(
+            1,
+            int(
+                payload.get("days_back")
+                or context.request.days_back
+                or 30
+            ),
+        )
+        raw_sources = payload.get("sources")
+        sources = (
+            [str(item).strip().lower() for item in raw_sources if str(item).strip()]
+            if isinstance(raw_sources, list)
+            else list(context.request.sources)
+        )
+        recommendation_output = await self.recommend_recent_papers(
+            question=question,
+            days_back=days_back,
+            top_k=top_k,
+            sources=sources,
+            include_notification=True,
+            persist=False,
+        )
+        recommendations = list(recommendation_output.recommendations)
+        memory_ops = [
+            MemoryOp(
+                op_type="record_user_recommendations",
+                params={
+                    "user_id": "local-user",
+                    "topics_used": list(recommendation_output.metadata.get("topics_used", [])),
+                    "recommendation_ids": [item.paper_id for item in recommendations],
+                    "query": question,
+                },
+            ),
+        ] if recommendations else []
+        delta = ResearchStateDelta(
+            preference_recommendation_result=recommendation_output,
+            memory_ops=memory_ops,
+        )
+        if not recommendations:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no personalized paper recommendations could be generated from long-term preferences",
+                metadata={
+                    "reason": "no_preference_recommendations",
+                    **recommendation_output.model_dump(mode="json"),
+                },
+                state_delta=delta,
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            decision=decision,
-            preference_memory_agent=self,
+        return ResearchToolResult(
+            status="succeeded",
+            observation=(
+                f"generated {len(recommendations)} personalized recommendations from long-term preferences"
+            ),
+            metadata=recommendation_output.model_dump(mode="json"),
+            state_delta=delta,
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "preference_memory_agent",
-        }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="preference_memory_agent",
-            delegate_type=self.__class__.__name__,
-        )
+
+    # ------------------------------------------------------------------
+    # Legacy unified runtime entry point (will be removed in Step 6)
+    # ------------------------------------------------------------------
 
     def observe_user_message(
         self,
@@ -258,6 +311,7 @@ class PreferenceMemoryAgent:
         top_k: int = 6,
         sources: list[PaperSource] | None = None,
         include_notification: bool = True,
+        persist: bool = True,
     ) -> RecommendPapersFunctionOutput:
         profile = self._load_user_profile(user_id=user_id)
         explicit_topics = self._extract_topics(question)
@@ -353,13 +407,14 @@ class PreferenceMemoryAgent:
                 "generated_at": _now_iso(),
             },
         )
-        self._record_user_recommendations(
-            user_id=user_id,
-            topics_used=topics_used,
-            recommendation_ids=[item.paper_id for item in recommendations],
-            query=question,
-        )
-        if include_notification and recommendations:
+        if persist:
+            self._record_user_recommendations(
+                user_id=user_id,
+                topics_used=topics_used,
+                recommendation_ids=[item.paper_id for item in recommendations],
+                query=question,
+            )
+        if persist and include_notification and recommendations:
             self._enqueue_recommendation_notification(
                 user_id=user_id,
                 output=output,

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Any
+import re
+import shutil
+from typing import TYPE_CHECKING, Any
 
 from domain.schemas.research import (
     AnalyzeResearchPaperFigureRequest,
@@ -10,15 +13,18 @@ from domain.schemas.research import (
     ResearchPaperFigureListResponse,
     ResearchPaperFigurePreview,
 )
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
-from services.research.capabilities.paper_chart_analysis import PaperChartAnalyzer
-from services.research.capabilities.visual_anchor import VisualAnchor
-from services.research.research_knowledge_access import ResearchKnowledgeAccess
-from services.research.research_specialist_capabilities import (
-    ChartAnalysisCapability,
-    build_specialist_unified_result,
-)
+from tools.research.paper_chart_analysis import PaperChartAnalyzer
+from tools.research.visual_anchor import VisualAnchor
+from tools.research.knowledge_access import ResearchKnowledgeAccess
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget, PaperFigureTools
+
+if TYPE_CHECKING:
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
+
+logger = logging.getLogger(__name__)
 
 
 class ChartAnalysisAgent:
@@ -31,7 +37,6 @@ class ChartAnalysisAgent:
         *,
         llm_adapter: Any | None = None,
         storage_root: str | Path | None = None,
-        execution_capability: ChartAnalysisCapability | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
         self.visual_anchor_skill = VisualAnchor(llm_adapter=llm_adapter)
@@ -39,41 +44,230 @@ class ChartAnalysisAgent:
         self.paper_figure_tools = (
             PaperFigureTools(storage_root=storage_root) if storage_root is not None else None
         )
-        self.execution_capability = execution_capability or ChartAnalysisCapability()
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        if supervisor_context is None or decision is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for ChartAnalysisAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="chart_analysis_agent",
-                delegate_type=self.__class__.__name__,
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+        *,
+        task_type: str = "supervisor_understand_chart",
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+
+        if task_type == "supervisor_understand_chart":
+            return await self._run_understand_chart(context=context, decision=decision)
+        if task_type == "analyze_paper_figures":
+            return await self._run_analyze_paper_figures(context=context, decision=decision)
+        return ResearchToolResult(
+            status="skipped",
+            observation=f"ChartAnalysisAgent does not support task_type={task_type}",
+            metadata={"reason": "unsupported_task_type"},
+        )
+
+    async def _run_understand_chart(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.unified_action_adapters import (
+            build_chart_understanding_input,
+            build_chart_understanding_output,
+        )
+
+        context.chart_attempted = True
+        chart_input = build_chart_understanding_input(context=context, decision=decision)
+        if not chart_input.image_path:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no chart_image_path was provided for chart understanding",
+                metadata={"reason": "missing_chart_image_path"},
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            decision=decision,
-            chart_analysis_agent=self,
-            task_type=task.task_type,
+        chart_result = await self.understand_chart(
+            graph_runtime=context.graph_runtime,
+            image_path=chart_input.image_path,
+            document_id=chart_input.document_id,
+            page_id=chart_input.page_id,
+            page_number=chart_input.page_number,
+            chart_id=chart_input.chart_id,
+            session_id=chart_input.session_id,
+            context=chart_input.context,
+            skill_name=chart_input.skill_name,
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "chart_analysis_agent",
-        }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="chart_analysis_agent",
-            delegate_type=self.__class__.__name__,
+        context.chart_result = chart_result
+        chart = getattr(chart_result, "chart", None)
+        output = build_chart_understanding_output(
+            chart_result=chart_result,
+            chart_input=chart_input,
         )
+        return ResearchToolResult(
+            status="succeeded",
+            observation=(
+                f"chart understood; chart_id={getattr(chart, 'id', chart_input.chart_id)}; "
+                f"chart_type={getattr(chart, 'chart_type', 'unknown')}"
+            ),
+            metadata=output.to_metadata(),
+        )
+
+    async def _run_analyze_paper_figures(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.unified_action_adapters import resolve_active_message
+
+        task_response = context.task_response
+        if task_response is None:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no research task is available for paper figure analysis",
+                metadata={"reason": "missing_task"},
+            )
+        active_message = resolve_active_message(decision)
+        payload = dict(active_message.payload or {}) if active_message is not None else {}
+        question = str(payload.get("question") or context.request.message or "").strip()
+
+        paper_ids = [
+            str(item).strip()
+            for item in (payload.get("paper_ids") or context.request.selected_paper_ids)
+            if str(item).strip()
+        ]
+        imported_papers = [
+            p for p in task_response.papers
+            if str(p.metadata.get("document_id") or "").strip()
+            and str(p.metadata.get("storage_uri") or "").strip()
+        ]
+        target_papers = [p for p in imported_papers if p.paper_id in paper_ids] if paper_ids else imported_papers
+        if not target_papers:
+            logger.warning(
+                "analyze_paper_figures: no target papers; imported_papers=%d; paper_ids=%s; all_papers=%s",
+                len(imported_papers),
+                paper_ids,
+                [(p.paper_id, p.ingest_status, bool(p.metadata.get("document_id")), bool(p.metadata.get("storage_uri"))) for p in task_response.papers[:5]],
+            )
+            return ResearchToolResult(
+                status="skipped",
+                observation="no imported paper with a local document is available for figure analysis",
+                metadata={"reason": "no_imported_papers"},
+            )
+        target_paper = target_papers[0]
+        logger.info("analyze_paper_figures: target_paper=%s doc_id=%s", target_paper.paper_id, target_paper.metadata.get("document_id"))
+
+        try:
+            figure_list = await context.research_service.list_paper_figures(
+                task_response.task.task_id,
+                target_paper.paper_id,
+                graph_runtime=context.graph_runtime,
+            )
+        except Exception as exc:
+            logger.warning("Failed to list paper figures", exc_info=True)
+            return ResearchToolResult(
+                status="failed",
+                observation=f"failed to extract figures from paper: {exc}",
+                metadata={"reason": "list_figures_failed"},
+            )
+
+        if not figure_list.figures:
+            return ResearchToolResult(
+                status="skipped",
+                observation=f"no figures found in paper '{target_paper.title}'",
+                metadata={"reason": "no_figures", "paper_id": target_paper.paper_id},
+            )
+
+        best_figure = await self._select_figure_via_anchor(
+            question=question or "",
+            target_paper=target_paper,
+            figures=figure_list.figures,
+            context=context,
+        )
+
+        figure_request = AnalyzeResearchPaperFigureRequest(
+            figure_id=best_figure.figure_id,
+            page_id=best_figure.page_id,
+            chart_id=best_figure.chart_id,
+            image_path=best_figure.image_path,
+            question=question or None,
+        )
+        try:
+            analysis_response = await context.research_service.analyze_paper_figure(
+                task_response.task.task_id,
+                target_paper.paper_id,
+                figure_request,
+                graph_runtime=context.graph_runtime,
+            )
+        except Exception as exc:
+            logger.warning("Failed to analyze paper figure", exc_info=True)
+            return ResearchToolResult(
+                status="failed",
+                observation=f"figure analysis failed: {exc}",
+                metadata={"reason": "analyze_figure_failed"},
+            )
+
+        exported_image_path = self._export_figure_image(
+            analysis_response=analysis_response,
+            task_id=task_response.task.task_id,
+        )
+        if exported_image_path and analysis_response.chart and hasattr(analysis_response.chart, "metadata"):
+            analysis_response.chart.metadata["image_path"] = exported_image_path
+
+        context.chart_result = analysis_response
+        return ResearchToolResult(
+            status="succeeded",
+            observation=(
+                f"paper figure analysis completed; paper='{target_paper.title}'; "
+                f"figure={best_figure.figure_id}; answer_length={len(analysis_response.answer)}"
+            ),
+            metadata={
+                "paper_id": target_paper.paper_id,
+                "figure_id": best_figure.figure_id,
+                "answer": analysis_response.answer,
+                "key_points": analysis_response.key_points,
+                "chart_type": getattr(analysis_response.chart, "chart_type", None),
+                "image_path": exported_image_path,
+            },
+        )
+
+    async def _select_figure_via_anchor(self, question: str, target_paper: Any, figures: list, context: Any) -> Any:
+        if len(figures) == 1:
+            return figures[0]
+        try:
+            anchor = await self.infer_cached_visual_anchor(
+                papers=[target_paper],
+                document_ids=[str(target_paper.metadata.get("document_id") or "")],
+                question=question,
+                load_cached_figure_payload=context.research_service._load_cached_figure_payload,
+            )
+        except Exception:
+            logger.debug("infer_cached_visual_anchor failed, using fallback", exc_info=True)
+            anchor = None
+        if anchor is not None:
+            anchor_figure_id = str(anchor.get("figure_id") or "").strip()
+            if anchor_figure_id:
+                matched = next((f for f in figures if f.figure_id == anchor_figure_id), None)
+                if matched is not None:
+                    logger.info("analyze_paper_figures: anchor selected figure_id=%s", anchor_figure_id)
+                    return matched
+        return figures[0]
+
+    @staticmethod
+    def _export_figure_image(analysis_response: Any, task_id: str) -> str | None:
+        source_path = getattr(analysis_response.figure, "image_path", None) if analysis_response.figure else None
+        if not source_path or not Path(source_path).is_file():
+            return None
+        export_dir = Path(".data/storage/figure_exports") / task_id
+        export_dir.mkdir(parents=True, exist_ok=True)
+        figure_id = getattr(analysis_response.figure, "figure_id", "") or "figure"
+        safe_name = re.sub(r"[^\w\-_.]", "_", figure_id)
+        suffix = Path(source_path).suffix or ".png"
+        dest_path = export_dir / f"{safe_name}{suffix}"
+        try:
+            shutil.copy2(source_path, dest_path)
+            logger.info("Exported figure image: %s -> %s", source_path, dest_path)
+            return str(dest_path)
+        except Exception:
+            logger.debug("Failed to export figure image", exc_info=True)
+            return str(source_path)
+
+    # ------------------------------------------------------------------
+    # Legacy unified runtime entry point (will be removed in Step 6)
+    # ------------------------------------------------------------------
 
     async def infer_cached_visual_anchor(
         self,

@@ -3,7 +3,6 @@ from __future__ import annotations
 import socket
 import time
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any
 
 from core.config import Settings
@@ -26,9 +25,9 @@ from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from memory.session_memory import JsonSessionMemoryStore, SessionMemory
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.paper_import_service import PaperImportService
-from services.research.paper_search_service import PaperSearchService
-from services.research.research_report_service import ResearchReportService
+from tools.research.paper_import import PaperImportService
+from tools.research.paper_search import PaperSearchService
+from adapters.storage.research_report_service import ResearchReportService
 from sdk.runtime_profile import RuntimeProfile, RuntimeProfileStore
 from tools.research.arxiv_search_tool import ArxivSearchTool
 from tools.research.ieee_metadata_search_tool import IEEEMetadataSearchTool
@@ -646,7 +645,7 @@ class ResearchCopilotSDK:
         paper_ids: list[str],
         collection_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        agent_service = self._ensure_agent_service()
+        self._ensure_agent_service()
         function_service = getattr(self._graph_runtime, "research_function_service", None)
         if function_service is None:
             raise RuntimeError("Research function service is not available in the current runtime.")
@@ -789,7 +788,7 @@ class ResearchCopilotSDK:
     def _register_optional_mcp_servers(self, graph_runtime: Any, settings: Settings) -> None:
         if not getattr(settings, "zotero_local_enabled", False):
             return
-        from services.research.zotero_local_mcp import (
+        from adapters.mcp.zotero_local import (
             ZoteroLocalServerConfig,
             build_zotero_local_mcp_client,
         )

@@ -5,7 +5,6 @@ import json
 import logging
 import mimetypes
 import re
-from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 

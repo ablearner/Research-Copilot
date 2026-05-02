@@ -45,6 +45,26 @@ class RetrievalHit(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+def retrieval_hit_score(hit: RetrievalHit) -> float:
+    return float(hit.merged_score or hit.vector_score or hit.graph_score or 0.0)
+
+
+def merge_retrieval_hits(*groups: list[RetrievalHit]) -> list[RetrievalHit]:
+    merged: dict[tuple[str, str, str | None, str | None], RetrievalHit] = {}
+    for group in groups:
+        for hit in group:
+            key = (
+                hit.id,
+                hit.source_id,
+                hit.document_id,
+                (hit.content or "")[:240] or None,
+            )
+            existing = merged.get(key)
+            if existing is None or retrieval_hit_score(hit) >= retrieval_hit_score(existing):
+                merged[key] = hit
+    return sorted(merged.values(), key=retrieval_hit_score, reverse=True)
+
+
 class HybridRetrievalResult(BaseModel):
     query: RetrievalQuery
     hits: list[RetrievalHit] = Field(default_factory=list)

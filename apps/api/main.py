@@ -21,11 +21,11 @@ from apps.api.research_runtime import (
 )
 from core.config import get_settings
 from core.logging import configure_logging
-from services.research.zotero_local_mcp import (
+from adapters.mcp.zotero_local import (
     ZoteroLocalServerConfig,
     build_zotero_local_mcp_client,
 )
-from services.research.academic_search_mcp import build_academic_search_mcp_client
+from adapters.mcp.academic_search import build_academic_search_mcp_client
 from mcp.server.app import MCPServerApp
 
 logger = logging.getLogger(__name__)

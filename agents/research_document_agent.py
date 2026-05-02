@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import TYPE_CHECKING, Any
 
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
-from services.research.research_document_capability import ResearchDocumentCapability
-from services.research.unified_action_adapters import (
-    build_document_understanding_input,
-    build_document_understanding_output,
-)
+from tools.research.document_capability import ResearchDocumentCapability
+
+if TYPE_CHECKING:
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchDocumentAgent:
@@ -18,67 +22,78 @@ class ResearchDocumentAgent:
     def __init__(self, *, capability: ResearchDocumentCapability | None = None) -> None:
         self.capability = capability or ResearchDocumentCapability()
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        if supervisor_context is None or decision is None:
-            return self._unified_result(
-                task=task,
-                status="failed",
-                observation="missing supervisor runtime context for ResearchDocumentAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-            )
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
 
-        supervisor_context.document_attempted = True
-        document_input = build_document_understanding_input(context=supervisor_context, decision=decision)
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+    ) -> ResearchToolResult:
+        from tools.research.knowledge_access import ResearchKnowledgeAccess
+        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.unified_action_adapters import (
+            build_document_understanding_input,
+            build_document_understanding_output,
+        )
+
+        context.document_attempted = True
+        document_input = build_document_understanding_input(context=context, decision=decision)
         if not document_input.file_path:
-            return self._unified_result(
-                task=task,
+            return ResearchToolResult(
                 status="skipped",
                 observation="no document_file_path was provided for document understanding",
                 metadata={"reason": "missing_document_file_path"},
             )
 
+        knowledge_access = context.knowledge_access or ResearchKnowledgeAccess.from_runtime(context.graph_runtime)
         try:
-            parsed_document, document_index_result = await self.capability.understand_document(
-                graph_runtime=supervisor_context.graph_runtime,
+            parsed_document = await knowledge_access.parse_document(
                 file_path=document_input.file_path,
                 document_id=document_input.document_id,
                 session_id=document_input.session_id,
                 metadata=document_input.metadata,
                 skill_name=document_input.skill_name,
-                include_graph=document_input.include_graph,
-                include_embeddings=document_input.include_embeddings,
             )
         except RuntimeError as exc:
-            return self._unified_result(
-                task=task,
+            return ResearchToolResult(
                 status="failed",
                 observation=str(exc),
-                metadata={"tool_name": "document_understanding"},
+                metadata={"tool_name": "parse_document"},
             )
+        context.parsed_document = parsed_document
 
-        supervisor_context.parsed_document = parsed_document
-        supervisor_context.document_index_result = document_index_result
+        if document_input.include_graph or document_input.include_embeddings:
+            try:
+                index_result = await knowledge_access.index_document(
+                    parsed_document=parsed_document,
+                    charts=[],
+                    include_graph=document_input.include_graph,
+                    include_embeddings=document_input.include_embeddings,
+                    session_id=document_input.session_id,
+                    metadata=document_input.metadata,
+                    skill_name=document_input.skill_name,
+                )
+                context.document_index_result = index_result.model_dump(mode="json")
+            except RuntimeError as exc:
+                return ResearchToolResult(
+                    status="failed",
+                    observation=str(exc),
+                    metadata={"tool_name": "index_document"},
+                )
+
         output = build_document_understanding_output(
             parsed_document=parsed_document,
-            document_index_result=document_index_result,
+            document_index_result=context.document_index_result,
         )
-        metadata = output.to_metadata()
-        metadata.update(
-            {
-                "executed_by": self.name,
-                "document_execution_path": "research_document_agent",
-            }
-        )
-        return self._unified_result(
-            task=task,
+        return ResearchToolResult(
             status="succeeded",
             observation=(
                 f"document understood; document_id={parsed_document.id}; "
-                f"pages={len(parsed_document.pages)}; indexed={bool(document_index_result)}"
+                f"pages={len(parsed_document.pages)}; indexed={bool(context.document_index_result)}"
             ),
-            metadata=metadata,
+            metadata=output.to_metadata(),
         )
 
     def _unified_result(

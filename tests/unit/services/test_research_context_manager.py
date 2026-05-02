@@ -1,6 +1,6 @@
 from domain.schemas.research import PaperCandidate, ResearchReport, ResearchTask, ResearchWorkspaceState
 from domain.schemas.sub_manager import SubManagerState, TaskStep
-from services.research.research_context_manager import ResearchContextManager
+from memory.research_context_manager import ResearchContextManager
 
 
 def test_research_context_manager_builds_context_from_artifacts() -> None:

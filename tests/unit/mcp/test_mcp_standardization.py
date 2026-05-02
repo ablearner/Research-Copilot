@@ -1,11 +1,7 @@
 """Tests for MCP standardization: JSON-RPC 2.0, initialize handshake, config loading, external tool injection."""
 from __future__ import annotations
 
-import asyncio
 import json
-import tempfile
-from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,7 +10,6 @@ from mcp.client.base import BaseMCPClient, build_jsonrpc_request, _MCP_PROTOCOL_
 from mcp.client.registry import MCPClientRegistry
 from mcp.client.stdio_client import StdioMCPClient
 from mcp.client.http_client import HttpMCPClient
-from mcp.schemas import MCPToolCallResult, MCPToolSpec
 
 
 # ── JSON-RPC 2.0 envelope ──────────────────────────────────────────
@@ -258,7 +253,6 @@ class TestHttpMCPClientErrorHandling:
     async def test_post_raises_on_jsonrpc_error(self):
         client = HttpMCPClient(server_name="err", base_url="http://localhost:9999")
         client._initialized = True
-        import httpx
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {

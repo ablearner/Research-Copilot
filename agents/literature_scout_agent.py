@@ -5,17 +5,15 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from domain.schemas.research import PaperCandidate, ResearchTopicPlan
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
-from agents.research_qa_agent import normalize_reasoning_style
-from services.research.paper_search_service import format_search_warning
-from services.research.research_specialist_capabilities import (
-    LiteratureDiscoveryCapability,
-    build_specialist_unified_result,
-)
+from domain.schemas.research import PaperCandidate, ResearchTopicPlan, normalize_reasoning_style
+from tools.research.paper_search import format_search_warning
 
 if TYPE_CHECKING:
-    from services.research.paper_search_service import PaperSearchService
+    from tools.research.paper_search import PaperSearchService
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
 
 _TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _STOPWORDS = {
@@ -140,49 +138,443 @@ class LiteratureScoutAgent:
         paper_search_service: PaperSearchService | None = None,
         *,
         llm_adapter: Any | None = None,
-        execution_capability: LiteratureDiscoveryCapability | None = None,
+        research_writer_agent: Any | None = None,
+        curation_skill: Any | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
-        self.execution_capability = execution_capability or LiteratureDiscoveryCapability()
+        self.research_writer_agent = research_writer_agent
+        self.curation_skill = curation_skill
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        runtime = runtime_context.metadata.get("supervisor_runtime")
-        if supervisor_context is None or decision is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for LiteratureScoutAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="literature_scout_agent",
-                delegate_type=self.__class__.__name__,
+    # ------------------------------------------------------------------
+    # SpecialistAgent protocol — owns the full discovery pipeline
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+    ) -> ResearchToolResult:
+        from types import SimpleNamespace
+
+        from core.utils import now_iso as _now_iso
+        from domain.schemas.research import ResearchTaskResponse
+        from domain.research_workspace import build_workspace_from_task, build_workspace_state
+        from runtime.research.agent_protocol.base import (
+            ResearchStateDelta,
+            ResearchToolResult,
+            _update_runtime_progress,
+        )
+        from runtime.research.unified_action_adapters import (
+            build_literature_search_input,
+            build_literature_search_output,
+        )
+
+        request = context.request
+        search_input = build_literature_search_input(context=context, decision=decision)
+        search_request = search_input.to_create_research_task_request().model_copy(
+            update={"run_immediately": False}
+        )
+        task_response = context.task_response
+        active_task = task_response.task if task_response is not None else None
+        if active_task is None:
+            task_response = await context.research_service.create_task(
+                search_request,
+                graph_runtime=context.graph_runtime,
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            decision=decision,
-            literature_scout_agent=self,
-            research_writer_agent=getattr(runtime, "research_writer_agent", None)
-            or getattr(supervisor_context.research_service, "research_writer_agent", None),
-            curation_skill=getattr(runtime, "paper_curation_skill", None)
-            or getattr(supervisor_context.research_service, "paper_curation_skill", None),
+            active_task = task_response.task
+
+        writer_agent = (
+            self.research_writer_agent
+            or getattr(context.research_service, "research_writer_agent", None)
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "literature_scout_agent",
+        curation_skill = (
+            self.curation_skill
+            or getattr(context.research_service, "paper_curation_skill", None)
+        )
+        exec_ctx = context.research_service.build_execution_context(
+            graph_runtime=context.graph_runtime,
+            conversation_id=request.conversation_id,
+            task=active_task,
+            report=task_response.report if task_response is not None else None,
+            papers=list(task_response.papers if task_response is not None else []),
+            document_ids=list(active_task.imported_document_ids),
+            selected_paper_ids=request.selected_paper_ids,
+            skill_name=request.skill_name,
+            reasoning_style=request.reasoning_style,
+            metadata=request.metadata,
+        )
+
+        # --- Discovery pipeline: agent owns the full orchestration ---
+        state = SimpleNamespace(
+            topic=search_request.topic,
+            days_back=search_request.days_back,
+            max_papers=search_request.max_papers,
+            sources=list(search_request.sources),
+            task_id=active_task.task_id,
+            execution_context=exec_ctx,
+            max_rounds=2,
+            round_index=0,
+            queried_pairs=set(),
+            search_completed=False,
+            curation_completed=False,
+            raw_papers=[],
+            trace=[],
+            warnings=[],
+            curated_papers=[],
+            must_read_ids=[],
+            ingest_candidate_ids=[],
+            report=None,
+            todo_items=[],
+            refinement_used=False,
+        )
+
+        _update_runtime_progress(context, stage="search_literature", node="search_literature:planning", status="running", summary="Planning literature discovery queries.")
+        plan = await self._discover_plan(state)
+        state.initial_plan = plan
+        state.active_queries = list(plan.queries)
+
+        _update_runtime_progress(context, stage="search_literature", node="search_literature:source_search", status="running", summary="Searching literature sources.")
+        raw_papers, search_warnings = await self.search(state)
+        state.warnings = list(search_warnings)
+
+        _update_runtime_progress(context, stage="search_literature", node="search_literature:curation", status="running", summary="Curating candidate papers.")
+        curated_papers, must_read_ids, ingest_candidate_ids = curation_skill.curate(
+            topic=search_request.topic,
+            raw_papers=raw_papers,
+            max_papers=search_request.max_papers,
+        )
+        state.curated_papers = curated_papers
+        state.must_read_ids = must_read_ids
+        state.ingest_candidate_ids = ingest_candidate_ids
+
+        _update_runtime_progress(context, stage="search_literature", node="search_literature:survey_writing", status="running", summary="Writing literature survey report.")
+        report = await self._discover_write_report(state, writer_agent=writer_agent)
+        state.report = report
+
+        _update_runtime_progress(context, stage="search_literature", node="search_literature:todo_planning", status="running", summary="Planning follow-up research todos.")
+        todo_items = await self._discover_plan_todos(state, writer_agent=writer_agent)
+
+        workspace = build_workspace_state(
+            objective=search_request.topic,
+            stage="complete",
+            papers=curated_papers,
+            imported_document_ids=[],
+            report=report,
+            plan=plan,
+            todo_items=todo_items,
+            must_read_ids=must_read_ids,
+            ingest_candidate_ids=ingest_candidate_ids,
+            stop_reason="Research discovery completed.",
+            metadata={
+                "decision_model": "supervisor_direct_execution",
+                "autonomy_rounds": 1,
+                "trace_steps": 0,
+            },
+        )
+        discovery_report = report.model_copy(
+            update={
+                "workspace": workspace,
+                "metadata": {
+                    **report.metadata,
+                    "autonomy_mode": "lead_agent_loop",
+                    "agent_architecture": "main_agents_plus_skills",
+                    "decision_model": "supervisor_direct_execution",
+                    "primary_agents": [
+                        "ResearchSupervisorAgent",
+                        "LiteratureScoutAgent",
+                        "ResearchWriterAgent",
+                    ],
+                    "primary_skills": ["PaperCurator"],
+                    "supervisor_agent_architecture": "supervisor_direct_execution",
+                    "supervisor_decision_model": "supervisor_direct_execution",
+                    "autonomy_rounds": 1,
+                    "search_plan": plan.model_dump(mode="json"),
+                },
+            }
+        )
+
+        # --- Build results (specialist owns the business logic, NOT persistence) ---
+        sm = {
+            "last_search_query": search_request.topic,
+            "last_search_discovered_paper_ids": [p.paper_id for p in curated_papers],
+            "last_search_discovered_count": len(curated_papers),
+            "search_plan": plan.model_dump(mode="json"),
         }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="literature_scout_agent",
-            delegate_type=self.__class__.__name__,
+
+        if context.task is not None:
+            existing_papers = context.research_service.report_service.load_papers(active_task.task_id)
+            merged_papers = self._refresh_paper_pool(
+                existing_papers=existing_papers,
+                incoming_papers=curated_papers,
+                ranking_topic=search_request.topic,
+            )
+            existing_report = context.research_service.report_service.load_report(active_task.task_id, active_task.report_id)
+            refreshed_report = discovery_report.model_copy(
+                update={
+                    "task_id": active_task.task_id,
+                    "report_id": existing_report.report_id if existing_report is not None else discovery_report.report_id,
+                    "generated_at": _now_iso(),
+                    "metadata": {
+                        **(existing_report.metadata if existing_report is not None else {}),
+                        **discovery_report.metadata,
+                        **sm,
+                    },
+                }
+            )
+            if existing_report is not None:
+                refreshed_report = self._merge_reports(refreshed_report, existing_report)
+            updated_task = active_task.model_copy(
+                update={
+                    "status": "completed",
+                    "paper_count": len(merged_papers),
+                    "report_id": refreshed_report.report_id,
+                    "updated_at": _now_iso(),
+                    "metadata": {**active_task.metadata, **sm},
+                }
+            )
+            updated_workspace = build_workspace_from_task(
+                task=updated_task,
+                report=refreshed_report,
+                papers=merged_papers,
+                plan=plan,
+                stop_reason="Literature discovery refreshed the current research workspace.",
+                metadata={
+                    **dict(updated_task.workspace.metadata),
+                    "last_search_query": search_request.topic,
+                    "last_search_discovered_count": len(curated_papers),
+                },
+            )
+            refreshed_report = refreshed_report.model_copy(update={"workspace": updated_workspace})
+            updated_task = updated_task.model_copy(update={"workspace": updated_workspace})
+            final_task = updated_task
+            final_papers = merged_papers
+            final_report = refreshed_report
+            response = ResearchTaskResponse(
+                task=updated_task, papers=merged_papers, report=refreshed_report, warnings=list(search_warnings),
+            )
+        else:
+            saved_report = discovery_report.model_copy(
+                update={"metadata": {**discovery_report.metadata, **sm}}
+            )
+            completed_task = active_task.model_copy(
+                update={
+                    "status": "completed",
+                    "paper_count": len(curated_papers),
+                    "report_id": saved_report.report_id,
+                    "todo_items": todo_items,
+                    "workspace": workspace,
+                    "updated_at": _now_iso(),
+                    "metadata": {**active_task.metadata, **sm},
+                }
+            )
+            final_task = completed_task
+            final_papers = curated_papers
+            final_report = saved_report
+            response = ResearchTaskResponse(
+                task=completed_task, papers=curated_papers, report=saved_report, warnings=list(search_warnings),
+            )
+
+        # --- P1: Build state delta (Runtime will apply + persist) ---
+        delta = ResearchStateDelta(
+            task=final_task,
+            papers=final_papers,
+            report=final_report,
+            task_response=response,
+            save_task_conversation_id=request.conversation_id,
+            rebuild_execution_context=True,
+            rebuild_execution_context_params={
+                "graph_runtime": context.graph_runtime,
+                "conversation_id": request.conversation_id,
+                "task": response.task,
+                "report": response.report,
+                "papers": list(response.papers),
+                "document_ids": list(response.task.imported_document_ids),
+                "selected_paper_ids": request.selected_paper_ids,
+                "skill_name": request.skill_name,
+                "reasoning_style": request.reasoning_style,
+                "metadata": request.metadata,
+            },
+            record_task_turn=bool(request.conversation_id),
         )
+        _update_runtime_progress(
+            context,
+            stage="search_literature",
+            node="search_literature:completed",
+            status="completed",
+            summary="Literature discovery completed.",
+            extra={"paper_count": len(response.papers), "query_count": len(plan.queries)},
+        )
+        output = build_literature_search_output(task_response=response)
+        action_label = "updated task" if context.task is not None else "created task"
+        return ResearchToolResult(
+            status="succeeded",
+            observation=f"{action_label} {response.task.task_id}; papers={len(response.papers)}; report={bool(response.report)}",
+            metadata=output.to_metadata(),
+            state_delta=delta,
+        )
+
+    # ------------------------------------------------------------------
+    # Discovery pipeline steps (timeout + heuristic fallback)
+    # ------------------------------------------------------------------
+
+    async def _discover_plan(self, state: Any) -> ResearchTopicPlan:
+        from runtime.research.agent_protocol.base import (
+            _DISCOVERY_PLAN_TIMEOUT_SECONDS,
+            _llm_stage_timeout_seconds,
+            _should_fallback_llm_stage,
+        )
+
+        timeout = _llm_stage_timeout_seconds(
+            self.llm_adapter,
+            fallback_seconds=_DISCOVERY_PLAN_TIMEOUT_SECONDS,
+            slack_seconds=10.0,
+        )
+        try:
+            return await asyncio.wait_for(self.plan(state), timeout=timeout)
+        except Exception as exc:
+            if not _should_fallback_llm_stage(exc):
+                raise
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Discovery planning timed out or hit transport failure; falling back to heuristic planner: %s",
+                exc,
+            )
+            return self._require_search_service().topic_planner.plan(
+                topic=state.topic,
+                days_back=state.days_back,
+                max_papers=state.max_papers,
+                sources=state.sources,
+            )
+
+    async def _discover_write_report(self, state: Any, *, writer_agent: Any) -> Any:
+        from runtime.research.agent_protocol.base import (
+            _SURVEY_WRITING_TIMEOUT_SECONDS,
+            _llm_stage_timeout_seconds,
+            _should_fallback_llm_stage,
+        )
+
+        timeout = _llm_stage_timeout_seconds(
+            writer_agent.llm_adapter,
+            fallback_seconds=_SURVEY_WRITING_TIMEOUT_SECONDS,
+            slack_seconds=15.0,
+        )
+        try:
+            return await asyncio.wait_for(
+                writer_agent.synthesize_async(state), timeout=timeout,
+            )
+        except Exception as exc:
+            if not _should_fallback_llm_stage(exc):
+                raise
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Survey writing timed out or hit transport failure; falling back to heuristic report generation: %s",
+                exc,
+            )
+            return writer_agent.synthesize(state)
+
+    async def _discover_plan_todos(self, state: Any, *, writer_agent: Any) -> list:
+        from runtime.research.agent_protocol.base import (
+            _TODO_PLANNING_TIMEOUT_SECONDS,
+            _llm_stage_timeout_seconds,
+            _should_fallback_llm_stage,
+        )
+
+        timeout = _llm_stage_timeout_seconds(
+            writer_agent.llm_adapter,
+            fallback_seconds=_TODO_PLANNING_TIMEOUT_SECONDS,
+            slack_seconds=8.0,
+        )
+        try:
+            return await asyncio.wait_for(
+                writer_agent.plan_todos_async(state), timeout=timeout,
+            )
+        except Exception as exc:
+            if not _should_fallback_llm_stage(exc):
+                raise
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "TODO planning timed out or hit transport failure; falling back to heuristic TODO generation: %s",
+                exc,
+            )
+            return writer_agent.plan_todos(state)
+
+    # ------------------------------------------------------------------
+    # Report merge + paper pool utilities
+    # ------------------------------------------------------------------
+
+    def _merge_reports(self, new_report: Any, existing_report: Any) -> Any:
+        markdown = new_report.markdown.rstrip()
+        qa_section = self._extract_markdown_section(existing_report.markdown, "## 研究集合问答补充")
+        todo_section = self._extract_markdown_section(existing_report.markdown, "## TODO 执行记录")
+        if qa_section:
+            markdown = f"{markdown}\n\n{qa_section.strip()}"
+        if todo_section:
+            markdown = f"{markdown}\n\n{todo_section.strip()}"
+        carry_highlights = [
+            item for item in existing_report.highlights
+            if item.startswith("问答补充：") or item.startswith("TODO执行：")
+        ]
+        return new_report.model_copy(
+            update={
+                "markdown": markdown,
+                "highlights": self._merge_text_entries(
+                    new_report.highlights, carry_highlights, limit=12,
+                ),
+                "gaps": self._merge_text_entries(
+                    new_report.gaps, list(existing_report.gaps), limit=12,
+                ),
+            }
+        )
+
+    @staticmethod
+    def _extract_markdown_section(markdown: str, heading: str) -> str | None:
+        md_lines = markdown.splitlines()
+        start_index: int | None = None
+        for index, line in enumerate(md_lines):
+            if line.strip() == heading:
+                start_index = index
+                break
+        if start_index is None:
+            return None
+        end_index = len(md_lines)
+        for index in range(start_index + 1, len(md_lines)):
+            if md_lines[index].startswith("## ") and md_lines[index].strip() != heading:
+                end_index = index
+                break
+        return "\n".join(md_lines[start_index:end_index]).strip()
+
+    @staticmethod
+    def _merge_text_entries(primary: list[str], secondary: list[str], *, limit: int) -> list[str]:
+        merged: list[str] = []
+        for item in [*primary, *secondary]:
+            if item and item not in merged:
+                merged.append(item)
+            if len(merged) >= limit:
+                break
+        return merged
+
+    def _refresh_paper_pool(
+        self,
+        *,
+        existing_papers: list[PaperCandidate],
+        incoming_papers: list[PaperCandidate],
+        ranking_topic: str,
+    ) -> list[PaperCandidate]:
+        paper_search_service = self._require_search_service()
+        merged = paper_search_service._dedupe([*existing_papers, *incoming_papers])
+        return paper_search_service.paper_ranker.rank(
+            topic=ranking_topic,
+            papers=merged,
+            max_papers=max(len(merged), 1),
+        )
+
+    # ------------------------------------------------------------------
+    # Topic planning + source search
+    # ------------------------------------------------------------------
 
     async def plan(self, state: Any) -> ResearchTopicPlan:
         paper_search_service = self._require_search_service()

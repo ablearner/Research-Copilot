@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from core.knowledge_loader import KnowledgeLoader
 

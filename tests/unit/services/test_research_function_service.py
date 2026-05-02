@@ -4,17 +4,16 @@ import httpx
 import pytest
 
 from adapters.llm.base import BaseLLMAdapter
-from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.research import ImportPapersResponse, ImportedPaperResult, PaperCandidate, ResearchReport, ResearchTopicPlan
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit, RetrievalQuery
 from domain.schemas.research_context import ResearchContext
 from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from retrieval.evidence_builder import build_evidence_bundle
-from services.research.paper_search_service import SearchResultBundle
-from services.research.research_function_service import ResearchFunctionService
-from services.research.research_report_service import ResearchReportService
-from services.research.capabilities import PaperReader, ResearchEvaluator, ReviewWriter
+from tools.research.paper_search import SearchResultBundle
+from tools.research.research_functions import ResearchFunctionService
+from adapters.storage.research_report_service import ResearchReportService
+from tools.research import PaperReader, ResearchEvaluator, ReviewWriter
 from tools.retrieval_toolkit import RetrievalAgentResult
 
 

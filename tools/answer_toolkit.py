@@ -14,7 +14,6 @@ from core.prompt_resolver import PromptResolver
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.retrieval import HybridRetrievalResult
-from agents.research_qa_agent import normalize_reasoning_style
 
 logger = logging.getLogger(__name__)
 
@@ -467,9 +466,6 @@ class AnswerAgent:
         memory_hints: dict[str, Any] | None = None,
     ) -> QAResponse:
         resolved_output_style = dict(preference_context or {})
-        reasoning_style = normalize_reasoning_style(
-            resolved_output_style.get("reasoning_style") or (metadata or {}).get("reasoning_style")
-        )
         answer_metadata = {
             **(metadata or {}),
             "session_context": session_context or {},

@@ -3,16 +3,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
-from services.research.research_specialist_capabilities import (
-    GeneralAnswerCapability,
-    build_specialist_unified_result,
-)
+
+if TYPE_CHECKING:
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -35,45 +36,86 @@ class GeneralAnswerAgent:
         self,
         *,
         llm_adapter: BaseLLMAdapter | None = None,
-        execution_capability: GeneralAnswerCapability | None = None,
         llm_timeout_seconds: float = 30.0,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.execution_capability = execution_capability or GeneralAnswerCapability()
         self.llm_timeout_seconds = llm_timeout_seconds
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        if supervisor_context is None or decision is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for GeneralAnswerAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="general_answer_agent",
-                delegate_type=self.__class__.__name__,
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.unified_action_adapters import resolve_active_message
+
+        active_message = resolve_active_message(decision)
+        payload = dict(active_message.payload or {}) if active_message is not None else {}
+        question = str(payload.get("goal") or context.request.message or "").strip()
+        on_token = None
+        if context.progress_callback is not None:
+            async def on_token(text: str) -> None:
+                await context.progress_callback({"type": "token", "text": text})
+        result = await self.answer(
+            question=question,
+            conversation_context={
+                "mode": context.request.mode,
+                "task_id": context.request.task_id,
+                "has_task": context.task is not None,
+                "selected_paper_ids": [] if payload.get("ignore_research_context") else list(context.request.selected_paper_ids),
+                "ignore_research_context": bool(payload.get("ignore_research_context")),
+            },
+            on_token=on_token,
+        )
+        warnings = list(result.warnings)
+        provider_fallback = result.answer_type in {"fallback", "provider_timeout", "provider_error"}
+        should_reroute = (not provider_fallback) and (
+            "route_mismatch" in warnings or (
+                result.answer_type == "reroute_hint"
+            ) or (
+                result.confidence < 0.45 and (
+                    context.request.task_id is not None
+                    or bool(context.request.selected_paper_ids)
+                    or bool(context.request.selected_document_ids)
+                    or bool(context.request.chart_image_path)
+                    or bool(context.request.document_file_path)
+                )
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            decision=decision,
-            general_answer_agent=self,
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "general_answer_agent",
-        }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="general_answer_agent",
-            delegate_type=self.__class__.__name__,
+        if should_reroute:
+            return ResearchToolResult(
+                status="skipped",
+                observation="general answer agent detected a likely route mismatch and requested supervisor rerouting",
+                metadata={
+                    **result.model_dump(mode="json"),
+                    "reason": "route_mismatch",
+                    "suggested_action": self._suggested_action(context=context),
+                },
+            )
+        context.general_answer = result.answer
+        context.general_answer_metadata = result.model_dump(mode="json")
+        return ResearchToolResult(
+            status="succeeded",
+            observation="general question answered directly without research workspace tools",
+            metadata=context.general_answer_metadata,
         )
+
+    def _suggested_action(self, *, context: ResearchAgentToolContext) -> str:
+        if context.request.chart_image_path:
+            return "supervisor_understand_chart"
+        if context.request.document_file_path:
+            return "understand_document"
+        if context.request.task_id or context.request.selected_paper_ids or context.request.selected_document_ids:
+            return "answer_question"
+        return "search_literature"
+
+    # ------------------------------------------------------------------
+    # Core LLM answer method
+    # ------------------------------------------------------------------
 
     async def answer(
         self,

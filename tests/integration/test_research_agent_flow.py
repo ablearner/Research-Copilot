@@ -6,7 +6,7 @@ that the _route_mode_hint_for_request uses intent results when confident.
 
 import pytest
 
-from services.research.capabilities.user_intent import ResearchIntentResolver, ResearchUserIntentResult
+from tools.research.user_intent import ResearchIntentResolver
 
 
 @pytest.fixture

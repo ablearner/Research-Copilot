@@ -1,7 +1,7 @@
 """Tests for reasoning.cot.CoTReasoningAgent."""
 
 import pytest
-from reasoning.cot import CoTReasoningAgent
+from chains.cot import CoTReasoningAgent
 from domain.schemas.retrieval import EvidenceBundle
 
 

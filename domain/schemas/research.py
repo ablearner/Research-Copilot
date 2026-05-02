@@ -8,6 +8,26 @@ from domain.schemas.document import BoundingBox, ParsedDocument
 
 
 PaperSource = Literal["arxiv", "openalex", "semantic_scholar", "ieee", "zotero"]
+
+DEFAULT_AGENT_REASONING_STYLE = "react"
+
+
+def normalize_reasoning_style(style: str | None) -> str:
+    normalized = (style or DEFAULT_AGENT_REASONING_STYLE).strip().lower().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return DEFAULT_AGENT_REASONING_STYLE
+    aliases = {
+        "chain_of_thought": "react",
+        "chainofthought": "react",
+        "cot": "react",
+        "planandsolve": "plan_and_execute",
+        "plan_and_solve": "plan_and_execute",
+        "plan_and_execute": "plan_and_execute",
+        "react": "react",
+        "auto": "auto",
+    }
+    return aliases.get(normalized, normalized)
+
 ResearchTaskStatus = Literal["created", "running", "completed", "failed"]
 PaperIngestStatus = Literal["not_selected", "selected", "ingested", "unavailable"]
 ResearchTodoStatus = Literal["open", "done", "dismissed"]

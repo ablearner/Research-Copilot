@@ -38,6 +38,7 @@ class ToolSpec(BaseModel):
     output_schema: type[Any] | None = None
     handler: ToolHandler
     tags: list[str] = Field(default_factory=list)
+    toolset: str = Field(default="default", min_length=1)
     category: ToolCategory = "runtime"
     enabled: bool = True
     max_retries: int = Field(default=0, ge=0, le=3)

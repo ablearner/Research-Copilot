@@ -36,8 +36,8 @@ from domain.schemas.research import (
     ResearchTodoItem,
     ResearchWorkspaceState,
 )
-from services.research.research_knowledge_access import ResearchKnowledgeAccess
-from services.research.research_workspace import build_workspace_from_task
+from tools.research.knowledge_access import ResearchKnowledgeAccess
+from domain.research_workspace import build_workspace_from_task
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget
 
 logger = logging.getLogger(__name__)

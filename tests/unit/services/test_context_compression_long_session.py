@@ -28,10 +28,10 @@ from domain.schemas.research_context import (
     ResearchContextSlice,
 )
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.research_context_manager import ResearchContextManager
-from services.research.research_report_service import ResearchReportService
-from services.research.paper_search_service import PaperSearchService
-from services.research.research_supervisor_graph_runtime import ResearchSupervisorGraphRuntime
+from memory.research_context_manager import ResearchContextManager
+from adapters.storage.research_report_service import ResearchReportService
+from tools.research.paper_search import PaperSearchService
+from runtime.research.supervisor_graph_runtime import ResearchSupervisorGraphRuntime
 
 
 # ---------------------------------------------------------------------------

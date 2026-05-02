@@ -4,7 +4,7 @@ from agents.preference_memory_agent import PreferenceMemoryAgent
 from domain.schemas.research import PaperCandidate, ResearchReport, ResearchTopicPlan
 from memory.long_term_memory import JsonLongTermMemoryStore, LongTermMemory
 from memory.memory_manager import MemoryManager
-from services.research.paper_search_service import SearchResultBundle
+from tools.research.paper_search import SearchResultBundle
 
 
 class PreferenceSearchServiceStub:

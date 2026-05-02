@@ -102,6 +102,7 @@ def build_research_runtime_tool_spec(
         output_schema=definition.output_schema,
         handler=handler,
         tags=list(definition.tags),
+        toolset="runtime_ops",
         enabled=enabled,
         max_retries=max_retries,
         strict_output_validation=strict_output_validation,

@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from domain.schemas.paper_knowledge import PaperFigureInsight, PaperFormulaInsight, PaperKnowledgeCard
+from domain.schemas.paper_knowledge import PaperFigureInsight, PaperFormulaInsight, PaperKnowledgeCard, PaperKnowledgeRecord
 from domain.schemas.research import PaperSource
 from domain.schemas.research_context import QAPair, ResearchContext, ResearchContextPaperMeta, ResearchUserPreferences
 from domain.schemas.sub_manager import TaskEvaluation, TaskStep
@@ -53,6 +53,7 @@ class ExtractPaperStructureFunctionOutput(BaseModel):
     key_formulas: list[PaperFormulaInsight] = Field(default_factory=list)
     figures: list[PaperFigureInsight] = Field(default_factory=list)
     knowledge_card: PaperKnowledgeCard | None = None
+    knowledge_record: PaperKnowledgeRecord | None = None
 
 
 class ComparisonTableRow(BaseModel):

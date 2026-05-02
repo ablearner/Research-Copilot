@@ -1,6 +1,6 @@
 import json
 
-from services.research.observability_service import ResearchObservabilityService
+from core.observability import ResearchObservabilityService
 
 
 def test_observability_service_writes_metrics_and_failures(tmp_path) -> None:

@@ -16,7 +16,7 @@ def test_frozen_snapshot_is_stable():
     mm = MemoryManager()
     ctx = ResearchContext(research_topic="quantum computing")
     mm.freeze_session_snapshot("s1", ctx)
-    first = mm.get_frozen_prompt_block("s1")
+    mm.get_frozen_prompt_block("s1")
     # Modify context; snapshot should NOT change
     ctx2 = ResearchContext(research_topic="machine learning", research_goals=["new goal"])
     mm.freeze_session_snapshot("s1", ctx2)  # re-freeze overwrites

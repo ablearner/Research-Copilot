@@ -1,7 +1,7 @@
 """Tests for source constraint extraction in user intent resolution."""
 import pytest
 
-from services.research.capabilities.user_intent import (
+from tools.research.user_intent import (
     ResearchIntentResolver,
     _extract_source_constraints,
 )

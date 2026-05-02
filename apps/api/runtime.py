@@ -18,7 +18,10 @@ from core.prompt_resolver import PromptResolver
 from rag_runtime.checkpoint import build_checkpointer
 from rag_runtime.memory import GraphSessionMemory, SQLiteSessionMemoryStore
 from rag_runtime.runtime import GraphRuntime, RagRuntime
-from reasoning import CoTReasoningAgent, PlanAndSolveReasoningAgent, ReActReasoningAgent, ReasoningStrategySet
+from agents.research_qa_agent import RagReActQAWorker as ReActReasoningAgent
+from chains.cot import CoTReasoningAgent
+from chains.plan_and_solve import PlanAndSolveReasoningAgent
+from rag_runtime.strategies import ReasoningStrategySet
 from retrieval.graph_retriever import GraphRetriever
 from retrieval.graph_summary_retriever import GraphSummaryRetriever
 from retrieval.hybrid_retriever import HybridRetriever
@@ -28,7 +31,7 @@ from retrieval.sparse_retriever import SparseRetriever
 from retrieval.vector_retriever import VectorRetriever
 from rag_runtime.services.embedding_index_service import EmbeddingIndexService
 from rag_runtime.services.graph_index_service import GraphIndexService
-from services.research.research_external_tool_gateway import ResearchExternalToolGateway
+from tools.research.external_tool_gateway import ResearchExternalToolGateway
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import (
@@ -197,6 +200,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["parse_document"],
                 handler=graph_runtime.handle_parse_document,
                 tags=["document", "parse"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="index_document",
@@ -205,6 +209,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["index_document"],
                 handler=graph_runtime.handle_index_document,
                 tags=["document", "index"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="understand_chart",
@@ -213,6 +218,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["understand_chart"],
                 handler=graph_runtime.handle_understand_chart,
                 tags=["chart", "vision"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="hybrid_retrieve",
@@ -221,6 +227,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["hybrid_retrieve"],
                 handler=graph_runtime.retrieval_tools.tool_hybrid_retrieve,
                 tags=["retrieval", "search"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="query_graph_summary",
@@ -229,6 +236,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["query_graph_summary"],
                 handler=graph_runtime.query_graph_summary,
                 tags=["retrieval", "graph", "summary"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="answer_with_evidence",
@@ -237,6 +245,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["answer_with_evidence"],
                 handler=graph_runtime.answer_tools.answer_with_evidence,
                 tags=["answer", "generation"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="ask_document",
@@ -245,6 +254,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["ask_document"],
                 handler=graph_runtime.handle_ask_document,
                 tags=["answer", "retrieval", "document"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="ask_fused",
@@ -253,6 +263,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["ask_fused"],
                 handler=graph_runtime.handle_ask_fused,
                 tags=["answer", "retrieval", "chart", "vision"],
+                toolset="rag",
             ),
             ToolSpec(
                 name="graph_backfill_document",
@@ -261,6 +272,7 @@ def _register_runtime_tools(graph_runtime: GraphRuntime) -> None:
                 output_schema=TOOL_OUTPUT_SCHEMAS["graph_backfill_document"],
                 handler=graph_runtime.handle_graph_backfill_document,
                 tags=["document", "graph", "index"],
+                toolset="rag",
             ),
         ],
         replace=True,

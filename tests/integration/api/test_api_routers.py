@@ -54,7 +54,7 @@ from domain.schemas.research import (
 )
 from rag_runtime.schemas import FusedAskResult
 from mcp.schemas import MCPToolCallResult, MCPToolSpec
-from services.research.research_context import ResearchExecutionContext
+from domain.schemas.research_context import ResearchExecutionContext
 
 
 class GraphRuntimeStub:

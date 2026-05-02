@@ -6,7 +6,7 @@ from agents.literature_scout_agent import LiteratureScoutAgent, _dynamic_source_
 from agents.research_knowledge_agent import ResearchKnowledgeAgent
 from domain.schemas.research import PaperCandidate, ResearchReport, ResearchTask, ResearchTaskAskRequest, ResearchTopicPlan
 from domain.schemas.retrieval import RetrievalHit
-from services.research.supervisor_tools.base import _llm_stage_timeout_seconds
+from runtime.research.agent_protocol.base import _llm_stage_timeout_seconds
 
 
 class PlanAndExecuteLLMStub:

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from services.research.paper_search_service import format_search_warning
+from tools.research.paper_search import format_search_warning
 from tools.research.semantic_scholar_search_tool import SemanticScholarSearchTool
 
 

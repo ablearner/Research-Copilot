@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from domain.schemas.research import PaperCandidate
+from domain.schemas.research import ImportPapersRequest, PaperCandidate, normalize_reasoning_style
 from domain.schemas.retrieval import RetrievalHit
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
-from agents.research_qa_agent import normalize_reasoning_style
-from services.research.research_knowledge_access import ResearchKnowledgeAccess
-from services.research.research_specialist_capabilities import (
-    KnowledgeOpsCapability,
-    build_specialist_unified_result,
-)
+from tools.research.knowledge_access import ResearchKnowledgeAccess
+
+if TYPE_CHECKING:
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
 
 _TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _STOPWORDS = {
@@ -52,24 +52,9 @@ def tokenize_research_text(text: str) -> list[str]:
     return tokens
 
 
-def retrieval_hit_score(hit: RetrievalHit) -> float:
-    return float(hit.merged_score or hit.vector_score or hit.graph_score or 0.0)
-
-
-def merge_retrieval_hits(*groups: list[RetrievalHit]) -> list[RetrievalHit]:
-    merged: dict[tuple[str, str, str | None, str | None], RetrievalHit] = {}
-    for group in groups:
-        for hit in group:
-            key = (
-                hit.id,
-                hit.source_id,
-                hit.document_id,
-                (hit.content or "")[:240] or None,
-            )
-            existing = merged.get(key)
-            if existing is None or retrieval_hit_score(hit) >= retrieval_hit_score(existing):
-                merged[key] = hit
-    return sorted(merged.values(), key=retrieval_hit_score, reverse=True)
+# Retrieval helpers – canonical location: domain.schemas.retrieval
+# Re-exported here for backward compatibility.
+from domain.schemas.retrieval import merge_retrieval_hits, retrieval_hit_score  # noqa: F401
 
 
 def is_insufficient_research_answer(*, answer: str, confidence: float, evidence_count: int) -> bool:
@@ -87,43 +72,244 @@ class ResearchKnowledgeAgent:
         self,
         *,
         llm_adapter: Any | None = None,
-        execution_capability: KnowledgeOpsCapability | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.execution_capability = execution_capability or KnowledgeOpsCapability()
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        decision = runtime_context.metadata.get("supervisor_decision")
-        if supervisor_context is None or decision is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for ResearchKnowledgeAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="research_knowledge_agent",
-                delegate_type=self.__class__.__name__,
+    def _dedupe_ids(self, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(values))
+
+    def _dedupe_text(self, values: list[str], *, limit: int) -> list[str]:
+        deduped = [v.strip() for v in values if v and v.strip()]
+        return list(dict.fromkeys(deduped))[:limit]
+
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+        *,
+        task_type: str = "compress_context",
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+
+        if task_type == "import_papers":
+            return await self._run_import_papers(context=context, decision=decision)
+        if task_type == "sync_to_zotero":
+            return await self._run_sync_to_zotero(context=context, decision=decision)
+        if task_type == "compress_context":
+            return await self._run_compress_context(context=context, decision=decision)
+        return ResearchToolResult(
+            status="skipped",
+            observation=f"ResearchKnowledgeAgent does not support task_type={task_type}",
+            metadata={"reason": "unsupported_task_type"},
+        )
+
+    async def _run_import_papers(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import MemoryOp, ResearchStateDelta, ResearchToolResult
+        from runtime.research.unified_action_adapters import build_paper_import_input, build_paper_import_output
+
+        task_response = context.task_response
+        context.import_attempted = True
+        if task_response is None:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no research task is available for paper import",
+                metadata={"reason": "missing_task"},
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            decision=decision,
-            task_type=task.task_type,
+        import_input = build_paper_import_input(context=context, decision=decision)
+        paper_ids = import_input.resolved_paper_ids(task_response.papers)
+        if not paper_ids:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no importable paper with an available PDF was found",
+                metadata={"reason": "no_import_candidates"},
+            )
+        import_result = await context.research_service.import_papers(
+            ImportPapersRequest(
+                task_id=task_response.task.task_id,
+                paper_ids=paper_ids,
+                include_graph=import_input.include_graph,
+                include_embeddings=import_input.include_embeddings,
+                skill_name=import_input.skill_name,
+                conversation_id=import_input.conversation_id,
+            ),
+            graph_runtime=context.graph_runtime,
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "research_knowledge_agent",
+        refreshed = context.research_service.get_task(task_response.task.task_id)
+        request = context.request
+        rebuild_params = {
+            "graph_runtime": context.graph_runtime,
+            "conversation_id": request.conversation_id,
+            "task": refreshed.task,
+            "report": refreshed.report,
+            "papers": refreshed.papers,
+            "document_ids": refreshed.task.imported_document_ids,
+            "selected_paper_ids": paper_ids,
+            "skill_name": request.skill_name,
+            "reasoning_style": request.reasoning_style,
+            "metadata": request.metadata,
         }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="research_knowledge_agent",
-            delegate_type=self.__class__.__name__,
+        memory_ops: list[MemoryOp] = []
+        if request.conversation_id:
+            memory_ops.append(MemoryOp(
+                op_type="record_import_turn",
+                params={
+                    "conversation_id": request.conversation_id,
+                    "task_response": refreshed,
+                    "import_response": import_result,
+                    "selected_paper_ids": paper_ids,
+                },
+            ))
+        delta = ResearchStateDelta(
+            task_response=refreshed,
+            import_result=import_result,
+            rebuild_execution_context=True,
+            rebuild_execution_context_params=rebuild_params,
+            memory_ops=memory_ops or None,
         )
+        output = build_paper_import_output(paper_ids=paper_ids, import_result=import_result)
+        return ResearchToolResult(
+            status="succeeded" if import_result.failed_count == 0 else "failed" if import_result.imported_count == 0 and import_result.skipped_count == 0 else "succeeded",
+            observation=(
+                f"paper import finished; imported={import_result.imported_count}; "
+                f"skipped={import_result.skipped_count}; failed={import_result.failed_count}"
+            ),
+            metadata=output.to_metadata(),
+            state_delta=delta,
+        )
+
+    async def _run_sync_to_zotero(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.unified_action_adapters import resolve_active_message
+
+        task_response = context.task_response
+        if task_response is None:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no research task is available for zotero sync",
+                metadata={"reason": "missing_task"},
+            )
+        active_message = resolve_active_message(decision)
+        payload = dict(active_message.payload or {}) if active_message is not None else {}
+        raw_paper_ids = [
+            str(item).strip()
+            for item in (payload.get("paper_ids") or context.request.selected_paper_ids)
+            if str(item).strip()
+        ]
+        papers_by_id = {paper.paper_id: paper for paper in task_response.papers}
+        paper_ids = [paper_id for paper_id in raw_paper_ids if paper_id in papers_by_id]
+        if not paper_ids:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no candidate papers were resolved for zotero sync",
+                metadata={"reason": "no_target_papers"},
+            )
+        function_service = getattr(context.graph_runtime, "research_function_service", None)
+        if function_service is None or not hasattr(function_service, "sync_paper_to_zotero"):
+            return ResearchToolResult(
+                status="failed",
+                observation="research function service is unavailable for zotero sync",
+                metadata={"reason": "missing_research_function_service"},
+            )
+        collection_name = str(payload.get("collection_name") or "").strip() or None
+        results: list[dict[str, Any]] = []
+        for paper_id in paper_ids:
+            paper = papers_by_id[paper_id]
+            sync_result = await function_service.sync_paper_to_zotero(
+                paper,
+                collection_name=collection_name,
+            )
+            results.append({"paper_id": paper.paper_id, "title": paper.title, **dict(sync_result)})
+        context.zotero_sync_results = results
+        synced_count = sum(1 for item in results if str(item.get("status") or "") in {"imported", "reused"})
+        failed_count = len(results) - synced_count
+        return ResearchToolResult(
+            status="succeeded" if failed_count == 0 else "failed" if synced_count == 0 else "succeeded",
+            observation=f"zotero sync finished; synced={synced_count}; failed={failed_count}",
+            metadata={
+                "paper_ids": paper_ids,
+                "synced_count": synced_count,
+                "failed_count": failed_count,
+                "results": results,
+                "collection_name": collection_name,
+            },
+        )
+
+    async def _run_compress_context(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import MemoryOp, ResearchStateDelta, ResearchToolResult
+        from runtime.research.agent_protocol.mixins import persist_workspace_results
+        from runtime.research.unified_action_adapters import build_context_compression_input, build_context_compression_output
+
+        execution_context = context.execution_context
+        if execution_context is None or execution_context.research_context is None:
+            return ResearchToolResult(status="skipped", observation="no execution context is available for compression", metadata={"reason": "missing_execution_context"})
+        compression_input = build_context_compression_input(context=context, decision=decision)
+        selected_paper_ids = compression_input.resolved_selected_paper_ids()
+        compressed = context.research_service.research_context_manager.compress_papers(
+            papers=list(context.papers),
+            selected_paper_ids=selected_paper_ids,
+            paper_reading_skill=context.research_service.paper_reading_skill,
+        )
+        if not compressed:
+            return ResearchToolResult(status="skipped", observation="no paper summary could be built for compression", metadata={"reason": "no_papers"})
+        updated_context = context.research_service.research_context_manager.update_context(
+            current_context=execution_context.research_context,
+            selected_papers=selected_paper_ids,
+            paper_summaries=compressed,
+            metadata={
+                "context_compression": {
+                    "paper_count": len({summary.paper_id for summary in compressed}),
+                    "summary_count": len(compressed),
+                    "levels": sorted({summary.level for summary in compressed}),
+                }
+            },
+        )
+        execution_context.research_context = updated_context
+        execution_context.context_slices = context.research_service.build_context_slices(
+            updated_context,
+            selected_paper_ids=selected_paper_ids,
+        )
+        compression_summary = {
+            "paper_count": len({summary.paper_id for summary in compressed}),
+            "summary_count": len(compressed),
+            "levels": sorted({summary.level for summary in compressed}),
+            "compressed_paper_ids": list(dict.fromkeys(summary.paper_id for summary in compressed)),
+        }
+        ws_result = persist_workspace_results(context, compression_summary=compression_summary, persist=False)
+        output = build_context_compression_output(
+            compression_summary=compression_summary,
+        )
+        memory_ops: list[MemoryOp] = []
+        if ws_result is not None and ws_result.memory_save_context_params is not None:
+            memory_ops.append(MemoryOp(
+                op_type="save_context",
+                params=ws_result.memory_save_context_params,
+            ))
+        delta = ResearchStateDelta(
+            task=ws_result.updated_task if ws_result else None,
+            report=ws_result.updated_report if ws_result else None,
+            save_task_conversation_id=context.request.conversation_id,
+            save_task_event_type=ws_result.save_event_type if ws_result else None,
+            save_task_event_payload=ws_result.save_event_payload if ws_result else None,
+            task_response=ws_result.updated_task_response if ws_result else None,
+            compressed_context_summary=compression_summary,
+            memory_ops=memory_ops or None,
+        )
+        return ResearchToolResult(
+            status="succeeded",
+            observation=(
+                f"context compressed; papers={compression_summary['paper_count']}; summaries={compression_summary['summary_count']}"
+            ),
+            metadata=output.to_metadata(),
+            state_delta=delta,
+        )
+
+    # ------------------------------------------------------------------
+    # Collection QA knowledge methods (used by ResearchCollectionQACapability)
+    # ------------------------------------------------------------------
 
     def decide(self, state: Any) -> tuple[str, str]:
         if not state.queries:

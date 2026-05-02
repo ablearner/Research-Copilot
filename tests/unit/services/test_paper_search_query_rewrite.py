@@ -1,7 +1,7 @@
 import pytest
 
 from domain.schemas.research import PaperCandidate
-from services.research.paper_search_service import PaperSearchService
+from tools.research.paper_search import PaperSearchService
 
 
 class RecordingToolStub:

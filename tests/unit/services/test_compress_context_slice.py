@@ -10,7 +10,6 @@ Covers:
 
 import json
 
-import pytest
 
 from domain.schemas.research_context import (
     CompressedPaperSummary,
@@ -18,7 +17,7 @@ from domain.schemas.research_context import (
     ResearchContextPaperMeta,
     ResearchContextSlice,
 )
-from services.research.research_context_manager import ResearchContextManager
+from memory.research_context_manager import ResearchContextManager
 
 
 # ---------------------------------------------------------------------------

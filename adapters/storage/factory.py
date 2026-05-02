@@ -26,7 +26,7 @@ def create_store(provider: str, **kwargs: object) -> StorageBackend:
             raise ValueError("db_path is required for sqlite provider")
         return SQLiteStore(db_path=Path(db_path))  # type: ignore[arg-type]
     elif provider == "json":
-        from services.research.research_report_service import ResearchReportService
+        from adapters.storage.research_report_service import ResearchReportService
 
         storage_root = kwargs.get("storage_root")
         if storage_root is None:

@@ -424,7 +424,7 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
     manager = ResearchSupervisorAgent(
         llm_adapter=ManagerDecisionLLMStub(
             {
-                "action_name": "understand_chart",
+                "action_name": "supervisor_understand_chart",
                 "worker_agent": "ChartAnalysisAgent",
                 "instruction": "Understand the uploaded chart.",
                 "thought": "A chart image was provided and should be processed.",
@@ -444,7 +444,7 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
         )
     )
 
-    assert decision.action_name == "understand_chart"
+    assert decision.action_name == "supervisor_understand_chart"
     assert decision.metadata["worker_agent"] == "ChartAnalysisAgent"
     assert decision.metadata["decision_source"] == "llm"
 

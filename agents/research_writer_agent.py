@@ -8,17 +8,16 @@ from core.utils import now_iso as _now_iso
 from domain.schemas.api import QAResponse
 from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from retrieval.evidence_builder import build_evidence_bundle
-from services.research.capabilities import PaperAnalyzer
-from services.research.research_knowledge_access import ResearchKnowledgeAccess
-from services.research.research_specialist_capabilities import (
-    ReviewWritingCapability,
-    build_specialist_unified_result,
-)
+from tools.research import PaperAnalyzer
+from tools.research.knowledge_access import ResearchKnowledgeAccess
 
 if TYPE_CHECKING:
-    from services.research.paper_search_service import PaperSearchService
+    from tools.research.paper_search import PaperSearchService
+    from runtime.research.agent_protocol.base import (
+        ResearchAgentToolContext,
+        ResearchToolResult,
+    )
 
 
 def _preferred_answer_language_from_question(question: str) -> str:
@@ -36,43 +35,141 @@ class ResearchWriterAgent:
         *,
         llm_adapter: Any | None = None,
         paper_analysis_skill: PaperAnalyzer | None = None,
-        execution_capability: ReviewWritingCapability | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
         self.paper_analysis_skill = paper_analysis_skill or PaperAnalyzer(llm_adapter=self.llm_adapter)
-        self.execution_capability = execution_capability or ReviewWritingCapability()
 
-    async def execute(self, task: UnifiedAgentTask, runtime_context: Any) -> UnifiedAgentResult:
-        supervisor_context = runtime_context.metadata.get("supervisor_tool_context")
-        if supervisor_context is None:
-            return build_specialist_unified_result(
-                task=task,
-                agent_name=self.name,
-                status="failed",
-                observation="missing supervisor runtime context for ResearchWriterAgent",
-                metadata={"reason": "missing_supervisor_runtime_context"},
-                execution_adapter="research_writer_agent",
-                delegate_type=self.__class__.__name__,
+    # ------------------------------------------------------------------
+    # New unified entry point (SpecialistAgent protocol)
+    # ------------------------------------------------------------------
+
+    async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
+        from runtime.research.unified_action_adapters import (
+            build_review_draft_input,
+            build_review_draft_output,
+        )
+
+        task_response = context.task_response
+        if task_response is None:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no research task is available for review drafting",
+                metadata={"reason": "missing_task"},
             )
-        result = await self.execution_capability.run(
-            context=supervisor_context,
-            writer_agent=self,
+
+        review_input = build_review_draft_input(context=context)
+        existing_report = review_input.report
+        candidate_report = existing_report or self.synthesize(review_input)
+        retry_count = 0
+        quality = self._quality_metrics(candidate_report)
+        if not quality["passed"]:
+            retry_count += 1
+            candidate_report = self.synthesize(review_input)
+            quality = self._quality_metrics(candidate_report)
+
+        generated_at = _now_iso()
+        task = task_response.task
+        saved_report = candidate_report.model_copy(
+            update={
+                "generated_at": generated_at,
+                "metadata": {
+                    **candidate_report.metadata,
+                    "worker_agent": "ResearchWriterAgent",
+                    "write_review_retry_count": retry_count,
+                    "write_review_quality_passed": quality["passed"],
+                    "write_review_issue_count": len(quality["issues"]),
+                },
+            }
         )
-        metadata = {
-            **dict(result.metadata),
-            "executed_by": self.name,
-            "specialist_execution_path": "research_writer_agent",
+        updated_task = task.model_copy(
+            update={
+                "updated_at": generated_at,
+                "report_id": saved_report.report_id,
+                "workspace": task.workspace.model_copy(
+                    update={
+                        "metadata": {
+                            **task.workspace.metadata,
+                            "write_review_retry_count": retry_count,
+                        }
+                    }
+                ),
+            }
+        )
+        request = context.request
+        updated_response = task_response.model_copy(update={"task": updated_task, "report": saved_report})
+
+        # --- P1: Build state delta (Runtime will apply + persist) ---
+        delta = ResearchStateDelta(
+            task=updated_task,
+            report=saved_report,
+            task_response=updated_response,
+            save_task_conversation_id=request.conversation_id,
+            save_task_event_type="memory_updated",
+            save_task_event_payload={"tool_name": "write_review", "report_id": saved_report.report_id},
+            rebuild_execution_context=True,
+            rebuild_execution_context_params={
+                "graph_runtime": context.graph_runtime,
+                "conversation_id": request.conversation_id,
+                "task": updated_task,
+                "report": saved_report,
+                "papers": review_input.curated_papers,
+                "document_ids": updated_task.imported_document_ids,
+                "selected_paper_ids": request.selected_paper_ids,
+                "skill_name": request.skill_name,
+                "reasoning_style": request.reasoning_style,
+                "metadata": request.metadata,
+            },
+        )
+        output = build_review_draft_output(
+            task_id=updated_task.task_id,
+            report_id=saved_report.report_id,
+            quality=quality,
+            retry_count=retry_count,
+        )
+        return ResearchToolResult(
+            status="succeeded" if quality["passed"] else "failed",
+            observation=(
+                f"review drafted; words={quality['word_count']}; citations={quality['has_citations']}; retries={retry_count}"
+            ),
+            metadata=output.to_metadata(),
+            state_delta=delta,
+        )
+
+    def _quality_metrics(self, report: ResearchReport) -> dict[str, Any]:
+        text = report.markdown
+        word_count = len([token for token in text.replace("\n", " ").split(" ") if token.strip()])
+        has_citations = "[P" in text or "引用" in text
+        has_key_sections = all(
+            section in text
+            for section in ("## 研究背景", "## 核心问题", "## 方法对比", "## 关键发现")
+        ) or all(
+            section in text
+            for section in ("## 研究背景", "## 方法对比", "## 关键发现")
+        )
+        issues: list[str] = []
+        if word_count < 250:
+            issues.append("review_too_short")
+        if not has_citations:
+            issues.append("missing_citations")
+        if not has_key_sections:
+            issues.append("missing_required_sections")
+        return {
+            "passed": not issues,
+            "word_count": word_count,
+            "has_citations": has_citations,
+            "has_key_sections": has_key_sections,
+            "issues": issues,
         }
-        return build_specialist_unified_result(
-            task=task,
-            agent_name=self.name,
-            status=result.status,
-            observation=result.observation,
-            metadata=metadata,
-            execution_adapter="research_writer_agent",
-            delegate_type=self.__class__.__name__,
-        )
+
+    # ------------------------------------------------------------------
+    # Legacy unified runtime entry point (will be removed in Step 6)
+    # ------------------------------------------------------------------
 
     def synthesize(self, state: Any) -> ResearchReport:
         paper_search_service = self._require_search_service()
@@ -285,7 +382,7 @@ class ResearchWriterAgent:
         state: Any,
         primary_agents: list[str],
     ) -> QAResponse:
-        from agents.research_knowledge_agent import merge_retrieval_hits
+        from domain.schemas.retrieval import merge_retrieval_hits
 
         all_hits = merge_retrieval_hits(state.retrieval_hits, state.summary_hits, state.manifest_hits)
         evidence_bundle = build_evidence_bundle(all_hits[: max(state.top_k * 2, 12)])

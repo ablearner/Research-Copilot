@@ -25,6 +25,7 @@ class ToolRegistry:
             "Tool registered",
             extra={
                 "tool_name": tool_spec.name,
+                "toolset": tool_spec.toolset,
                 "enabled": tool_spec.enabled,
                 "tags": tool_spec.tags,
             },
@@ -54,9 +55,11 @@ class ToolRegistry:
         tags: list[str] | None = None,
         enabled_only: bool = True,
         names: list[str] | None = None,
+        toolsets: list[str] | None = None,
     ) -> list[ToolSpec]:
         normalized_tags = set(tags or [])
         normalized_names = set(names or [])
+        normalized_toolsets = set(toolsets or [])
         tools = self.list_tools(include_disabled=not enabled_only)
         filtered: list[ToolSpec] = []
         for tool_spec in tools:
@@ -64,8 +67,18 @@ class ToolRegistry:
                 continue
             if normalized_tags and not (normalized_tags & set(tool_spec.tags)):
                 continue
+            if normalized_toolsets and tool_spec.toolset not in normalized_toolsets:
+                continue
             filtered.append(tool_spec)
         return filtered
+
+    def filter_by_toolset(self, *toolsets: str, enabled_only: bool = True) -> list[ToolSpec]:
+        """Return tools belonging to one or more toolsets."""
+        return self.filter_tools(toolsets=list(toolsets), enabled_only=enabled_only)
+
+    def list_toolsets(self) -> list[str]:
+        """Return sorted unique toolset names present in the registry."""
+        return sorted({tool.toolset for tool in self._tools.values()})
 
     def as_openai_function_tools(
         self,

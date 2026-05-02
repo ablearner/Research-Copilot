@@ -18,9 +18,9 @@ from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit, Retrie
 from rag_runtime.memory import GraphSessionMemory
 from retrieval.evidence_builder import build_evidence_bundle
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.paper_search_service import PaperSearchService
-from services.research.research_supervisor_graph_runtime import ResearchSupervisorGraphRuntime
-from services.research.research_report_service import ResearchReportService
+from tools.research.paper_search import PaperSearchService
+from runtime.research.supervisor_graph_runtime import ResearchSupervisorGraphRuntime
+from adapters.storage.research_report_service import ResearchReportService
 from rag_runtime.schemas import ChartUnderstandingResult
 from tooling.schemas import GraphSummaryToolOutput
 from tools.retrieval_toolkit import RetrievalAgentResult
@@ -1164,9 +1164,9 @@ async def test_research_supervisor_graph_can_use_chart_understanding_tool(tmp_pa
     assert response.task is None
     assert response.workspace.current_stage == "chart"
     assert response.trace[0].phase == "act"
-    assert [step.action_name for step in response.trace] == ["understand_chart", "finalize"]
-    assert _find_unified_result_action_output(response, "understand_chart")["unified_input_adapter"] == "chart_understanding_input"
-    assert _find_unified_result_metadata(response, "understand_chart")["unified_input_adapter"] == "chart_understanding_input"
+    assert [step.action_name for step in response.trace] == ["supervisor_understand_chart", "finalize"]
+    assert _find_unified_result_action_output(response, "supervisor_understand_chart")["unified_input_adapter"] == "chart_understanding_input"
+    assert _find_unified_result_metadata(response, "supervisor_understand_chart")["unified_input_adapter"] == "chart_understanding_input"
 
 
 @pytest.mark.asyncio

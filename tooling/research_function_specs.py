@@ -108,6 +108,7 @@ def build_research_tool_spec(
         output_schema=definition.output_schema,
         handler=handler,
         tags=tags or list(definition.tags),
+        toolset="research_function",
         enabled=enabled,
         max_retries=max_retries,
     )

@@ -2,7 +2,6 @@
 
 from tools.graph_extraction_toolkit import (
     GraphFromTextBlocksInput,
-    GraphFromChartInput,
     PageSummaryInput,
 )
 

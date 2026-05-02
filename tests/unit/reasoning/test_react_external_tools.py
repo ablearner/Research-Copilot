@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mcp.schemas import MCPToolCallResult, MCPToolSpec
-from reasoning.react import ReActReasoningAgent
+from agents.research_qa_agent import RagReActQAWorker as ReActReasoningAgent
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 

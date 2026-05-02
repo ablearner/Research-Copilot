@@ -4,9 +4,9 @@ import httpx
 
 from domain.schemas.document import ParsedDocument
 from domain.schemas.research import ImportPapersRequest, PaperCandidate, ResearchTask
-from services.research.paper_import_service import PaperImportService
+from tools.research.paper_import import PaperImportService
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.research_report_service import ResearchReportService
+from adapters.storage.research_report_service import ResearchReportService
 
 
 class PaperSearchServiceStub:
@@ -190,7 +190,7 @@ async def test_paper_import_service_retries_with_landing_page_pdf_discovery(tmp_
     }
 
     monkeypatch.setattr(
-        "services.research.paper_import_service.httpx.AsyncClient",
+        "tools.research.paper_import.httpx.AsyncClient",
         lambda **kwargs: FakeAsyncClient(responses, calls),
     )
 
@@ -231,7 +231,7 @@ async def test_paper_import_service_discovers_pdf_from_landing_page_without_pdf_
     }
 
     monkeypatch.setattr(
-        "services.research.paper_import_service.httpx.AsyncClient",
+        "tools.research.paper_import.httpx.AsyncClient",
         lambda **kwargs: FakeAsyncClient(responses, calls),
     )
 
@@ -266,7 +266,7 @@ async def test_paper_import_service_retries_queryless_pdf_variant(tmp_path, monk
     }
 
     monkeypatch.setattr(
-        "services.research.paper_import_service.httpx.AsyncClient",
+        "tools.research.paper_import.httpx.AsyncClient",
         lambda **kwargs: FakeAsyncClient(responses, calls),
     )
 

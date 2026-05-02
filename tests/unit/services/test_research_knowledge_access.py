@@ -4,7 +4,7 @@ import pytest
 
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
-from services.research.research_knowledge_access import ResearchKnowledgeAccess
+from tools.research.knowledge_access import ResearchKnowledgeAccess
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import HybridRetrieveToolInput, HybridRetrieveToolOutput, ToolSpec

@@ -1,4 +1,4 @@
-from services.research.capabilities import TopicPlanner
+from tools.research import TopicPlanner
 
 
 def test_topic_planner_agent_simplifies_natural_language_research_request() -> None:

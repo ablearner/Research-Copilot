@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mcp.client.registry import MCPClientRegistry
-from services.research.research_capability_registry import ResearchCapabilityRegistry
+from tools.research.capability_registry import ResearchCapabilityRegistry
 from tooling.registry import ToolRegistry
 from tooling.research_supervisor_tool_specs import build_research_supervisor_tool_spec
 from tooling.schemas import ToolSpec
@@ -19,8 +19,8 @@ async def _noop_handler(**_: object) -> dict[str, str]:
 
 
 def test_research_capability_registry_summarizes_action_runtime_and_mcp_layers() -> None:
-    action_registry = ToolRegistry()
-    action_registry.register(
+    unified_registry = ToolRegistry()
+    unified_registry.register(
         build_research_supervisor_tool_spec("search_literature", _noop_handler),
     )
     runtime_registry = ToolRegistry()
@@ -47,7 +47,7 @@ def test_research_capability_registry_summarizes_action_runtime_and_mcp_layers()
     mcp_registry = MCPClientRegistry()
     mcp_registry.register_server("zotero", SimpleNamespace())
 
-    runtime = SimpleNamespace(action_tool_registry=action_registry)
+    runtime = SimpleNamespace(tool_registry=unified_registry)
     graph_runtime = SimpleNamespace(
         tool_registry=runtime_registry,
         mcp_client_registry=mcp_registry,

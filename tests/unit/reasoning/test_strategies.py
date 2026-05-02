@@ -1,6 +1,6 @@
 """Tests for reasoning.strategies dataclass and protocols."""
 
-from reasoning.strategies import ReasoningStrategySet
+from rag_runtime.strategies import ReasoningStrategySet
 
 
 class TestReasoningStrategySet:

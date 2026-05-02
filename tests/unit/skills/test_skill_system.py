@@ -11,8 +11,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import textwrap
 from pathlib import Path
 
@@ -25,11 +23,9 @@ from core.skill_registry import (
     parse_skill_file,
     parse_skill_meta,
 )
-from core.skill_matcher import SkillMatcher, SkillMatchResult, build_skill_context
+from core.skill_matcher import SkillMatcher, build_skill_context
 from core.skill_validator import (
-    SkillValidationResult,
     SkillValidator,
-    _COMPILED_PATTERNS,
 )
 
 

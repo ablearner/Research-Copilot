@@ -1,6 +1,5 @@
 """Tests for tools.answer_toolkit utility functions and AnswerAgent basics."""
 
-import pytest
 
 from domain.schemas.evidence import Evidence, EvidenceBundle
 from tools.answer_toolkit import (

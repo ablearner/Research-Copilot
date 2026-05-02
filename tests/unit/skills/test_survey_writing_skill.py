@@ -1,7 +1,7 @@
 import pytest
 
 from domain.schemas.research import PaperCandidate
-from services.research.capabilities.survey_writing import SurveyWriter
+from tools.research.survey_writing import SurveyWriter
 
 
 class _MiniLLMStub:

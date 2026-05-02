@@ -3,9 +3,9 @@ from types import SimpleNamespace
 from core.config import Settings
 from memory.memory_manager import MemoryManager
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
-from services.research.research_function_service import ResearchFunctionService
-from services.research.research_report_service import ResearchReportService
-from services.research.capabilities import PaperReader, ResearchEvaluator, ReviewWriter
+from tools.research.research_functions import ResearchFunctionService
+from adapters.storage.research_report_service import ResearchReportService
+from tools.research import PaperReader, ResearchEvaluator, ReviewWriter
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 

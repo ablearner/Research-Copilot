@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from services.research.research_memory_gateway import ResearchMemoryGateway
+from memory.research_memory_gateway import ResearchMemoryGateway
 
 
 class _MemoryManagerStub:

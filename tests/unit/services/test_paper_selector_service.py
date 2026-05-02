@@ -1,5 +1,5 @@
 from domain.schemas.research import PaperCandidate, ResearchTask
-from services.research.paper_selector_service import PaperSelectorService
+from tools.research.paper_selector import PaperSelectorService
 
 
 def test_paper_selector_service_resolves_selected_imported_paper_scope() -> None:

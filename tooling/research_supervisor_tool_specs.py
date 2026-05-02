@@ -81,8 +81,8 @@ RESEARCH_SUPERVISOR_ACTION_DEFINITIONS: dict[str, ResearchSupervisorActionDefini
         description="Supervisor action that parses and optionally indexes an input document.",
         tags=("research", "supervisor_action", "document"),
     ),
-    "understand_chart": ResearchSupervisorActionDefinition(
-        name="understand_chart",
+    "supervisor_understand_chart": ResearchSupervisorActionDefinition(
+        name="supervisor_understand_chart",
         description="Supervisor action that analyzes chart evidence from an input image.",
         tags=("research", "supervisor_action", "chart"),
     ),
@@ -110,6 +110,7 @@ def build_research_supervisor_tool_spec(
         output_schema=SupervisorActionToolOutput,
         handler=handler,
         tags=list(definition.tags),
+        toolset="supervisor_action",
         category="research",
         enabled=enabled,
         max_retries=max_retries,

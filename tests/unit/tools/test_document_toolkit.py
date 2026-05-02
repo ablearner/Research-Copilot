@@ -3,7 +3,6 @@
 from tools.document_toolkit import (
     DocumentParseInput,
     PageSummary,
-    ChartCandidate,
     page_text,
     trim_text,
 )

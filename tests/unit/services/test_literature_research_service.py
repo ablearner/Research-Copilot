@@ -30,16 +30,16 @@ from domain.schemas.research import (
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit, RetrievalQuery
 from rag_runtime.memory import GraphSessionMemory
 from retrieval.evidence_builder import build_evidence_bundle
-from services.research.paper_search_service import PaperSearchService
+from tools.research.paper_search import PaperSearchService
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.research_report_service import ResearchReportService
-from services.research.research_supervisor_graph_runtime_core import ResearchSupervisorGraphRuntime
-from services.research.research_workspace import build_workspace_state
+from adapters.storage.research_report_service import ResearchReportService
+from runtime.research.supervisor_graph_runtime_core import ResearchSupervisorGraphRuntime
+from domain.research_workspace import build_workspace_state
 from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
 from domain.schemas.agent_message import AgentResultMessage
-from services.research.capabilities.qa_routing import ResearchQARouter
-from services.research.capabilities.user_intent import ResearchIntentResolver
-from services.research.capabilities.visual_anchor import VisualAnchor
+from tools.research.qa_routing import ResearchQARouter
+from tools.research.user_intent import ResearchIntentResolver
+from tools.research.visual_anchor import VisualAnchor
 from tooling.schemas import GraphSummaryToolOutput
 from tools.retrieval_toolkit import RetrievalAgentResult
 

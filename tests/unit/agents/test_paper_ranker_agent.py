@@ -1,4 +1,4 @@
-from services.research.capabilities import PaperRanker
+from tools.research import PaperRanker
 from domain.schemas.research import PaperCandidate
 
 

@@ -3,7 +3,7 @@ import logging
 from core.config import Settings
 from domain.schemas.research import PaperCandidate
 from rag_runtime.runtime import RagRuntime
-from services.research.capabilities import (
+from tools.research import (
     CodeLinker,
     PaperReader,
     ResearchEvaluator,
@@ -11,14 +11,14 @@ from services.research.capabilities import (
     SurveyWriter,
     WritingPolisher,
 )
-from services.research.research_function_service import ResearchFunctionService
-from services.research.research_external_tool_gateway import ResearchExternalToolGateway
+from tools.research.research_functions import ResearchFunctionService
+from tools.research.external_tool_gateway import ResearchExternalToolGateway
 from services.research.literature_research_service import LiteratureResearchService
-from services.research.paper_import_service import PaperImportService
-from services.research.paper_search_service import PaperSearchService
-from services.research.academic_search_mcp import AcademicSearchMCPDependencies
+from tools.research.paper_import import PaperImportService
+from tools.research.paper_search import PaperSearchService
+from adapters.mcp.academic_search import AcademicSearchMCPDependencies
 from adapters.storage.factory import create_store
-from services.research.research_report_service import ResearchReportService
+from adapters.storage.research_report_service import ResearchReportService
 from tooling.research_function_registry import ResearchFunctionRegistry
 from tooling.research_runtime_tool_specs import build_research_runtime_tool_spec
 from tools.research import (

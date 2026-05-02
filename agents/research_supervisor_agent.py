@@ -12,7 +12,7 @@ from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
 from domain.schemas.research_context import ResearchContextSlice
 from domain.schemas.sub_manager import TaskEvaluation
-from services.research.capabilities import ResearchEvaluator
+from tools.research import ResearchEvaluator
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ ResearchSupervisorActionName = Literal[
     "analyze_papers",
     "compress_context",
     "understand_document",
-    "understand_chart",
+    "supervisor_understand_chart",
     "analyze_paper_figures",
     "finalize",
 ]
@@ -355,7 +355,7 @@ class ResearchSupervisorAgent:
         )
         if (state.has_chart_input or state.mode == "chart") and not state.chart_understood:
             return self._guardrail_worker_action(
-                action_name="understand_chart",
+                action_name="supervisor_understand_chart",
                 state=state,
                 all_messages=all_messages,
                 results=results,
@@ -1112,7 +1112,7 @@ class ResearchSupervisorAgent:
             "analyze_papers",
             "compress_context",
             "understand_document",
-            "understand_chart",
+            "supervisor_understand_chart",
             "analyze_paper_figures",
         }
         for suggestion in suggestions:
@@ -1179,7 +1179,7 @@ class ResearchSupervisorAgent:
         if payload.get("reason") != "route_mismatch":
             return None
         suggested_action = str(payload.get("suggested_action") or "").strip()
-        if suggested_action not in {"search_literature", "answer_question", "understand_document", "understand_chart", "analyze_paper_figures"}:
+        if suggested_action not in {"search_literature", "answer_question", "understand_document", "supervisor_understand_chart", "analyze_paper_figures"}:
             suggested_action = "answer_question" if state.has_task else "search_literature"
         return self._guardrail_worker_action(
             action_name=suggested_action,  # type: ignore[arg-type]
@@ -1510,7 +1510,7 @@ class ResearchSupervisorAgent:
             actions.append(self._action_descriptor("understand_document", "ResearchDocumentAgent", "Parse and ground the uploaded document before other research actions.", state=state))
         intent_name = str(state.user_intent.get("intent") or "").strip()
         if (state.has_chart_input and not state.chart_understood) or intent_name == "figure_qa":
-            actions.append(self._action_descriptor("understand_chart", "ChartAnalysisAgent", "Understand or analyze a chart, figure, or diagram from an uploaded image.", state=state))
+            actions.append(self._action_descriptor("supervisor_understand_chart", "ChartAnalysisAgent", "Understand or analyze a chart, figure, or diagram from an uploaded image.", state=state))
         if not state.has_task:
             actions.append(self._action_descriptor("search_literature", "LiteratureScoutAgent", "Start a new research exploration and create the initial task, candidate papers, and workspace.", state=state))
         else:
@@ -1584,7 +1584,7 @@ class ResearchSupervisorAgent:
         intent_name = str(state.user_intent.get("intent") or "").strip()
         if action_name == "analyze_paper_figures" and intent_name == "figure_qa" and state.imported_document_count > 0:
             score += 0.88
-        if action_name == "understand_chart" and state.has_chart_input and not state.chart_understood:
+        if action_name == "supervisor_understand_chart" and state.has_chart_input and not state.chart_understood:
             score += 0.92
         return round(score, 3)
 
@@ -1796,7 +1796,7 @@ class ResearchSupervisorAgent:
             "analyze_papers",
             "compress_context",
             "understand_document",
-            "understand_chart",
+            "supervisor_understand_chart",
             "analyze_paper_figures",
             "finalize",
         }
@@ -1821,7 +1821,7 @@ class ResearchSupervisorAgent:
             "analyze_papers": "PaperAnalysisAgent",
             "compress_context": "ResearchKnowledgeAgent",
             "understand_document": "ResearchDocumentAgent",
-            "understand_chart": "ChartAnalysisAgent",
+            "supervisor_understand_chart": "ChartAnalysisAgent",
             "analyze_paper_figures": "ChartAnalysisAgent",
             "finalize": "ResearchSupervisorAgent",
         }
@@ -1844,7 +1844,7 @@ class ResearchSupervisorAgent:
             "analyze_papers": "analyze_papers",
             "compress_context": "compress_context",
             "understand_document": "understand_document",
-            "understand_chart": "understand_chart",
+            "supervisor_understand_chart": "supervisor_understand_chart",
             "analyze_paper_figures": "analyze_paper_figures",
             "finalize": "finalize",
         }
@@ -1932,7 +1932,7 @@ class ResearchSupervisorAgent:
             return f"Compress the current research context for '{state.goal}' so later workers can reason over a denser summary."
         if action_name == "understand_document":
             return "Parse and ground the uploaded document into reusable research evidence."
-        if action_name == "understand_chart":
+        if action_name == "supervisor_understand_chart":
             return "Understand the uploaded chart and convert it into structured evidence for later reasoning."
         if action_name == "analyze_paper_figures":
             return f"Extract and analyze figures from an imported paper's PDF to answer the user's figure question about '{state.goal}'."
@@ -1960,7 +1960,7 @@ class ResearchSupervisorAgent:
             "analyze_papers": {"answer": "str", "focus": "str", "recommended_paper_ids": "list[str]"},
             "compress_context": {"paper_count": "int", "summary_count": "int"},
             "understand_document": {"document_id": "str", "page_count": "int"},
-            "understand_chart": {"chart_id": "str", "chart_type": "str|null"},
+            "supervisor_understand_chart": {"chart_id": "str", "chart_type": "str|null"},
             "analyze_paper_figures": {"paper_id": "str", "figure_id": "str", "answer": "str"},
             "finalize": {"stop_reason": "str"},
         }
@@ -2373,7 +2373,7 @@ class ResearchSupervisorAgent:
             )
         if self._should_understand_chart(state):
             return self._fallback_action_decision(
-                action_name="understand_chart",
+                action_name="supervisor_understand_chart",
                 state=state,
                 thought="The uploaded chart should be structured before broader research actions.",
                 rationale="Chart understanding turns the visual artifact into evidence that later workers can cite.",
@@ -2844,9 +2844,9 @@ class ResearchSupervisorAgent:
                 "estimated_cost": 0.35,
                 "action_input": {"goal": state.goal, "mode": state.mode},
             }
-        if message.task_type == "understand_chart":
+        if message.task_type == "supervisor_understand_chart":
             return {
-                "action_name": "understand_chart",
+                "action_name": "supervisor_understand_chart",
                 "worker_agent": "ChartAnalysisAgent",
                 "thought": "Planner 识别到图表证据输入，先完成图表结构化理解以服务后续研究分析。",
                 "rationale": "Chart understanding belongs inside the research assistant as a visual evidence worker.",

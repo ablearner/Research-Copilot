@@ -7,10 +7,7 @@ from uuid import uuid4
 
 from core.utils import now_iso as _now_iso
 from agents.chart_analysis_agent import ChartAnalysisAgent
-from agents.literature_scout_agent import LiteratureScoutAgent
 from agents.preference_memory_agent import PreferenceMemoryAgent
-from agents.research_knowledge_agent import ResearchKnowledgeAgent
-from agents.research_writer_agent import ResearchWriterAgent
 from domain.schemas.research import (
     ResearchAdvancedStrategy,
     CreateResearchTaskRequest,
@@ -36,27 +33,26 @@ from memory.memory_manager import MemoryManager
 from memory.long_term_memory import JsonLongTermMemoryStore, LongTermMemory
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from memory.session_memory import JsonSessionMemoryStore, SessionMemory
-from services.research.capabilities import (
+from tools.research import (
+    PaperAnalyzer,
     PaperReader,
     ResearchQARouter,
     ResearchEvaluator,
     ResearchIntentResolver,
     ReviewWriter,
     WritingPolisher,
-    PaperCurator,
 )
-from services.research.research_collection_qa_capability import ResearchCollectionQACapability
-from services.research.research_context import ResearchExecutionContext
-from services.research.research_context_manager import ResearchContextManager
-from services.research.research_discovery_capability import ResearchDiscoveryCapability
-from services.research.research_memory_gateway import ResearchMemoryGateway
-from services.research.paper_selector_service import PaperSelectorService
-from services.research.paper_import_service import PaperImportService
-from services.research.observability_service import ResearchObservabilityService
-from services.research.paper_search_service import PaperSearchService
-from services.research.research_report_service import ResearchReportService
-from services.research.research_workspace import build_workspace_state
-from services.research.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
+from tools.research.collection_qa_capability import ResearchCollectionQACapability
+from domain.schemas.research_context import ResearchExecutionContext
+from memory.research_context_manager import ResearchContextManager
+from memory.research_memory_gateway import ResearchMemoryGateway
+from tools.research.paper_selector import PaperSelectorService
+from tools.research.paper_import import PaperImportService
+from core.observability import ResearchObservabilityService
+from tools.research.paper_search import PaperSearchService
+from adapters.storage.research_report_service import ResearchReportService
+from domain.research_workspace import build_workspace_state
+from memory.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
 from services.research.paper_operations import PaperOperationsMixin
 from services.research.qa_router import QARoutingMixin
 
@@ -113,23 +109,9 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         self.paper_reading_skill = paper_reading_skill or PaperReader()
         llm_adapter = getattr(paper_search_service, "llm_adapter", None)
         self.llm_adapter = llm_adapter
-        self.literature_scout_agent = LiteratureScoutAgent(
-            paper_search_service,
-        )
-        self.paper_curation_skill = PaperCurator(paper_search_service)
-        self.research_knowledge_agent = ResearchKnowledgeAgent()
-        self.research_writer_agent = ResearchWriterAgent(
-            paper_search_service,
-            llm_adapter=llm_adapter,
-        )
         self.research_collection_qa_capability = ResearchCollectionQACapability(
             llm_adapter=llm_adapter,
-            paper_analysis_skill=self.research_writer_agent.paper_analysis_skill,
-        )
-        self.research_discovery_capability = ResearchDiscoveryCapability(
-            literature_scout_agent=self.literature_scout_agent,
-            research_writer_agent=self.research_writer_agent,
-            curation_skill=self.paper_curation_skill,
+            paper_analysis_skill=PaperAnalyzer(llm_adapter=llm_adapter),
         )
         self.qa_routing_skill = ResearchQARouter(llm_adapter=llm_adapter)
         self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
@@ -578,6 +560,12 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         *,
         graph_runtime: Any | None = None,
     ) -> ResearchTaskResponse:
+        """Facade: create a research task and optionally trigger autonomous execution.
+
+        This method owns initial task construction and persistence. If
+        ``run_immediately`` is set, it delegates to :meth:`run_task` which in
+        turn delegates to the Runtime via :meth:`run_agent`.
+        """
         now = _now_iso()
         correlation_id = f"task_{uuid4().hex}"
         task = ResearchTask(
@@ -637,7 +625,12 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         graph_runtime: Any,
         on_progress: Any | None = None,
     ) -> ResearchAgentRunResponse:
-        from services.research.research_supervisor_graph_runtime import ResearchSupervisorGraphRuntime
+        """Facade: delegate an agent run request to the Supervisor Graph Runtime.
+
+        The Service only performs pre-flight user preference observation here;
+        all execution, state mutation, and persistence happen inside the Runtime.
+        """
+        from runtime.research.supervisor_graph_runtime import ResearchSupervisorGraphRuntime
 
         if self._agent_runtime is None:
             self._agent_runtime = ResearchSupervisorGraphRuntime(research_service=self)
@@ -664,6 +657,12 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         graph_runtime: Any | None = None,
         conversation_id: str | None = None,
     ) -> ResearchTaskResponse:
+        """Facade: execute a previously created research task end-to-end.
+
+        Handles lifecycle bookkeeping (status transitions, events, metrics)
+        around a call to :meth:`run_agent`.  The actual research logic lives
+        entirely inside the Runtime.
+        """
         task = self.report_service.load_task(task_id)
         if task is None:
             raise KeyError(task_id)
