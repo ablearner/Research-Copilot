@@ -132,8 +132,8 @@ Browser (http://localhost:3000)
   敏感数据脱敏（API key、token、密码、连接串等 11 种模式）
 - `memory/`
   research 侧工作记忆、会话记忆、长期记忆、用户画像记忆和论文知识记忆
-- `reasoning/`
-  可复用推理策略层（CoT / PlanAndSolve / ReAct）
+- `chains/` + `rag_runtime/strategies.py`
+  可复用推理策略实现与协议。`CoTReasoningAgent` 和 `PlanAndSolveReasoningAgent` 在 `chains/`，ReAct 工具推理 worker 在 `agents/research_qa_agent.py`，策略组合定义在 `rag_runtime/strategies.py`。
 - `tooling/`
   工具注册 / 执行框架和 research function 规范
 - `mcp/`
