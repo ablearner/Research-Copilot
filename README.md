@@ -4,7 +4,7 @@
 
 ## 当前代码主线
 
-当前项目最值得先记住的是三层边界：
+当前项目最值得先记住的是四层边界：
 
 - `services/research/`
   高层 research 业务服务层，负责 conversation、task、paper pool、import job、collection QA、workspace、report 和持久化收口。
@@ -20,7 +20,7 @@
 - 技术栈：Next.js 15 (App Router) + React 18 + TypeScript + Tailwind CSS
 - 应用入口：`web/app/layout.tsx` + `web/app/page.tsx`
 - 主组件：`web/src/App.tsx`
-- API 封装：`web/src/api.ts`（通过 Next.js rewrites 代理到 FastAPI）
+- API 封装：`web/src/api.ts`（当前直接请求 `http://127.0.0.1:8000`；`next.config.ts` 里仍保留 `/api/backend/*` rewrite，但活跃前端请求没有走这层代理）
 - 图片服务：`web/app/api/files/[...path]/route.ts`（Next.js Route Handler）
 - 聊天视图：`web/src/components/ChatView.tsx`
 - 消息气泡：`web/src/components/MessageBubble.tsx`（含内联图片渲染）
@@ -30,8 +30,8 @@
 前端采用类似 ChatGPT / Claude 的对话式布局：
 
 - **主区域**：居中的对话线程，占满屏幕高度
-- **输入栏**：底部固定，支持检索/问答模式切换
-- **侧边栏**：默认收起，包含会话列表
+- **输入栏**：底部固定，支持文本输入、文件选择和流式发送
+- **侧边栏**：桌面端默认展开，移动端可通过顶部按钮收起/展开
 - **内联图片**：自动检测消息中的图片路径并渲染为 `<img>` 标签
 - **决策轨迹**：Agent 活动和 Trace 默认展开显示
 
@@ -42,8 +42,10 @@
 | `ChatView` | 聊天视图：消息过滤、发送、task_id 跟踪 |
 | `MessageBubble` | 消息气泡：Markdown 渲染、内联图片、论文卡片、决策轨迹 |
 | `InputBar` | 底部输入栏 |
+| `FileUpload` | 文件选择和待上传文件预览 |
 | `PaperCard` | 论文卡片 |
 | `Sidebar` | 侧边栏会话列表 |
+| `Toast` | 前端提示消息 |
 | `WelcomeScreen` | 空状态欢迎页 |
 
 
@@ -52,7 +54,7 @@
 ```text
 Browser (http://localhost:3000)
 -> Next.js (web/, App Router)
--> /api/backend/* rewrites -> FastAPI (http://127.0.0.1:8000)
+-> web/src/api.ts -> FastAPI (http://127.0.0.1:8000)
 -> /api/files/* -> Route Handler -> .data/storage/
 -> LiteratureResearchService
 -> ResearchSupervisorGraphRuntime
@@ -68,7 +70,7 @@ Browser (http://localhost:3000)
 - `research discovery`
   根据研究主题搜索 arXiv、OpenAlex、Semantic Scholar、IEEE 等学术源，生成候选论文池和研究草稿。
 - `paper import`
-  对选中的论文执行 `download -> parse -> Zotero sync -> embedding index -> graph index`。索引阶段有 `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 超时保护；索引超时会保留已解析/已同步的论文，不再把整次导入判为失败。
+  对选中的论文执行 `download -> parse -> optional Zotero sync -> embedding index`。`ImportPapersRequest.fast_mode` 默认是 `true`，因此主导入阶段默认先完成 embedding 索引；如果 `include_graph=true`，图谱索引会标记为 `graph_backfill_pending`，后台导入 job 会继续执行 graph backfill。索引阶段有 `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 超时保护；索引超时会保留已解析/已同步的论文，不再把整次导入判为失败。
 - `collection QA`
   基于已导入论文集合做混合检索和 grounded answer，必要时下钻到单文档或图表链路。
 - `paper question answering`
@@ -87,7 +89,7 @@ Browser (http://localhost:3000)
 - RAG runtime session memory
   定义在 `rag_runtime/memory.py`，核心是 `GraphSessionMemory`，用于给底层问答链路保存结构化会话快照。
 
-默认配置下：
+代码默认配置下：
 
 - `SESSION_MEMORY_PROVIDER=sqlite`
   底层 `GraphSessionMemory` 默认写入 `RESEARCH_SQLITE_DB_PATH`。
@@ -95,6 +97,8 @@ Browser (http://localhost:3000)
   runtime profile 显示为 sqlite；research service 内部的长期记忆仍由 `MemoryManager` 和本地 JSON store 承载业务画像/论文知识。
 - `VECTOR_STORE_PROVIDER=milvus`
 - `GRAPH_STORE_PROVIDER=memory`
+
+本机常用业务配置会覆盖上述代码默认值。当前业务运行一般使用 `RUNTIME_BACKEND=business`、OpenAI-compatible LLM/embedding、Milvus compose 暴露端口 `19531`、`GRAPH_STORE_PROVIDER=neo4j`。在这种配置下 Neo4j 是必需服务；如果保持代码默认的 `GRAPH_STORE_PROVIDER=memory`，则不需要启动 Neo4j。
 
 ## 主要目录
 
@@ -151,6 +155,8 @@ Browser (http://localhost:3000)
 
 - `POST /research/agent`
   当前统一主入口
+- `POST /research/agent/stream`
+  前端当前使用的 SSE 流式入口
 - `GET/POST /research/conversations`
 - `GET/PATCH/DELETE /research/conversations/{conversation_id}`
 - `POST /research/reset`
@@ -165,6 +171,10 @@ Browser (http://localhost:3000)
 - `GET /research/tasks/{task_id}/papers/{paper_id}/figures`
 - `POST /research/tasks/{task_id}/papers/{paper_id}/figures/analyze`
 - `PATCH /research/tasks/{task_id}/todos/{todo_id}`
+- `POST /research/tasks/{task_id}/todos/{todo_id}/search`
+- `POST /research/tasks/{task_id}/todos/{todo_id}/import`
+
+兼容入口仍保留但已标记为 deprecated：`POST /research/agent/run`、`POST /research/agent/chat`、`POST /research/papers/import`、`POST /research/papers/import/jobs`。
 
 ### Research Document API
 
@@ -215,13 +225,14 @@ Browser (http://localhost:3000)
 - uploads
   `UPLOAD_DIR`、`UPLOAD_MAX_BYTES`
 
-当前默认值中比较关键的几点：
+代码默认值中比较关键的几点：
 
 - `APP_ENV=local` 时会暴露 `/uploads/*`
 - `UPLOAD_MAX_BYTES` 默认 `25 MiB`
 - `VECTOR_STORE_PROVIDER` 默认 `milvus`
-- `MILVUS_URI` 代码默认 `http://localhost:19530`；仓库当前 `.env` 和 compose 映射常用 `http://localhost:19531`
-- `GRAPH_STORE_PROVIDER` 代码默认 `memory`，仓库当前 `.env` 中可配置为 `neo4j`
+- `MILVUS_URI` 代码默认 `http://localhost:19530`；使用仓库的 `docker-compose.milvus.yml` 时需要配置为 `http://localhost:19531`
+- `MILVUS_DIMENSION` 代码默认自动跟随 embedding adapter；如果用 `text-embedding-3-large`，本地通常配置为 `3072`
+- `GRAPH_STORE_PROVIDER` 代码默认 `memory`；业务 `.env` 可配置为 `neo4j`，此时后端启动会要求 `NEO4J_URI`、`NEO4J_USER`、`NEO4J_PASSWORD` 且 Neo4j 可连接
 - `SESSION_MEMORY_PROVIDER` 默认 `sqlite`
 - `LONG_TERM_MEMORY_PROVIDER` 默认 `sqlite`
 - `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 默认 `300`
@@ -358,7 +369,7 @@ requires:
 
 ## 本地启动
 
-### 完整启动顺序（必须按顺序执行）
+### 常用启动顺序
 
 #### 第一步：基础设施
 
@@ -369,12 +380,12 @@ docker-compose -f docker-compose.milvus.yml up -d
 # 等待端口 19531 就绪（约 15-30 秒）
 # 检查：curl -s http://localhost:9092/healthz  →  应返回 "OK"
 
-# 2. 启动 Neo4j（Docker 容器，数据挂载在 .data/neo4j/）
+# 2. 如果 GRAPH_STORE_PROVIDER=neo4j，启动 Neo4j（Docker 容器，数据挂载在 .data/neo4j/）
 docker start kepler-neo4j
 # 等待端口 7687 就绪（约 10-15 秒）
 # 检查：docker exec kepler-neo4j cypher-shell -u neo4j -p neo4j1234 'RETURN 1'
 
-# 3. 启动 Zotero Bridge（WSL 环境，需要 Windows 上先打开 Zotero 桌面程序）
+# 3. 如果需要访问本地 Zotero，启动 Zotero Bridge（WSL 环境，需要 Windows 上先打开 Zotero 桌面程序）
 bash scripts/wsl_zotero_bridge.sh start
 # 检查：ss -tlnp | grep 23119
 ```
@@ -389,7 +400,7 @@ cd /home/myc/Research-Copilot
   --reload-dir agents --reload-dir tools --reload-dir adapters \
   --reload-dir memory --reload-dir retrieval --reload-dir domain
 # 等待日志出现 "Application startup complete"
-# 如果卡在 "Waiting for application startup"，说明 Milvus 或 Neo4j 没启动
+# 如果卡在 "Waiting for application startup"，优先检查 Milvus；若 GRAPH_STORE_PROVIDER=neo4j，再检查 Neo4j
 # 注意：必须用 --reload-dir 限制监视目录，否则 watchfiles 会因 web/node_modules 文件过多而崩溃
 ```
 
@@ -406,8 +417,8 @@ npm run dev
 | 服务 | 端口 | 启动方式 |
 |------|------|------|
 | Milvus | 19531 (映射到容器内 19530) | `docker-compose -f docker-compose.milvus.yml up -d`（在 Research-Copilot 目录下） |
-| Neo4j | 7474/7687 | `docker start kepler-neo4j`（Docker 容器，数据在 `.data/neo4j/`） |
-| Zotero Bridge | 23119 | `bash scripts/wsl_zotero_bridge.sh start` |
+| Neo4j | 7474/7687 | 仅 `GRAPH_STORE_PROVIDER=neo4j` 时需要，常用 `docker start kepler-neo4j` |
+| Zotero Bridge | 23119 | 仅需要本地 Zotero 时启动，`bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
 | 前端 (Next.js) | 3000 | `cd web && npm run dev` |
 
