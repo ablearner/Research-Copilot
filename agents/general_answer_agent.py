@@ -60,15 +60,18 @@ class GeneralAnswerAgent:
         if context.progress_callback is not None:
             async def on_token(text: str) -> None:
                 await context.progress_callback({"type": "token", "text": text})
+        conversation_ctx: dict[str, Any] = {
+            "mode": context.request.mode,
+            "task_id": context.request.task_id,
+            "has_task": context.task is not None,
+            "selected_paper_ids": [] if payload.get("ignore_research_context") else list(context.request.selected_paper_ids),
+            "ignore_research_context": bool(payload.get("ignore_research_context")),
+        }
+        if context.supervisor_instruction:
+            conversation_ctx["supervisor_instruction"] = context.supervisor_instruction
         result = await self.answer(
             question=question,
-            conversation_context={
-                "mode": context.request.mode,
-                "task_id": context.request.task_id,
-                "has_task": context.task is not None,
-                "selected_paper_ids": [] if payload.get("ignore_research_context") else list(context.request.selected_paper_ids),
-                "ignore_research_context": bool(payload.get("ignore_research_context")),
-            },
+            conversation_context=conversation_ctx,
             on_token=on_token,
         )
         warnings = list(result.warnings)

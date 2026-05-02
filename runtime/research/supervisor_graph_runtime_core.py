@@ -42,6 +42,7 @@ from runtime.research.unified_runtime import (
 from typing import TYPE_CHECKING
 from domain.research_workspace import build_workspace_from_task, build_workspace_state
 from tools.research import PaperAnalyzer, PaperReader, ResearchIntentResolver, PaperCurator
+from tools.research.user_intent import ResearchUserIntentResult
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from context.compressor import ContextCompressor
@@ -49,6 +50,7 @@ from core.skill_registry import SkillRegistry
 from core.skill_matcher import SkillMatcher
 from core.utils import normalize_topic_text as _normalize_topic_text_impl
 from runtime.research.context_builder import ResearchAgentContextBuilder
+from runtime.research.response_formatter import ResearchResponseFormatter
 from runtime.research.result_aggregator import ResearchAgentResultAggregator
 from tools.research.capability_registry import ResearchCapabilityRegistry
 from tools.research.skill_resolver import ResearchSkillResolver
@@ -126,6 +128,7 @@ class ResearchRuntimeBase:
             memory_gateway=getattr(research_service, "memory_gateway", None),
             paper_search_service=research_service.paper_search_service,
             storage_root=research_service.report_service.storage_root,
+            llm_adapter=llm_adapter,
         )
         self.literature_scout_agent.research_writer_agent = self.research_writer_agent
         self.paper_curation_skill = PaperCurator(research_service.paper_search_service)
@@ -149,6 +152,9 @@ class ResearchRuntimeBase:
             skill_resolver=self.skill_resolver,
         )
         self.capability_registry = ResearchCapabilityRegistry(runtime=self)
+        self.response_formatter = ResearchResponseFormatter(
+            manager_display_name=self._manager_display_name(),
+        )
         self.result_aggregator = ResearchAgentResultAggregator(runtime=self)
 
     @property
@@ -265,6 +271,7 @@ class ResearchRuntimeBase:
         )
         metadata_context["active_thread_id"] = snapshot.active_thread_id
         metadata["context"] = metadata_context
+        metadata["user_intent"] = heuristic_intent.model_dump(mode="json")
 
         hydrated_request = request.model_copy(
             update={
@@ -278,8 +285,41 @@ class ResearchRuntimeBase:
         )
         return hydrated_request, restored_task_response
 
-    def _build_tool_context(self, *, request: ResearchAgentRunRequest, graph_runtime: Any) -> ResearchAgentToolContext:
-        return self.context_builder.build(request=request, graph_runtime=graph_runtime)
+    async def _build_tool_context(self, *, request: ResearchAgentRunRequest, graph_runtime: Any) -> ResearchAgentToolContext:
+        self._inject_skill_matcher_backends(graph_runtime)
+        return await self.context_builder.build(request=request, graph_runtime=graph_runtime)
+
+    def _inject_skill_matcher_backends(self, graph_runtime: Any) -> None:
+        """Lazy-inject embedding_adapter and reranker into the skill matcher.
+
+        These are only available from graph_runtime (RagRuntime), which is not
+        known at __init__ time.  Injection happens once on first request.
+        """
+        if self.skill_matcher.embedding_adapter is not None:
+            return  # already injected
+        embedding_adapter = getattr(
+            getattr(graph_runtime, "embedding_index_service", None),
+            "embedding_adapter",
+            None,
+        )
+        if embedding_adapter is not None:
+            self.skill_matcher.embedding_adapter = embedding_adapter
+        reranker = getattr(
+            getattr(
+                getattr(graph_runtime, "retrieval_tools", None),
+                "retriever",
+                None,
+            ),
+            "reranker",
+            None,
+        )
+        if reranker is not None:
+            self.skill_matcher.reranker = reranker
+            # Warmup: trigger tokenizer/model weight loading to avoid cold-start
+            try:
+                reranker._predict([("warmup", "warmup")])
+            except Exception:
+                pass
 
     def _build_unified_agent_delegates(self) -> dict[str, Any]:
         return {
@@ -425,8 +465,39 @@ class ResearchRuntimeBase:
         )
 
     async def _decide_next_action(self, state: ResearchAgentGraphState) -> ResearchSupervisorDecision:
+        context = state["context"]
+        session_ctx = self._resolve_session_context(context)
+        user_intent = await self.user_intent_resolver.resolve_async(
+            message=context.request.message,
+            has_task=context.task is not None,
+            candidate_paper_count=len(context.papers),
+            candidate_papers=self._candidate_paper_scope_for_manager(context.papers),
+            active_paper_ids=self._active_paper_ids_for_manager(context),
+            selected_paper_ids=list(context.request.selected_paper_ids),
+            has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
+            has_document_input=bool(context.request.document_file_path),
+            session_topic=session_ctx["previous_topic"] or None,
+        )
+
+        # --- Fast path: skip Supervisor LLM for trivial messages ---
+        fast_decision = self._try_fast_route(
+            context=context,
+            user_intent=user_intent,
+            session_ctx=session_ctx,
+            state=state,
+        )
+        if fast_decision is not None:
+            return self._inject_skill_metadata_into_decision(fast_decision, context=context)
+
+        supervisor_state = self._state_from_context(
+            context,
+            trace=state.get("trace", []),
+            user_intent=user_intent,
+            session_context=session_ctx,
+            execution_plan=state.get("execution_plan", []),
+        )
         decision = await self.manager_agent.decide_next_action_async(
-            await self._state_from_context(state["context"], trace=state.get("trace", [])),
+            supervisor_state,
             pending_messages=state.get("pending_agent_messages", []),
             agent_messages=state.get("agent_messages", []),
             agent_results=state.get("agent_results", []),
@@ -435,11 +506,51 @@ class ResearchRuntimeBase:
             replanned_failure_task_ids=state.get("replanned_failure_task_ids", []),
             planner_runs=int(state.get("planner_runs", 0) or 0),
             replan_count=int(state.get("replan_count", 0) or 0),
-            context_slice=self._context_slice(state["context"]),
+            context_slice=self._context_slice(context),
             clarification_request=state.get("clarification_request"),
             active_plan_id=state.get("active_plan_id"),
         )
-        return self._inject_skill_metadata_into_decision(decision, context=state["context"])
+        return self._inject_skill_metadata_into_decision(decision, context=context)
+
+    def _try_fast_route(
+        self,
+        *,
+        context: ResearchAgentToolContext,
+        user_intent: Any,
+        session_ctx: dict[str, Any],
+        state: ResearchAgentGraphState,
+    ) -> ResearchSupervisorDecision | None:
+        """Return a pre-built decision for trivial messages, or None to fall through to LLM."""
+        route_mode = session_ctx.get("route_mode", "")
+        intent_name = str(getattr(user_intent, "intent", "") or "").strip()
+        has_task = context.task is not None
+        is_first_step = int(state.get("current_step_index", 0) or 0) == 0
+
+        # Greeting / general chat without active research task → general_answer
+        if (
+            route_mode == "general_chat"
+            and intent_name in ("general_answer", "general_follow_up")
+            and not has_task
+            and is_first_step
+            and not context.request.document_file_path
+            and not context.request.chart_image_path
+        ):
+            logger.info("Fast-route: general_chat → general_answer (skipping Supervisor LLM)")
+            return ResearchSupervisorDecision(
+                action_name="general_answer",
+                thought="Simple greeting or general chat detected — routing directly without LLM planning.",
+                rationale="fast_route:general_chat",
+                phase="act",
+                estimated_gain=0.3,
+                estimated_cost=0.1,
+                metadata={
+                    "worker_agent": "GeneralAnswerAgent",
+                    "fast_route": True,
+                    "route_mode": route_mode,
+                    "intent": intent_name,
+                },
+            )
+        return None
 
     def _inject_skill_metadata_into_decision(
         self,
@@ -628,12 +739,13 @@ class ResearchRuntimeBase:
                 "stagnant_decision_count": stagnant_count,
                 "repeated_action_count": repeated_count,
             }
-            self._sync_execution_context(
+            self._rebuild_execution_context(
                 context=state["context"],
                 agent_messages=update.get("agent_messages", state.get("agent_messages", [])),
                 agent_results=update.get("agent_results", state.get("agent_results", [])),
                 pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
             )
+            self._persist_execution_context(state["context"])
             return update  # type: ignore[return-value]
         return {
             "progress_signature": signature,
@@ -801,9 +913,13 @@ class ResearchRuntimeBase:
         step_index = state.get("current_step_index", 0)
         worker_agent = self._worker_agent_name(decision)
         active_message = self._active_message(decision)
+        context = state["context"]
+        context.supervisor_instruction = (
+            active_message.instruction.strip() if active_message is not None else None
+        ) or None
         result = await self._execute_agent_run_action(
             action_name=action_name,
-            context=state["context"],
+            context=context,
             decision=decision,
             worker_agent=worker_agent,
         )
@@ -852,12 +968,11 @@ class ResearchRuntimeBase:
                 payload=dict(result.metadata),
             ),
         }
-        self._sync_execution_context(
+        self._rebuild_execution_context(
             context=state["context"],
             agent_messages=state.get("agent_messages", []),
             agent_results=update.get("agent_results", state.get("agent_results", [])),
             pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
-            persist=False,
         )
         return update
 
@@ -925,12 +1040,13 @@ class ResearchRuntimeBase:
                 },
             ),
         }
-        self._sync_execution_context(
+        self._rebuild_execution_context(
             context=state["context"],
             agent_messages=state.get("agent_messages", []),
             agent_results=update.get("agent_results", state.get("agent_results", [])),
             pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
         )
+        self._persist_execution_context(state["context"])
         return update
 
     def _context_slice(self, context: ResearchAgentToolContext):
@@ -939,15 +1055,15 @@ class ResearchRuntimeBase:
             return None
         return execution_context.context_slices.get("manager") or execution_context.context_slices.get("default")
 
-    def _sync_execution_context(
+    def _rebuild_execution_context(
         self,
         *,
         context: ResearchAgentToolContext,
         agent_messages: list[AgentMessage],
         agent_results: list[AgentResultMessage],
         pending_messages: list[AgentMessage],
-        persist: bool = True,
     ) -> None:
+        """Rebuild in-memory execution context (task plan + slices). No I/O."""
         execution_context = context.execution_context
         if execution_context is None or execution_context.research_context is None:
             return
@@ -990,10 +1106,16 @@ class ResearchRuntimeBase:
             research_context,
             selected_paper_ids=context.request.selected_paper_ids,
         )
-        if persist and execution_context.session_id:
+
+    def _persist_execution_context(self, context: ResearchAgentToolContext) -> None:
+        """Persist the current execution context to storage."""
+        execution_context = context.execution_context
+        if execution_context is None or execution_context.research_context is None:
+            return
+        if execution_context.session_id:
             self.research_service.memory_gateway.save_context(
                 execution_context.session_id,
-                research_context,
+                execution_context.research_context,
             )
 
     def _active_message(self, decision: ResearchSupervisorDecision) -> AgentMessage | None:
@@ -1249,11 +1371,49 @@ class ResearchRuntimeBase:
             )
         return serialized
 
-    async def _state_from_context(
+    def _resolve_session_context(self, context: ResearchAgentToolContext) -> dict[str, Any]:
+        """Extract session context from conversation snapshot (sync, no LLM)."""
+        request_metadata = context.request.metadata if isinstance(context.request.metadata, dict) else {}
+        metadata_context = (
+            dict(request_metadata.get("context") or {})
+            if isinstance(request_metadata.get("context"), dict)
+            else {}
+        )
+        conversation = None
+        if context.request.conversation_id:
+            conversation = context.research_service.report_service.load_conversation(context.request.conversation_id)
+        snapshot = conversation.snapshot if conversation is not None else None
+        route_mode = str(
+            metadata_context.get("route_mode")
+            or (snapshot.active_route_mode if snapshot is not None else "")
+            or "research_follow_up"
+        ).strip() or "research_follow_up"
+        active_thread_id = str(
+            metadata_context.get("active_thread_id")
+            or (snapshot.active_thread_id if snapshot is not None else "")
+        ).strip() or None
+        active_thread_topic = None
+        if snapshot is not None and active_thread_id:
+            for thread in snapshot.thread_history:
+                if thread.thread_id == active_thread_id:
+                    active_thread_topic = thread.topic or None
+                    break
+        previous_topic = active_thread_topic or (snapshot.topic if snapshot is not None else "")
+        return {
+            "route_mode": route_mode,
+            "active_thread_id": active_thread_id,
+            "active_thread_topic": active_thread_topic,
+            "previous_topic": previous_topic,
+        }
+
+    def _state_from_context(
         self,
         context: ResearchAgentToolContext,
         *,
         trace: list[ResearchAgentTraceStep] | None = None,
+        user_intent: ResearchUserIntentResult | None = None,
+        session_context: dict[str, Any] | None = None,
+        execution_plan: list[dict[str, Any]] | None = None,
     ) -> ResearchSupervisorState:
         task = context.task
         papers = context.papers
@@ -1276,16 +1436,8 @@ class ResearchRuntimeBase:
             else None
         )
         request_metadata = context.request.metadata if isinstance(context.request.metadata, dict) else {}
-        metadata_context = (
-            dict(request_metadata.get("context") or {})
-            if isinstance(request_metadata.get("context"), dict)
-            else {}
-        )
         research_goal_lower = context.request.message.lower()
-        conversation = None
-        if context.request.conversation_id:
-            conversation = context.research_service.report_service.load_conversation(context.request.conversation_id)
-        snapshot = conversation.snapshot if conversation is not None else None
+        session_ctx = session_context or self._resolve_session_context(context)
         metadata_comparison_dimension_values = request_metadata.get("comparison_dimensions")
         metadata_comparison_dimensions = [
             str(item).strip()
@@ -1354,33 +1506,22 @@ class ResearchRuntimeBase:
         preference_recommendation_requested = intent_flags.preference_recommendation_requested
         analysis_focus = intent_flags.analysis_focus
         context_compression_needed = intent_flags.context_compression_needed
-        route_mode = str(
-            metadata_context.get("route_mode")
-            or (snapshot.active_route_mode if snapshot is not None else "")
-            or "research_follow_up"
-        ).strip() or "research_follow_up"
-        active_thread_id = str(
-            metadata_context.get("active_thread_id")
-            or (snapshot.active_thread_id if snapshot is not None else "")
-        ).strip() or None
-        active_thread_topic = None
-        if snapshot is not None and active_thread_id:
-            for thread in snapshot.thread_history:
-                if thread.thread_id == active_thread_id:
-                    active_thread_topic = thread.topic or None
-                    break
-        previous_topic = active_thread_topic or (snapshot.topic if snapshot is not None else "")
-        user_intent = await self.user_intent_resolver.resolve_async(
-            message=context.request.message,
-            has_task=task is not None,
-            candidate_paper_count=len(papers),
-            candidate_papers=self._candidate_paper_scope_for_manager(papers),
-            active_paper_ids=active_paper_ids,
-            selected_paper_ids=list(context.request.selected_paper_ids),
-            has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
-            has_document_input=bool(context.request.document_file_path),
-            session_topic=previous_topic or None,
-        )
+        route_mode = session_ctx["route_mode"]
+        active_thread_id = session_ctx["active_thread_id"]
+        active_thread_topic = session_ctx["active_thread_topic"]
+        previous_topic = session_ctx["previous_topic"]
+        if user_intent is None:
+            user_intent = self.user_intent_resolver.resolve(
+                message=context.request.message,
+                has_task=task is not None,
+                candidate_paper_count=len(papers),
+                candidate_papers=self._candidate_paper_scope_for_manager(papers),
+                active_paper_ids=active_paper_ids,
+                selected_paper_ids=list(context.request.selected_paper_ids),
+                has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
+                has_document_input=bool(context.request.document_file_path),
+                session_topic=previous_topic or None,
+            )
         topic_continuity_score = self._topic_continuity_score(
             context.request.message,
             previous_topic,
@@ -1439,6 +1580,7 @@ class ResearchRuntimeBase:
             candidate_papers=self._candidate_paper_scope_for_manager(papers),
             user_intent=user_intent.model_dump(mode="json"),
             skill_context=context.skill_context,
+            execution_plan=list(execution_plan or []),
         )
 
     def _topic_continuity_score(self, current: str | None, previous: str | None) -> float:
@@ -1568,316 +1710,17 @@ class ResearchRuntimeBase:
         clarification_request: str | None,
         replan_count: int,
     ) -> list[ResearchMessage]:
-        executed_actions = {step.action_name for step in trace if step.status in {"succeeded", "skipped"}}
-        messages = [
-            _message(
-                role="user",
-                kind="topic" if request.mode != "qa" else "question",
-                title="用户研究目标" if request.mode != "qa" else "研究集合提问",
-                content=request.message,
-            )
-        ]
-        if clarification_request:
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="warning",
-                    title="需要澄清研究目标",
-                    meta=f"{self._manager_display_name()} 请求用户澄清范围",
-                    content=clarification_request,
-                    payload={"clarification_request": clarification_request},
-                )
-            )
-        if agent_messages:
-            plan_lines = [
-                (
-                    f"- {message.task_id} · {message.agent_to} · {message.task_type} "
-                    f"· priority={message.priority}"
-                    f"{' · depends_on=' + ','.join(message.depends_on) if message.depends_on else ''}"
-                )
-                for message in agent_messages[-8:]
-            ]
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="Manager 决策轨迹",
-                    meta=f"decisions={len(agent_messages)} · results={len(agent_results)} · recoveries={replan_count}",
-                    content="\n".join(plan_lines),
-                    payload={
-                        "agent_messages": [message.model_dump(mode="json") for message in agent_messages],
-                        "agent_results": [result.model_dump(mode="json") for result in agent_results],
-                        "delegation_plan": self._serialize_task_plan(agent_messages, agent_results),
-                        "unified_delegation_plan": serialize_unified_delegation_plan(
-                            agent_messages,
-                            agent_results,
-                            registry=context.unified_agent_registry,
-                        ),
-                    },
-                )
-            )
-        report_is_fresh = executed_actions & {"search_literature", "write_review"}
-        if context.report and report_is_fresh:
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="report",
-                    title="自主文献综述",
-                    meta=f"候选论文 {context.report.paper_count} 篇",
-                    content=context.report.markdown,
-                    payload={"report": context.report.model_dump(mode="json")},
-                )
-            )
-        if context.papers and report_is_fresh:
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="candidates",
-                    title="候选论文池",
-                    meta=f"当前共 {len(context.papers)} 篇",
-                    payload={"papers": [paper.model_dump(mode="json") for paper in context.papers]},
-                )
-            )
-        if context.import_result:
-            lines = [
-                f"imported={context.import_result.imported_count} · skipped={context.import_result.skipped_count} · failed={context.import_result.failed_count}"
-            ]
-            lines.extend(
-                f"- {result.title} · {result.status}{' · doc=' + result.document_id if result.document_id else ''}"
-                for result in context.import_result.results[:5]
-            )
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="import_result",
-                    title="自主导入结果",
-                    meta=f"{self._manager_display_name()} 调用了论文导入工具",
-                    content="\n".join(lines),
-                    payload={"import_result": context.import_result.model_dump(mode="json")},
-                )
-            )
-        if context.zotero_sync_results:
-            synced_count = sum(1 for item in context.zotero_sync_results if str(item.get("status") or "") in {"imported", "reused"})
-            lines = [f"synced={synced_count} · total={len(context.zotero_sync_results)}"]
-            lines.extend(
-                f"- {item.get('title', '')} · {item.get('status', 'unknown')}"
-                for item in context.zotero_sync_results[:5]
-            )
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="Zotero 同步结果",
-                    meta=f"{self._manager_display_name()} 调用了 Zotero 同步工具",
-                    content="\n".join(lines),
-                    payload={"zotero_sync_results": context.zotero_sync_results},
-                )
-            )
-        if context.parsed_document:
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="文档理解结果",
-                    meta=f"pages={len(context.parsed_document.pages)} · doc={context.parsed_document.id}",
-                    content=(
-                        f"已将文档 {context.parsed_document.filename} 解析为 "
-                        f"{len(context.parsed_document.pages)} 页，并作为科研助手的证据工具输出。"
-                    ),
-                    payload={
-                        "parsed_document": context.parsed_document.model_dump(mode="json"),
-                        "document_index_result": context.document_index_result,
-                    },
-                )
-            )
-        if context.chart_result:
-            chart = getattr(context.chart_result, "chart", None)
-            chart_metadata = getattr(chart, "metadata", {}) or {} if chart is not None else {}
-            chart_image_path = str(chart_metadata.get("image_path") or "").strip()
-            chart_summary = getattr(chart, "summary", None) or "已完成图表结构化理解。"
-            figure_answer = (getattr(context.chart_result, "answer", None) or "").strip()
-            if figure_answer:
-                display_content = figure_answer
-                if chart_image_path:
-                    display_content = f"{display_content}\n\n图片路径：{chart_image_path}"
-                messages.append(
-                    _message(
-                        role="assistant",
-                        kind="answer",
-                        title="论文图表分析",
-                        meta=f"chart_type={getattr(chart, 'chart_type', 'unknown')}",
-                        content=display_content,
-                        payload={
-                            "chart": chart.model_dump(mode="json") if hasattr(chart, "model_dump") else None,
-                            "graph_text": getattr(context.chart_result, "graph_text", None),
-                            "image_path": chart_image_path or None,
-                        },
-                    )
-                )
-            else:
-                if chart_image_path:
-                    chart_summary = f"{chart_summary}\n图片路径：{chart_image_path}"
-                messages.append(
-                    _message(
-                        role="assistant",
-                        kind="notice",
-                        title="图表理解结果",
-                        meta=f"chart_type={getattr(chart, 'chart_type', 'unknown')}",
-                        content=chart_summary,
-                        payload={
-                            "chart": chart.model_dump(mode="json") if hasattr(chart, "model_dump") else None,
-                            "graph_text": getattr(context.chart_result, "graph_text", None),
-                            "image_path": chart_image_path or None,
-                        },
-                    )
-                )
-        if context.qa_result:
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="answer",
-                    title="研究集合回答",
-                    meta=(
-                        f"evidence={len(context.qa_result.qa.evidence_bundle.evidences)} · "
-                        f"confidence={context.qa_result.qa.confidence if context.qa_result.qa.confidence is not None else 'empty'}"
-                    ),
-                    content=context.qa_result.qa.answer,
-                    payload={"qa": context.qa_result.qa.model_dump(mode="json")},
-                )
-            )
-        if context.general_answer:
-            meta = context.general_answer_metadata or {}
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="answer",
-                    title="通用回答",
-                    meta=f"route=general_answer · confidence={meta.get('confidence', 'empty')}",
-                    content=context.general_answer,
-                    payload={"general_answer": meta},
-                )
-            )
-        preference_recommendations_payload = None
-        if context.preference_recommendation_result is not None:
-            preference_recommendations_payload = context.preference_recommendation_result.model_dump(mode="json")
-        if isinstance(preference_recommendations_payload, dict):
-            recommendations = list(preference_recommendations_payload.get("recommendations") or [])
-            topics_used = list((preference_recommendations_payload.get("metadata") or {}).get("topics_used") or [])
-            resolved_sources = list((preference_recommendations_payload.get("metadata") or {}).get("resolved_sources") or [])
-            topic_groups = list((preference_recommendations_payload.get("metadata") or {}).get("topic_groups") or [])
-            content_lines: list[str] = []
-            if topic_groups:
-                for group in topic_groups[:4]:
-                    topic_name = str(group.get("topic") or "其他").strip() or "其他"
-                    papers = list(group.get("papers") or [])
-                    content_lines.append(f"主题：{topic_name}")
-                    for index, paper in enumerate(papers[:4], start=1):
-                        paper_title = str(paper.get("title") or "").strip()
-                        paper_source = str(paper.get("source") or "").strip()
-                        paper_year = paper.get("year")
-                        paper_url = str(paper.get("url") or "").strip()
-                        paper_reason = str(paper.get("reason") or "").strip()
-                        paper_explanation = str(paper.get("explanation") or "").strip()
-                        meta_parts = [str(item) for item in (paper_year, paper_source) if item]
-                        meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
-                        content_lines.append(f"{index}. {paper_title}{meta}")
-                        if paper_url:
-                            content_lines.append(f"链接：{paper_url}")
-                        if paper_reason:
-                            content_lines.append(f"推荐理由：{paper_reason}")
-                        if paper_explanation:
-                            content_lines.append(f"论文讲解：{paper_explanation}")
-                    content_lines.append("")
-                if content_lines and not content_lines[-1].strip():
-                    content_lines.pop()
-            else:
-                for index, item in enumerate(recommendations[:5], start=1):
-                    title = str(item.get("title") or "").strip()
-                    source = str(item.get("source") or "").strip()
-                    year = item.get("year")
-                    url = str(item.get("url") or "").strip()
-                    reason = str(item.get("reason") or "").strip()
-                    meta_parts = [str(value) for value in (year, source) if value]
-                    meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
-                    content_lines.append(f"{index}. {title}{meta}")
-                    if url:
-                        content_lines.append(f"链接：{url}")
-                    if reason:
-                        content_lines.append(f"推荐理由：{reason}")
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="长期兴趣论文推荐",
-                    meta=(
-                        f"recommended={len(recommendations)}"
-                        f"{' · topics=' + ', '.join(topics_used[:3]) if topics_used else ''}"
-                        f"{' · sources=' + ', '.join(resolved_sources[:3]) if resolved_sources else ''}"
-                    ),
-                    content="\n".join(content_lines) or "已生成基于长期兴趣的论文推荐。",
-                    payload={"recommendations": preference_recommendations_payload},
-                )
-            )
-        paper_analysis_payload = None
-        if context.paper_analysis_result is not None:
-            paper_analysis_payload = context.paper_analysis_result.model_dump(mode="json")
-        if isinstance(paper_analysis_payload, dict):
-            focus = str(paper_analysis_payload.get("focus") or "analysis")
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="论文分析结果",
-                    meta=f"focus={focus}",
-                    content=str(paper_analysis_payload.get("answer") or "").strip() or "已生成基于所选论文的分析结果。",
-                    payload={"paper_analysis": paper_analysis_payload},
-                )
-            )
-        compression_payload = context.compressed_context_summary
-        if isinstance(compression_payload, dict):
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="上下文压缩摘要",
-                    meta=(
-                        f"papers={compression_payload.get('paper_count', 0)} · "
-                        f"summaries={compression_payload.get('summary_count', 0)}"
-                    ),
-                    content="当前研究上下文已经压缩为更短的论文摘要视图，后续 QA、对比和推荐会复用它。",
-                    payload={"context_compression": compression_payload},
-                )
-            )
-        if workspace.status_summary or workspace.stop_reason:
-            workspace_lines = []
-            if workspace.stop_reason:
-                workspace_lines.append(f"stop_reason: {workspace.stop_reason}")
-            workspace_lines.extend(f"- {item}" for item in workspace.next_actions[:4])
-            messages.append(
-                _message(
-                    role="assistant",
-                    kind="notice",
-                    title="Research Workspace",
-                    meta=workspace.status_summary,
-                    content="\n".join(workspace_lines),
-                    payload={"workspace": workspace.model_dump(mode="json")},
-                )
-            )
-        trace_lines = [
-            f"{step.step_index}. {step.agent} · {step.phase}:{step.action_name} · {step.status} · {step.observation}"
-            for step in trace
-        ]
-        messages.append(
-            _message(
-                role="assistant",
-                kind="notice",
-                title="Agent 决策轨迹",
-                meta=f"{len(trace)} step(s)",
-                content="\n".join(trace_lines),
-                payload={"trace": [step.model_dump(mode="json") for step in trace]},
-            )
+        return self.response_formatter.build_messages(
+            request,
+            context,
+            trace,
+            workspace,
+            agent_messages=agent_messages,
+            agent_results=agent_results,
+            clarification_request=clarification_request,
+            replan_count=replan_count,
+            serialize_task_plan_fn=self._serialize_task_plan,
         )
-        return messages
 
     def _next_actions(
         self,
@@ -1886,35 +1729,11 @@ class ResearchRuntimeBase:
         *,
         clarification_request: str | None = None,
     ) -> list[str]:
-        actions: list[str] = list(workspace.next_actions)
-        task = context.task
-        if clarification_request:
-            actions.insert(0, "补充更具体的研究子方向、评价维度、应用场景或时间范围后再继续。")
-        if task and context.papers:
-            actions.append(
-                f"继续追问这个研究集合，{self._manager_display_name()} 会基于已导入文献和候选论文池回答。"
-            )
-        if task and not task.imported_document_ids:
-            actions.append("导入开放 PDF 后可以获得更强的 grounded QA 证据。")
-        if task and task.todo_items:
-            actions.append("执行或关闭自动 TODO，让研究空间持续补证据。")
-        if context.parsed_document:
-            actions.append("可以继续围绕刚解析的文档提问，或让助手补充相关领域文献。")
-        if context.chart_result:
-            actions.append("可以让助手把图表结论和相关论文证据合并分析。")
-        if context.preference_recommendation_result is not None:
-            actions.append("可以继续追问推荐列表里的某篇论文，或让助手按其中一个主题继续做深入调研。")
-        if workspace.metadata.get("latest_paper_analysis"):
-            actions.append("可以继续基于这组论文追问实验差异、适用场景、失败边界或下一步阅读建议。")
-        if not actions:
-            actions.append("换一个更具体的研究目标，或扩大时间窗口和数据源。")
-        deduped: list[str] = []
-        for action in actions:
-            normalized = action.strip()
-            if not normalized or normalized in deduped:
-                continue
-            deduped.append(normalized)
-        return deduped[:5]
+        return self.response_formatter.build_next_actions(
+            context,
+            workspace,
+            clarification_request=clarification_request,
+        )
 
     def _resolved_advanced_strategy(
         self,
@@ -2172,7 +1991,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
         self.graph = graph.compile()
 
     async def run(self, request: ResearchAgentRunRequest, *, graph_runtime: Any, on_progress: Any | None = None) -> ResearchAgentRunResponse:
-        context = self._build_tool_context(request=request, graph_runtime=graph_runtime)
+        context = await self._build_tool_context(request=request, graph_runtime=graph_runtime)
         if on_progress is not None:
             context.progress_callback = on_progress
         _update_runtime_progress(
@@ -2198,6 +2017,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             "replan_count": 0,
             "clarification_request": None,
             "active_plan_id": None,
+            "execution_plan": [],
             "progress_signature": "",
             "stagnant_decision_count": 0,
             "repeated_action_count": 0,

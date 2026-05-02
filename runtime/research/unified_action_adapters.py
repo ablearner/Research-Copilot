@@ -54,7 +54,10 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
         or request.message
     ).strip()
     resolved_sources = source_constraints if source_constraints else list(request.sources)
-    requested_paper_count = task_payload.get("requested_paper_count")
+    requested_paper_count = (
+        task_payload.get("requested_paper_count")
+        or user_intent.get("requested_paper_count")
+    )
     max_papers = int(requested_paper_count) if requested_paper_count is not None else int(request.max_papers or 5)
     return UnifiedLiteratureSearchInput(
         topic=topic or request.message.strip(),
@@ -155,6 +158,11 @@ def build_collection_qa_input(
         page_number = None
     if page_number is not None and page_number < 1:
         page_number = None
+    supervisor_instruction = (
+        active_message.instruction.strip()
+        if active_message is not None and active_message.instruction
+        else None
+    )
     return UnifiedCollectionQAInput(
         task_id=task_id,
         question=question,
@@ -176,6 +184,7 @@ def build_collection_qa_input(
             "routing_authority": str(payload.get("routing_authority") or "supervisor_llm"),
             "preferred_qa_route": str(payload.get("qa_route") or "").strip() or None,
             "task_payload": payload,
+            "supervisor_instruction": supervisor_instruction,
         },
         conversation_id=request.conversation_id,
     )

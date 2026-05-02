@@ -91,6 +91,7 @@ class PaperAnalyzer:
         task_topic: str = "",
         report_highlights: list[str] | None = None,
         evidence_hits: list[RetrievalHit] | None = None,
+        supervisor_instruction: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
         if self.llm_adapter is not None and papers:
             try:
@@ -100,6 +101,7 @@ class PaperAnalyzer:
                     task_topic=task_topic,
                     report_highlights=report_highlights or [],
                     evidence_hits=evidence_hits or [],
+                    supervisor_instruction=supervisor_instruction,
                 )
                 if result.answer.strip():
                     return result
@@ -120,6 +122,7 @@ class PaperAnalyzer:
         task_topic: str,
         report_highlights: list[str],
         evidence_hits: list[RetrievalHit],
+        supervisor_instruction: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
         papers_json = json.dumps(
             [
@@ -151,6 +154,7 @@ class PaperAnalyzer:
                 "highlights": " | ".join(report_highlights[:4]),
                 "papers_json": papers_json,
                 "evidence_json": evidence_json,
+                **(({"supervisor_instruction": supervisor_instruction}) if supervisor_instruction else {}),
             },
             response_model=_PaperAnalysisLLMResponse,
         )

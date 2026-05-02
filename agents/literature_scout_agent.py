@@ -213,6 +213,7 @@ class LiteratureScoutAgent:
             sources=list(search_request.sources),
             task_id=active_task.task_id,
             execution_context=exec_ctx,
+            supervisor_instruction=context.supervisor_instruction,
             max_rounds=2,
             round_index=0,
             queried_pairs=set(),
@@ -585,6 +586,7 @@ class LiteratureScoutAgent:
                 days_back=state.days_back,
                 max_papers=state.max_papers,
                 sources=state.sources,
+                supervisor_instruction=getattr(state, "supervisor_instruction", None),
             )
         else:
             base_plan = planner.plan(

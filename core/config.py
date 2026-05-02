@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     research_cli_heartbeat_seconds: float = 10.0
     research_state_cache_ttl_seconds: float = 2.0
     research_trajectory_cache_ttl_seconds: float = 3.0
+    research_import_index_timeout_seconds: float = 300.0
     research_default_days_back: int = 30
     research_default_max_papers: int = 5
     research_default_ranking_mode: str = "heuristic"

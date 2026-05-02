@@ -46,7 +46,7 @@ class ResearchSkillResolver:
         self.matcher = matcher or SkillMatcher(self.registry)
         self.validator = validator or SkillValidator()
 
-    def resolve(
+    async def resolve(
         self,
         *,
         message: str,
@@ -58,10 +58,18 @@ class ResearchSkillResolver:
             for name in (available_tool_names or [])
             if str(name).strip()
         }
-        matches = self.matcher.match(
-            message,
-            available_tool_names=sorted(available_tools) if available_tools else None,
-        )
+        tool_list = sorted(available_tools) if available_tools else None
+        try:
+            matches = await self.matcher.amatch(
+                message,
+                available_tool_names=tool_list,
+            )
+        except Exception:
+            logger.warning("Async skill matching failed, falling back to sync", exc_info=True)
+            matches = self.matcher.match(
+                message,
+                available_tool_names=tool_list,
+            )
 
         skill_names: list[str] = []
         match_reasons: dict[str, str] = {}

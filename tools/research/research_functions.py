@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -56,6 +57,22 @@ from tooling.research_runtime_schemas import (
     WebSearchResultItem,
     WebSearchToolOutput,
 )
+
+_ANALYSIS_EVIDENCE_TIMEOUT_SECONDS = 15.0
+_UNQUERYABLE_INDEX_STATUSES = {"timeout", "failed", "skipped"}
+
+
+def _has_queryable_index(paper: PaperCandidate) -> bool:
+    metadata = paper.metadata if isinstance(paper.metadata, dict) else {}
+    document_id = str(metadata.get("document_id") or "").strip()
+    if not document_id:
+        return False
+    index_status = str(metadata.get("index_status") or "").strip().lower()
+    if index_status in _UNQUERYABLE_INDEX_STATUSES:
+        return False
+    if metadata.get("indexed") is False:
+        return False
+    return True
 
 
 class _FunctionServiceMemoryGateway:
@@ -1175,10 +1192,11 @@ class ResearchFunctionService:
     ) -> list[RetrievalHit]:
         if self.graph_runtime is None:
             return []
+        queryable_papers = [paper for paper in papers if _has_queryable_index(paper)]
         document_ids = list(
             dict.fromkeys(
                 str(paper.metadata.get("document_id") or "").strip()
-                for paper in papers
+                for paper in queryable_papers
                 if str(paper.metadata.get("document_id") or "").strip()
             )
         )
@@ -1186,43 +1204,53 @@ class ResearchFunctionService:
             return []
         knowledge_access = ResearchKnowledgeAccess.from_runtime(self.graph_runtime)
         try:
-            retrieval_output = await knowledge_access.retrieve(
-                question=question,
-                document_ids=document_ids,
-                top_k=max(8, min(16, len(document_ids) * 4)),
-                filters={
-                    "analysis_mode": "paper_analysis",
-                    "selected_paper_ids": [paper.paper_id for paper in papers],
-                    "selected_document_ids": document_ids,
-                },
-                session_id=None,
-                task_id=None,
-                memory_hints={},
+            retrieval_output = await asyncio.wait_for(
+                knowledge_access.retrieve(
+                    question=question,
+                    document_ids=document_ids,
+                    top_k=max(8, min(16, len(document_ids) * 4)),
+                    filters={
+                        "analysis_mode": "paper_analysis",
+                        "selected_paper_ids": [paper.paper_id for paper in queryable_papers],
+                        "selected_document_ids": document_ids,
+                    },
+                    session_id=None,
+                    task_id=None,
+                    memory_hints={},
+                ),
+                timeout=_ANALYSIS_EVIDENCE_TIMEOUT_SECONDS,
             )
-        except RuntimeError:
-            return []
-        retrieval_hits = [
-            self._attach_paper_id_to_hit(hit=hit, papers=papers)
-            for hit in list(retrieval_output.retrieval_result.hits or [])
-        ]
-        summary_hits: list[RetrievalHit] = []
-        summary_output = await knowledge_access.query_graph_summary(
-            question=question,
-            document_ids=document_ids,
-            top_k=max(3, min(6, len(document_ids) * 2)),
-            filters={
-                "analysis_mode": "paper_analysis",
-                "selected_paper_ids": [paper.paper_id for paper in papers],
-                "selected_document_ids": document_ids,
-            },
-            session_id=None,
-            task_id=None,
-            memory_hints={},
-        )
-        summary_hits = [
-            self._attach_paper_id_to_hit(hit=hit, papers=papers)
-            for hit in list(getattr(summary_output, "hits", []) or [])
-        ]
+        except (RuntimeError, asyncio.TimeoutError):
+            retrieval_hits = []
+        else:
+            retrieval_hits = [
+                self._attach_paper_id_to_hit(hit=hit, papers=queryable_papers)
+                for hit in list(retrieval_output.retrieval_result.hits or [])
+            ]
+        try:
+            summary_output = await asyncio.wait_for(
+                knowledge_access.query_graph_summary(
+                    question=question,
+                    document_ids=document_ids,
+                    top_k=max(3, min(6, len(document_ids) * 2)),
+                    filters={
+                        "analysis_mode": "paper_analysis",
+                        "selected_paper_ids": [paper.paper_id for paper in queryable_papers],
+                        "selected_document_ids": document_ids,
+                    },
+                    session_id=None,
+                    task_id=None,
+                    memory_hints={},
+                ),
+                timeout=_ANALYSIS_EVIDENCE_TIMEOUT_SECONDS,
+            )
+        except (RuntimeError, asyncio.TimeoutError):
+            summary_hits = []
+        else:
+            summary_hits = [
+                self._attach_paper_id_to_hit(hit=hit, papers=queryable_papers)
+                for hit in list(getattr(summary_output, "hits", []) or [])
+            ]
         return merge_retrieval_hits(retrieval_hits, summary_hits)[:12]
 
     def _attach_paper_id_to_hit(

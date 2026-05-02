@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -11,6 +13,7 @@ import unicodedata
 from typing import Any
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -77,6 +80,74 @@ _KEPLER_ART = [
     "                              /\\                                                           ",
     "        ·        ✦            ·          ✦          ·            ✦        ·               ",
 ]
+
+
+def _is_wsl_environment() -> bool:
+    try:
+        version = Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
+    return "microsoft" in version or "wsl" in version
+
+
+def _default_gateway_from_proc_route() -> str | None:
+    try:
+        lines = Path("/proc/net/route").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines[1:]:
+        fields = line.split()
+        if len(fields) < 3 or fields[1] != "00000000":
+            continue
+        try:
+            gateway = int(fields[2], 16)
+        except ValueError:
+            continue
+        return socket.inet_ntoa(gateway.to_bytes(4, "little"))
+    return None
+
+
+def _proxy_url_reachable(proxy_url: str, *, timeout_seconds: float = 0.25) -> bool:
+    parsed = urlparse(proxy_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((parsed.hostname, port), timeout=timeout_seconds):
+            return True
+    except OSError:
+        return False
+
+
+def _ensure_wsl_proxy_env() -> None:
+    auto_enable = os.environ.get("KEPLER_WSL_PROXY_AUTO_ENABLE", os.environ.get("WSL_PROXY_AUTO_ENABLE", "1"))
+    if auto_enable.lower() in {"0", "false", "no", "off"}:
+        return
+    if not _is_wsl_environment():
+        return
+
+    for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "ALL_PROXY", "all_proxy"):
+        proxy_url = os.environ.get(name)
+        if proxy_url and _proxy_url_reachable(proxy_url):
+            return
+
+    host = os.environ.get("WSL_PROXY_HOST") or _default_gateway_from_proc_route()
+    if not host:
+        return
+    try:
+        port = int(os.environ.get("WSL_PROXY_PORT", "7890"))
+    except ValueError:
+        port = 7890
+
+    proxy_url = f"http://{host}:{port}"
+    if not _proxy_url_reachable(proxy_url):
+        return
+
+    for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "all_proxy"):
+        os.environ[name] = proxy_url
+    no_proxy = os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or "localhost,127.0.0.1,::1"
+    os.environ["no_proxy"] = no_proxy
+    os.environ["NO_PROXY"] = no_proxy
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1527,8 +1598,12 @@ async def _run_agent_shell(sdk: Any, args: argparse.Namespace) -> int:
                         last_event_timestamp = event_timestamp
                         last_event_change_at = time.monotonic()
                     stall_timeout_seconds = 24.0
-                    if event_summary and "latest event: tool_called" in event_summary:
-                        stall_timeout_seconds = 90.0
+                    if event_summary and (
+                        "latest event: tool_called" in event_summary
+                        or "import_papers" in event_summary
+                        or "understand_document" in event_summary
+                    ):
+                        stall_timeout_seconds = 180.0
                     if (
                         last_event_timestamp is not None
                         and time.monotonic() - last_event_change_at >= stall_timeout_seconds
@@ -1586,6 +1661,8 @@ async def _run_agent_shell(sdk: Any, args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    _ensure_wsl_proxy_env()
+
     from sdk.client import ResearchCopilotSDK
 
     args = build_parser().parse_args()

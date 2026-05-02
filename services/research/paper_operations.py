@@ -87,6 +87,7 @@ class PaperOperationsMixin:
         request: AnalyzeResearchPaperFigureRequest,
         *,
         graph_runtime: Any,
+        supervisor_instruction: str | None = None,
     ) -> AnalyzeResearchPaperFigureResponse:
         _, paper = self._resolve_imported_paper(task_id=task_id, paper_id=paper_id)
         return await self.chart_analysis_agent.analyze_paper_figure(
@@ -96,6 +97,7 @@ class PaperOperationsMixin:
             graph_runtime=graph_runtime,
             load_cached_figure_target=self._load_cached_figure_target,
             parse_imported_paper_document=self._parse_imported_paper_document,
+            supervisor_instruction=supervisor_instruction,
         )
 
     def _load_cached_figure_payload(self, *, paper: PaperCandidate) -> dict[str, Any] | None:
@@ -640,6 +642,23 @@ class PaperOperationsMixin:
             failed_count=failed_count,
         )
 
+    def _emit_import_heartbeat(self, request: ImportPapersRequest, summary: str) -> None:
+        try:
+            self.append_runtime_event(
+                conversation_id=request.conversation_id,
+                event_type="supervisor_heartbeat",
+                task_id=request.task_id,
+                payload={
+                    "runtime_event": "supervisor_heartbeat",
+                    "stage": "import_papers",
+                    "node": "import_papers_node",
+                    "status": "running",
+                    "summary": summary,
+                },
+            )
+        except Exception:
+            pass
+
     async def _import_single_paper(
         self,
         paper: PaperCandidate,
@@ -666,7 +685,12 @@ class PaperOperationsMixin:
                     paper,
                 )
 
+            import time as _time
+            _t0 = _time.monotonic()
             artifact = await self.paper_import_service.download_paper(paper)
+            _t1 = _time.monotonic()
+            logger.info("Import timing | paper=%s | download=%.1fs", paper.title[:60], _t1 - _t0)
+            self._emit_import_heartbeat(request, f"Downloaded: {paper.title[:40]}")
             knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
             parsed_document = await knowledge_access.parse_document(
                 file_path=artifact.storage_uri,
@@ -680,33 +704,74 @@ class PaperOperationsMixin:
                 },
                 skill_name=request.skill_name,
             )
-            index_result = await knowledge_access.index_document(
-                parsed_document=parsed_document,
-                charts=[],
-                include_graph=(request.include_graph and not request.fast_mode),
-                include_embeddings=request.include_embeddings,
-                session_id=session_id,
-                metadata={
-                    "research_paper_id": paper.paper_id,
-                    "research_title": paper.title,
-                    "research_source": paper.source,
-                    "fast_mode": request.fast_mode,
-                },
-                skill_name=request.skill_name,
-            )
-            graph_pending = bool(request.include_graph and request.fast_mode)
-            import_status = "imported" if index_result.status == "succeeded" else "failed"
+            _t2 = _time.monotonic()
+            logger.info("Import timing | paper=%s | parse=%.1fs", paper.title[:60], _t2 - _t1)
+            self._emit_import_heartbeat(request, f"Parsed: {paper.title[:40]} ({len(parsed_document.pages)}p)")
             zotero_sync = await self._sync_imported_paper_to_zotero(
                 paper=paper,
                 request=request,
                 graph_runtime=graph_runtime,
             )
+            if zotero_sync is not None:
+                self._emit_import_heartbeat(request, f"Synced Zotero: {paper.title[:40]}")
+
+            index_status = "skipped"
+            index_error_message: str | None = None
+            index_succeeded = False
+            try:
+                index_call = knowledge_access.index_document(
+                    parsed_document=parsed_document,
+                    charts=[],
+                    include_graph=(request.include_graph and not request.fast_mode),
+                    include_embeddings=request.include_embeddings,
+                    session_id=session_id,
+                    metadata={
+                        "research_paper_id": paper.paper_id,
+                        "research_title": paper.title,
+                        "research_source": paper.source,
+                        "fast_mode": request.fast_mode,
+                    },
+                    skill_name=request.skill_name,
+                )
+                timeout_seconds = getattr(self, "import_index_timeout_seconds", None)
+                if timeout_seconds and timeout_seconds > 0:
+                    index_result = await asyncio.wait_for(index_call, timeout=timeout_seconds)
+                else:
+                    index_result = await index_call
+                index_status = str(getattr(index_result, "status", "unknown") or "unknown")
+                index_succeeded = index_status == "succeeded"
+            except TimeoutError:
+                timeout_seconds = getattr(self, "import_index_timeout_seconds", None) or 0
+                index_status = "timeout"
+                index_error_message = f"Indexing timed out after {timeout_seconds:.0f}s"
+                logger.warning(
+                    "Import indexing timed out; keeping parsed paper imported",
+                    extra={"paper_id": paper.paper_id, "timeout_seconds": timeout_seconds},
+                )
+            except Exception as exc:
+                index_status = "failed"
+                index_error_message = str(exc)
+                logger.warning(
+                    "Import indexing failed; keeping parsed paper imported: %s",
+                    exc,
+                    extra={"paper_id": paper.paper_id},
+                )
+            _t3 = _time.monotonic()
+            logger.info("Import timing | paper=%s | index=%.1fs | total=%.1fs", paper.title[:60], _t3 - _t2, _t3 - _t0)
+            if index_succeeded:
+                self._emit_import_heartbeat(request, f"Indexed: {paper.title[:40]} ({_t3 - _t0:.0f}s)")
+            else:
+                self._emit_import_heartbeat(request, f"Imported without full index: {paper.title[:40]}")
+            graph_pending = bool(request.include_graph and request.fast_mode)
+            import_status = "imported" if parsed_document.status == "parsed" else "failed"
             result_metadata = {
-                "index_status": index_result.status,
+                "index_status": index_status,
                 "filename": artifact.filename,
                 "index_mode": "fast_embeddings_first" if request.fast_mode else "full_sync",
                 "graph_backfill_pending": graph_pending,
             }
+            if index_error_message:
+                result_metadata["index_error"] = index_error_message
             if zotero_sync is not None:
                 result_metadata["zotero_sync"] = zotero_sync
 
@@ -715,10 +780,12 @@ class PaperOperationsMixin:
                 "document_id": parsed_document.id,
                 "storage_uri": artifact.storage_uri,
                 "filename": artifact.filename,
-                "index_status": index_result.status,
+                "index_status": index_status,
                 "index_mode": "fast_embeddings_first" if request.fast_mode else "full_sync",
                 "graph_backfill_pending": graph_pending,
             }
+            if index_error_message:
+                updated_paper_metadata["index_error"] = index_error_message
             if zotero_sync is not None:
                 updated_paper_metadata["zotero_sync"] = zotero_sync
             return (
@@ -729,9 +796,9 @@ class PaperOperationsMixin:
                     document_id=parsed_document.id,
                     storage_uri=artifact.storage_uri,
                     parsed=parsed_document.status == "parsed",
-                    indexed=index_result.status == "succeeded",
+                    indexed=index_succeeded,
                     graph_pending=graph_pending,
-                    error_message=None if import_status == "imported" else "Indexing failed",
+                    error_message=None if import_status == "imported" else "Parsing failed",
                     metadata=result_metadata,
                 ),
                 paper.model_copy(

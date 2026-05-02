@@ -112,6 +112,28 @@ _GENERIC_TOPIC_BLACKLIST = {
 }
 
 
+class RecommendationIntentResult(BaseModel):
+    """Structured output from LLM intent understanding."""
+    search_topics: list[str] = Field(default_factory=list, description="Precise search topics extracted from user intent, max 4")
+    recency_days: int | None = Field(default=None, description="How many days back to search, null means use default")
+    constraints: dict[str, Any] = Field(default_factory=dict, description="Extra constraints: must_include_keywords, exclude_keywords, preferred_venues")
+    rationale: str = Field(default="", description="Brief explanation of the interpreted intent")
+    is_generic: bool = Field(default=False, description="True if user wants a broad recommendation without specific topics")
+
+
+class PersonalizedRankItem(BaseModel):
+    """Single ranked paper from LLM personalized ranking."""
+    paper_id: str = Field(description="ID of the paper")
+    score: float = Field(description="Relevance score 0-1")
+    reason: str = Field(description="Personalized explanation why this paper is recommended for this user")
+
+
+class PersonalizedRankResult(BaseModel):
+    """Structured output from LLM personalized ranking."""
+    ranked_papers: list[PersonalizedRankItem] = Field(default_factory=list)
+    ranking_rationale: str = Field(default="", description="Overall rationale for the ranking")
+
+
 class RecommendationSourceDecision(BaseModel):
     sources: list[PaperSource] = Field(default_factory=list, min_length=1, max_length=3)
     rationale: str = ""
@@ -150,11 +172,13 @@ class PreferenceMemoryAgent:
         paper_search_service: PaperSearchService,
         storage_root: str | Path | None = None,
         memory_gateway: Any | None = None,
+        llm_adapter: Any | None = None,
     ) -> None:
         self._memory_backend = memory_manager
         self.memory_gateway = memory_gateway
         self.paper_search_service = paper_search_service
         self.storage_root = Path(storage_root) if storage_root is not None else None
+        self.llm_adapter = llm_adapter
 
     # ------------------------------------------------------------------
     # New unified entry point (SpecialistAgent protocol)
@@ -203,6 +227,7 @@ class PreferenceMemoryAgent:
             sources=sources,
             include_notification=True,
             persist=False,
+            supervisor_instruction=context.supervisor_instruction,
         )
         recommendations = list(recommendation_output.recommendations)
         memory_ops = [
@@ -312,30 +337,69 @@ class PreferenceMemoryAgent:
         sources: list[PaperSource] | None = None,
         include_notification: bool = True,
         persist: bool = True,
+        supervisor_instruction: str | None = None,
     ) -> RecommendPapersFunctionOutput:
         profile = self._load_user_profile(user_id=user_id)
-        explicit_topics = self._extract_topics(question)
-        preferred_days_back = self._extract_recency_days(question)
-        effective_days_back = max(
-            1,
-            preferred_days_back
-            or min(
-                days_back,
-                min(
-                    (
-                        item.preferred_recency_days
-                        for item in profile.interest_topics
-                        if item.preferred_recency_days is not None
-                    ),
-                    default=days_back,
-                ),
-            ),
-        )
-        topics = self._select_recommendation_topics(
+
+        # --- Phase 1: Intent understanding (LLM with heuristic fallback) ---
+        intent = await self._understand_recommendation_intent(
             question=question,
             profile=profile,
-            explicit_topics=explicit_topics,
+            supervisor_instruction=supervisor_instruction,
         )
+        intent_mode = "llm" if intent is not None else "heuristic"
+
+        if intent is not None:
+            # LLM-driven topic & recency extraction
+            llm_topics = [
+                InterestTopic(
+                    topic_name=t,
+                    normalized_topic=_normalize_text(t),
+                    weight=0.9,
+                    confidence=0.8,
+                    mention_count=1,
+                    recent_mention_count=1,
+                )
+                for t in intent.search_topics[:4]
+                if t.strip()
+            ]
+            # If LLM says generic, supplement with profile top topics
+            if intent.is_generic or not llm_topics:
+                profile_topics = self._select_recommendation_topics(
+                    question=question,
+                    profile=profile,
+                    explicit_topics=[],
+                )
+                llm_topics = self._dedupe_topics([*llm_topics, *profile_topics])[:4]
+            topics = llm_topics
+            effective_days_back = max(1, intent.recency_days or days_back)
+            intent_rationale = intent.rationale
+        else:
+            # Heuristic fallback (original logic)
+            explicit_topics = self._extract_topics(question)
+            preferred_days_back = self._extract_recency_days(question)
+            effective_days_back = max(
+                1,
+                preferred_days_back
+                or min(
+                    days_back,
+                    min(
+                        (
+                            item.preferred_recency_days
+                            for item in profile.interest_topics
+                            if item.preferred_recency_days is not None
+                        ),
+                        default=days_back,
+                    ),
+                ),
+            )
+            topics = self._select_recommendation_topics(
+                question=question,
+                profile=profile,
+                explicit_topics=explicit_topics,
+            )
+            intent_rationale = ""
+
         if not topics:
             return RecommendPapersFunctionOutput(
                 recommendations=[],
@@ -344,14 +408,19 @@ class PreferenceMemoryAgent:
                     "days_back": effective_days_back,
                     "sources": list(sources or []),
                     "reason": "no_preference_topics",
+                    "intent_mode": intent_mode,
                 },
             )
+
+        # --- Phase 2: Source resolution (unchanged) ---
         source_pool, source_selection_metadata = await self._resolve_recommendation_sources(
             question=question,
             profile=profile,
             topics=topics,
             requested_sources=list(sources or []),
         )
+
+        # --- Phase 3: Paper search ---
         paper_matches: dict[str, dict[str, Any]] = {}
         per_topic_limit = max(top_k, 4)
         for topic in topics:
@@ -367,20 +436,70 @@ class PreferenceMemoryAgent:
                     paper_matches[marker] = {"paper": paper, "topics": [], "search_topics": []}
                 paper_matches[marker]["topics"].append(topic)
                 paper_matches[marker]["search_topics"].append(topic.topic_name)
-        all_ranked_candidates = sorted(
-            (
-                self._build_ranked_recommendation_candidate(
-                    paper=payload["paper"],
-                    matched_topics=payload["topics"],
-                    profile=profile,
-                    days_back=effective_days_back,
-                )
-                for payload in paper_matches.values()
-            ),
-            key=lambda item: float(item["score"]),
-            reverse=True,
+
+        # --- Phase 4: Ranking (LLM with heuristic fallback) ---
+        ranking_mode = "heuristic"
+        llm_rank = await self._personalized_rank(
+            question=question,
+            candidates=list(paper_matches.values()),
+            profile=profile,
+            top_k=top_k,
+            intent_rationale=intent_rationale,
+            supervisor_instruction=supervisor_instruction,
         )
-        ranked_candidates = all_ranked_candidates[:top_k]
+
+        if llm_rank is not None and llm_rank.ranked_papers:
+            ranking_mode = "llm"
+            # Build lookup from paper_matches by paper_id
+            paper_by_id: dict[str, dict[str, Any]] = {}
+            for payload in paper_matches.values():
+                paper_by_id[payload["paper"].paper_id] = payload
+            ranked_candidates = []
+            for rank_item in llm_rank.ranked_papers[:top_k]:
+                match = paper_by_id.get(rank_item.paper_id)
+                if match is not None:
+                    ranked_candidates.append({
+                        "paper": match["paper"],
+                        "score": rank_item.score,
+                        "reason": rank_item.reason,
+                        "matched_topics": [t.topic_name for t in match.get("topics", [])[:2]],
+                        "primary_topic": match["search_topics"][0] if match.get("search_topics") else "其他",
+                    })
+            # If LLM returned fewer than requested, supplement with heuristic
+            if len(ranked_candidates) < top_k:
+                used_ids = {item["paper"].paper_id for item in ranked_candidates}
+                heuristic_fill = sorted(
+                    (
+                        self._build_ranked_recommendation_candidate(
+                            paper=payload["paper"],
+                            matched_topics=payload["topics"],
+                            profile=profile,
+                            days_back=effective_days_back,
+                        )
+                        for payload in paper_matches.values()
+                        if payload["paper"].paper_id not in used_ids
+                    ),
+                    key=lambda item: float(item["score"]),
+                    reverse=True,
+                )
+                ranked_candidates.extend(heuristic_fill[: top_k - len(ranked_candidates)])
+        else:
+            # Full heuristic fallback
+            all_ranked_candidates = sorted(
+                (
+                    self._build_ranked_recommendation_candidate(
+                        paper=payload["paper"],
+                        matched_topics=payload["topics"],
+                        profile=profile,
+                        days_back=effective_days_back,
+                    )
+                    for payload in paper_matches.values()
+                ),
+                key=lambda item: float(item["score"]),
+                reverse=True,
+            )
+            ranked_candidates = all_ranked_candidates[:top_k]
+
         recommendations = [
             RecommendedPaper(
                 paper_id=item["paper"].paper_id,
@@ -393,7 +512,7 @@ class PreferenceMemoryAgent:
             for item in ranked_candidates
         ]
         topics_used = _dedupe_strings([topic.topic_name for topic in topics], limit=4)
-        topic_groups = self._build_topic_groups(all_ranked_candidates, limit_per_topic=2, limit_topics=3)
+        topic_groups = self._build_topic_groups(ranked_candidates, limit_per_topic=2, limit_topics=3)
         output = RecommendPapersFunctionOutput(
             recommendations=recommendations,
             metadata={
@@ -405,6 +524,9 @@ class PreferenceMemoryAgent:
                 "topic_groups": topic_groups,
                 "profile_interest_count": len(profile.interest_topics),
                 "generated_at": _now_iso(),
+                "intent_mode": intent_mode,
+                "ranking_mode": ranking_mode,
+                "intent_rationale": intent_rationale,
             },
         )
         if persist:
@@ -976,3 +1098,148 @@ class PreferenceMemoryAgent:
             json.dumps([item.model_dump(mode="json") for item in items[-100:]], ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    # ------------------------------------------------------------------
+    # LLM-driven intent understanding
+    # ------------------------------------------------------------------
+
+    _INTENT_PROMPT = (
+        "You are a research interest analyst for a personalized paper recommendation system.\n"
+        "Given the user's request, their long-term interest profile, and an optional supervisor instruction,\n"
+        "extract the precise search intent.\n\n"
+        "Rules:\n"
+        "- Output search_topics: concise academic search queries (English preferred for better coverage), max 4.\n"
+        "- If the user references past interests implicitly (e.g. '跟上次类似'), infer from the profile.\n"
+        "- If the request is generic ('推荐最近的论文'), set is_generic=true and pick top topics from the profile.\n"
+        "- If a supervisor_instruction is given, incorporate its constraints (e.g. venue preferences, time range).\n"
+        "- Output recency_days if the user specifies a time range, otherwise null.\n"
+        "- Output constraints.must_include_keywords for important filter terms.\n"
+        "- Output constraints.preferred_venues if venues/conferences are mentioned or implied.\n"
+        "- Follow the user's language in the rationale field."
+    )
+
+    async def _understand_recommendation_intent(
+        self,
+        *,
+        question: str,
+        profile: UserResearchProfile,
+        supervisor_instruction: str | None = None,
+    ) -> RecommendationIntentResult | None:
+        if self.llm_adapter is None:
+            return None
+        profile_summary = [
+            {
+                "topic": item.topic_name,
+                "weight": round(float(item.weight), 2),
+                "mention_count": int(item.mention_count),
+                "preferred_sources": list(item.preferred_sources)[:2],
+            }
+            for item in sorted(
+                profile.interest_topics,
+                key=lambda t: (float(t.weight), int(t.recent_mention_count)),
+                reverse=True,
+            )[:5]
+        ]
+        input_data: dict[str, Any] = {
+            "question": question,
+            "user_interest_profile": profile_summary,
+            "profile_preferred_sources": list(profile.preferred_sources)[:3],
+        }
+        if supervisor_instruction:
+            input_data["supervisor_instruction"] = supervisor_instruction
+        try:
+            result = await self.llm_adapter.generate_structured(
+                prompt=self._INTENT_PROMPT,
+                input_data=input_data,
+                response_model=RecommendationIntentResult,
+            )
+            if result.search_topics or result.is_generic:
+                return result
+            return None
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "LLM recommendation intent understanding failed, falling back to heuristic",
+                exc_info=True,
+            )
+            return None
+
+    # ------------------------------------------------------------------
+    # LLM-driven personalized ranking
+    # ------------------------------------------------------------------
+
+    _RANK_PROMPT = (
+        "You are a personalized paper ranking assistant.\n"
+        "Given a user's research interest profile, their original question, and a list of candidate papers,\n"
+        "rank the papers by personal relevance and generate a unique, specific recommendation reason for each.\n\n"
+        "Rules:\n"
+        "- Score each paper 0.0 to 1.0 based on relevance to the user's interests AND the current question.\n"
+        "- The reason should be personalized: explain WHY this paper matters to THIS user, not a generic summary.\n"
+        "- Reference the user's known interests when explaining relevance.\n"
+        "- If a supervisor_instruction is given, factor it into scoring (e.g. prefer certain venues or recency).\n"
+        "- Return only paper_ids that exist in the candidate list.\n"
+        "- Follow the user's language in the reason field.\n"
+        "- Rank at most top_k papers."
+    )
+
+    async def _personalized_rank(
+        self,
+        *,
+        question: str,
+        candidates: list[dict[str, Any]],
+        profile: UserResearchProfile,
+        top_k: int,
+        intent_rationale: str = "",
+        supervisor_instruction: str | None = None,
+    ) -> PersonalizedRankResult | None:
+        if self.llm_adapter is None or not candidates:
+            return None
+        profile_summary = [
+            {
+                "topic": item.topic_name,
+                "weight": round(float(item.weight), 2),
+            }
+            for item in sorted(
+                profile.interest_topics,
+                key=lambda t: float(t.weight),
+                reverse=True,
+            )[:5]
+        ]
+        papers_for_llm = [
+            {
+                "paper_id": item["paper"].paper_id,
+                "title": item["paper"].title,
+                "year": item["paper"].year,
+                "source": item["paper"].source,
+                "abstract": (item["paper"].abstract or item["paper"].summary or "")[:300],
+                "matched_topics": [
+                    (t.topic_name if hasattr(t, "topic_name") else str(t))
+                    for t in item.get("topics", [])[:2]
+                ],
+            }
+            for item in candidates[:15]
+        ]
+        if not papers_for_llm:
+            return None
+        input_data: dict[str, Any] = {
+            "question": question,
+            "user_interest_profile": profile_summary,
+            "candidate_papers": papers_for_llm,
+            "top_k": top_k,
+            "intent_rationale": intent_rationale,
+        }
+        if supervisor_instruction:
+            input_data["supervisor_instruction"] = supervisor_instruction
+        try:
+            return await self.llm_adapter.generate_structured(
+                prompt=self._RANK_PROMPT,
+                input_data=input_data,
+                response_model=PersonalizedRankResult,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "LLM personalized ranking failed, falling back to heuristic",
+                exc_info=True,
+            )
+            return None

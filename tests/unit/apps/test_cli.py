@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 from apps.cli import (
+    _ensure_wsl_proxy_env,
     _figure_from_response,
     _format_compact_sources,
     _profile_summary_lines,
@@ -32,6 +35,34 @@ def test_cli_parser_supports_agent_and_management_commands() -> None:
     plugins_args = parser.parse_args(["plugins", "enable", "zotero_local_mcp"])
     assert plugins_args.command == "plugins"
     assert plugins_args.plugins_command == "enable"
+
+
+def test_ensure_wsl_proxy_env_sets_proxy_from_gateway(monkeypatch) -> None:
+    for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.setenv("WSL_PROXY_PORT", "7890")
+    monkeypatch.setattr("apps.cli._is_wsl_environment", lambda: True)
+    monkeypatch.setattr("apps.cli._default_gateway_from_proc_route", lambda: "172.23.160.1")
+    monkeypatch.setattr("apps.cli._proxy_url_reachable", lambda proxy_url: proxy_url == "http://172.23.160.1:7890")
+
+    _ensure_wsl_proxy_env()
+
+    assert os.environ["HTTPS_PROXY"] == "http://172.23.160.1:7890"
+    assert os.environ["https_proxy"] == "http://172.23.160.1:7890"
+    assert os.environ["NO_PROXY"] == "localhost,127.0.0.1,::1"
+
+
+def test_ensure_wsl_proxy_env_keeps_reachable_existing_proxy(monkeypatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:7890")
+    monkeypatch.setattr("apps.cli._is_wsl_environment", lambda: True)
+    monkeypatch.setattr("apps.cli._default_gateway_from_proc_route", lambda: "172.23.160.1")
+    monkeypatch.setattr("apps.cli._proxy_url_reachable", lambda proxy_url: proxy_url == "http://proxy.example:7890")
+
+    _ensure_wsl_proxy_env()
+
+    assert os.environ["HTTPS_PROXY"] == "http://proxy.example:7890"
 
 
 def test_slash_command_entries_include_profile_aliases_and_clear() -> None:

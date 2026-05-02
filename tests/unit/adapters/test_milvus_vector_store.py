@@ -166,3 +166,47 @@ async def test_ensure_collection_rejects_dimension_mismatch() -> None:
 
     with pytest.raises(VectorStoreError, match="existing_dim=1024 requested_dim=3072"):
         await store._ensure_collection(3072)
+
+
+@pytest.mark.asyncio
+async def test_upsert_embeddings_flushes_after_write() -> None:
+    calls: list[str] = []
+
+    class FakeClient:
+        def has_collection(self, collection_name: str) -> bool:
+            calls.append("has_collection")
+            return True
+
+        def describe_collection(self, collection_name: str) -> dict:
+            calls.append("describe_collection")
+            return {"fields": [{"name": "vector", "params": {"dim": 2}}]}
+
+        def load_collection(self, collection_name: str) -> None:
+            calls.append("load_collection")
+
+        def upsert(self, collection_name: str, data: list[dict]) -> dict:
+            calls.append("upsert")
+            return {"upsert_count": len(data)}
+
+        def flush(self, collection_name: str) -> None:
+            calls.append("flush")
+
+    store = MilvusVectorStore(collection_name="test_collection")
+    store.client = FakeClient()
+    record = MultimodalEmbeddingRecord(
+        id="rec1",
+        item=EmbeddingItem(
+            id="item1",
+            document_id="doc1",
+            source_type="text_block",
+            source_id="tb1",
+            content="hello",
+        ),
+        embedding=EmbeddingVector(model="m1", dimensions=2, values=[1.0, 0.0]),
+        modality="text",
+        namespace="default",
+    )
+
+    await store.upsert_embeddings([record])
+
+    assert calls[-2:] == ["upsert", "flush"]

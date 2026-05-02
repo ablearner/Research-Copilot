@@ -3896,6 +3896,9 @@ def test_record_agent_turn_persists_thread_workspace_summary(tmp_path) -> None:
 
 
 def test_supervisor_uses_explicit_clarify_request_action_for_ambiguous_turn() -> None:
+    """Intent-based guardrails are removed; needs_clarification is now a hint
+    for the Supervisor LLM, not a hard guardrail.  The guardrail should return
+    None so the LLM can decide whether clarification is truly needed."""
     agent = ResearchSupervisorAgent()
     decision = agent._intent_guardrail_decision(
         state=ResearchSupervisorState(
@@ -3914,9 +3917,7 @@ def test_supervisor_uses_explicit_clarify_request_action_for_ambiguous_turn() ->
         replan_count=0,
     )
 
-    assert decision is not None
-    assert decision.action_name == "clarify_request"
-    assert decision.stop_reason == "你想问哪篇论文？请给我标题、序号或先选中论文。"
+    assert decision is None
 
 
 def test_supervisor_standardizes_observation_envelope_for_new_topic_discovery(tmp_path) -> None:

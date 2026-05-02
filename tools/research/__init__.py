@@ -24,6 +24,7 @@ from tools.research.survey_writing import SurveyWriter, SurveyWriterAgent
 from tools.research.visual_anchor import VisualAnchor
 from tools.research.user_intent import ResearchIntentResolver, ResearchUserIntentResult
 from tools.research.writing_polish import WritingPolisher
+from tools.research.zotero_search_tool import ZoteroSearchTool
 from tools.research.qa_schemas import ResearchQARouteDecision
 from tools.research.qa_decisions import (
     build_answer_quality_check,
@@ -69,4 +70,5 @@ __all__ = [
     "is_insufficient_answer",
     "rewrite_collection_question",
     "select_recovery_qa_route",
+    "ZoteroSearchTool",
 ]

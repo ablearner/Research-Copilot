@@ -114,6 +114,7 @@ class ResearchAgentToolContext:
     skill_context: str | None = None
     skill_selection: Any | None = None
     knowledge_access: Any | None = None
+    supervisor_instruction: str | None = None
 
     @property
     def task(self) -> ResearchTask | None:

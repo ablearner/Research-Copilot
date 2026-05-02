@@ -119,6 +119,7 @@ class SurveyWriter:
         min_length: int = 800,
         include_citations: bool = True,
         language: str = "zh-CN",
+        supervisor_instruction: str | None = None,
     ) -> ResearchReport:
         """Async generate — uses LLM if available, falls back to heuristic."""
         min_length = _effective_min_length(self.llm_adapter, min_length)
@@ -127,6 +128,7 @@ class SurveyWriter:
                 return await self._llm_generate(
                     topic=topic, task_id=task_id, papers=papers, warnings=warnings,
                     style=style, min_length=min_length, include_citations=include_citations, language=language,
+                    supervisor_instruction=supervisor_instruction,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("LLM survey generation failed, falling back to heuristic: %s", exc)
@@ -146,6 +148,7 @@ class SurveyWriter:
         min_length: int = 800,
         include_citations: bool = True,
         language: str = "zh-CN",
+        supervisor_instruction: str | None = None,
     ) -> ResearchReport:
         warnings = warnings or []
         papers_with_summary = [
@@ -170,16 +173,19 @@ class SurveyWriter:
             for c in clusters
         )
 
+        input_data: dict[str, Any] = {
+            "topic": topic,
+            "style": style,
+            "paper_count": str(len(papers_with_summary)),
+            "papers_json": papers_json,
+            "clusters_json": clusters_json,
+            "min_length": str(min_length),
+        }
+        if supervisor_instruction:
+            input_data["supervisor_instruction"] = supervisor_instruction
         result = await self.llm_adapter.generate_structured(
             prompt=_SURVEY_PROMPT if _is_chinese_language(language) else _SURVEY_PROMPT_EN,
-            input_data={
-                "topic": topic,
-                "style": style,
-                "paper_count": str(len(papers_with_summary)),
-                "papers_json": papers_json,
-                "clusters_json": clusters_json,
-                "min_length": str(min_length),
-            },
+            input_data=input_data,
             response_model=_LLMSurveyResponse,
         )
 

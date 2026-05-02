@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -28,7 +29,7 @@ class ResearchAgentContextBuilder:
         self.runtime = runtime
         self.skill_resolver = skill_resolver
 
-    def build(
+    async def build(
         self,
         *,
         request: ResearchAgentRunRequest,
@@ -55,6 +56,11 @@ class ResearchAgentContextBuilder:
                 context.warnings.append(
                     f"research task not found: {hydrated_request.task_id}"
                 )
+
+        # Start async skill resolution early so it runs concurrently with sync setup
+        skill_task = asyncio.create_task(
+            self._resolve_skills(context=context, graph_runtime=graph_runtime)
+        )
 
         context.execution_context = self.runtime.research_service.build_execution_context(
             graph_runtime=graph_runtime,
@@ -86,17 +92,18 @@ class ResearchAgentContextBuilder:
             graph_runtime=graph_runtime,
             research_service=self.runtime.research_service,
         ).model_dump(mode="json")
-        self._resolve_skills(context=context, graph_runtime=graph_runtime)
+
+        await skill_task
         return context
 
-    def _resolve_skills(
+    async def _resolve_skills(
         self,
         *,
         context: ResearchAgentToolContext,
         graph_runtime: Any,
     ) -> None:
         try:
-            selection = self.skill_resolver.resolve(
+            selection = await self.skill_resolver.resolve(
                 message=context.request.message,
                 explicit_skill_name=context.request.skill_name,
                 available_tool_names=self._available_tool_names(graph_runtime),

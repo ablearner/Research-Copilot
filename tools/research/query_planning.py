@@ -94,7 +94,7 @@ _ENGLISH_SOURCE_LIMITS = {
     "semantic_scholar": 1,
     "ieee": 2,
     "openalex": 3,
-    "zotero": 3,
+    "zotero": 5,
 }
 
 _REWRITE_PROMPT = (
@@ -158,19 +158,22 @@ class ResearchQueryRewriter:
         """Synchronous rewrite — uses heuristic logic."""
         return self._heuristic_rewrite(topic)
 
-    async def rewrite_async(self, topic: str) -> ResearchQueryRewriteResult:
+    async def rewrite_async(self, topic: str, *, supervisor_instruction: str | None = None) -> ResearchQueryRewriteResult:
         """Async rewrite — uses LLM if available, falls back to heuristic."""
         if self.llm_adapter is not None:
             try:
-                return await self._llm_rewrite(topic)
+                return await self._llm_rewrite(topic, supervisor_instruction=supervisor_instruction)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("LLM query rewrite failed, falling back to heuristic: %s", exc)
         return self._heuristic_rewrite(topic)
 
-    async def _llm_rewrite(self, topic: str) -> ResearchQueryRewriteResult:
+    async def _llm_rewrite(self, topic: str, *, supervisor_instruction: str | None = None) -> ResearchQueryRewriteResult:
+        input_data: dict[str, Any] = {"topic": topic}
+        if supervisor_instruction:
+            input_data["supervisor_instruction"] = supervisor_instruction
         result = await self.llm_adapter.generate_structured(
             prompt=_REWRITE_PROMPT,
-            input_data={"topic": topic},
+            input_data=input_data,
             response_model=_LLMRewriteResponse,
         )
         return ResearchQueryRewriteResult(
@@ -214,21 +217,47 @@ class ResearchQueryRewriter:
         if not cleaned:
             return []
         if source == "zotero":
-            # Zotero titleCreatorYear uses AND-matching on multi-word queries,
-            # so prefer short individual terms for broader recall.  Exclude
-            # mixed-language concatenated strings (e.g. "无人机 UAV drone …")
-            # which waste a query slot with near-zero matches.
-            pure_cjk = sorted(
-                (q for q in cleaned if _contains_cjk(q) and not _contains_ascii_letter(q)),
-                key=len,
-            )
-            pure_eng = sorted(
-                (q for q in cleaned if _contains_ascii_letter(q) and not _contains_cjk(q)),
-                key=len,
-            )
+            # Zotero local API uses AND-matching on multi-word queries,
+            # so both CJK and English multi-word queries need to be split
+            # into short individual terms for broader recall.
+            cjk_terms: list[str] = []
+            for q in cleaned:
+                if not _contains_cjk(q) or _contains_ascii_letter(q):
+                    continue
+                words = q.split()
+                if len(words) <= 1:
+                    cjk_terms.append(q)
+                else:
+                    cjk_terms.extend(words)
+            cjk_terms = _dedupe_queries(cjk_terms)
+            short_eng_terms: list[str] = []
+            split_eng_terms: list[str] = []
+            for q in cleaned:
+                if not _contains_ascii_letter(q) or _contains_cjk(q):
+                    continue
+                words = q.split()
+                if len(words) <= 3:
+                    short_eng_terms.append(q)
+                else:
+                    split_eng_terms.extend(words)
+            eng_terms = _dedupe_queries([*short_eng_terms, *split_eng_terms])
+            # Interleave CJK and English so both get fair slots.
             limit = _ENGLISH_SOURCE_LIMITS.get(source, 3)
-            mixed = _dedupe_queries([*pure_cjk[:limit], *pure_eng[:limit]])
-            mixed = mixed[:limit] if mixed else cleaned[:limit]
+            mixed: list[str] = []
+            ci, ei = 0, 0
+            while len(mixed) < limit and (ci < len(cjk_terms) or ei < len(eng_terms)):
+                if ei < len(eng_terms):
+                    if eng_terms[ei] not in mixed:
+                        mixed.append(eng_terms[ei])
+                    ei += 1
+                if len(mixed) >= limit:
+                    break
+                if ci < len(cjk_terms):
+                    if cjk_terms[ci] not in mixed:
+                        mixed.append(cjk_terms[ci])
+                    ci += 1
+            if not mixed:
+                mixed = cleaned[:limit]
             return mixed
 
         english_queries = [query for query in cleaned if _contains_ascii_letter(query)]
@@ -271,14 +300,19 @@ class TopicPlanner:
         days_back: int,
         max_papers: int,
         sources: list[PaperSource],
+        supervisor_instruction: str | None = None,
     ) -> ResearchTopicPlan:
         """Async plan — uses LLM rewrite if available."""
         normalized = " ".join(topic.strip().split())
-        rewrite = await self.query_rewrite_skill.rewrite_async(normalized)
+        rewrite = await self.query_rewrite_skill.rewrite_async(normalized, supervisor_instruction=supervisor_instruction)
         heuristic_rewrite = self.query_rewrite_skill.rewrite(normalized)
         # Preserve high-yield heuristic seeds alongside LLM rewrites so acronym-heavy
         # topics like "VLN" do not lose their most effective provider queries.
-        queries = _dedupe_queries([*rewrite.all_queries, *heuristic_rewrite.all_queries])
+        queries = _merge_rewrite_queries(
+            rewrite,
+            heuristic_rewrite,
+            prefer_local_library="zotero" in sources,
+        )
         core_terms = extract_core_terms(rewrite.simplified_topic) or extract_core_terms(
             heuristic_rewrite.simplified_topic
         )
@@ -289,7 +323,7 @@ class TopicPlanner:
         return ResearchTopicPlan(
             topic=topic,
             normalized_topic=normalized,
-            queries=queries[:6],
+            queries=_limit_plan_queries(queries, limit=6),
             days_back=days_back,
             max_papers=max_papers,
             sources=sources,
@@ -324,7 +358,7 @@ class TopicPlanner:
         return ResearchTopicPlan(
             topic=topic,
             normalized_topic=normalized,
-            queries=queries[:4],
+            queries=_limit_plan_queries(queries, limit=4),
             days_back=days_back,
             max_papers=max_papers,
             sources=sources,
@@ -373,11 +407,61 @@ def _dedupe_queries(values) -> list[str]:
     return deduped
 
 
+def _merge_rewrite_queries(
+    rewrite: ResearchQueryRewriteResult,
+    heuristic_rewrite: ResearchQueryRewriteResult,
+    *,
+    prefer_local_library: bool,
+) -> list[str]:
+    if not prefer_local_library:
+        return _dedupe_queries([*rewrite.all_queries, *heuristic_rewrite.all_queries])
+
+    return _dedupe_queries(
+        [
+            *rewrite.local_queries[:1],
+            *heuristic_rewrite.expanded_queries,
+            *heuristic_rewrite.english_queries,
+            *rewrite.english_queries,
+            *rewrite.local_queries[1:],
+            *heuristic_rewrite.local_queries,
+        ]
+    )
+
+
+def _limit_plan_queries(queries: list[str], *, limit: int) -> list[str]:
+    cleaned = _dedupe_queries(queries)
+    if len(cleaned) <= limit:
+        return cleaned
+
+    selected: list[str] = []
+    cjk_only = [query for query in cleaned if _contains_cjk(query) and not _contains_ascii_letter(query)]
+    english_only = [query for query in cleaned if _contains_ascii_letter(query) and not _contains_cjk(query)]
+
+    if cjk_only:
+        selected.append(cjk_only[0])
+
+    # Keep English provider/library terms from being pushed out by several
+    # local-language variants in LLM rewrites.
+    english_slots = max(0, limit - len(selected) - 1)
+    for query in english_only[:english_slots]:
+        if query not in selected:
+            selected.append(query)
+
+    for query in cleaned:
+        if len(selected) >= limit:
+            break
+        if query not in selected:
+            selected.append(query)
+
+    return selected[:limit]
+
+
 def _focused_domain_queries(topic: str) -> list[str]:
+    spaced = _insert_cjk_ascii_spaces(topic)
     focused: list[str] = []
     if re.search(
         r"(?:\bvln\b|vision(?:\s|-and-|\s+and\s+)language navigation|vision language navigation)",
-        topic,
+        spaced,
         re.IGNORECASE,
     ):
         focused.extend(
@@ -390,23 +474,35 @@ def _focused_domain_queries(topic: str) -> list[str]:
         )
     if re.search(
         r"(?:大模型|大语言模型|大型语言模型|基础模型|基座模型|\bllm(?:s)?\b|large language model|foundation model|generative ai)",
-        topic,
+        spaced,
         re.IGNORECASE,
     ):
         focused.extend(["large language model", "foundation model", "LLM"])
-    if re.search(r"(?:\buav\b|\bdrone\b|无人机)", topic, re.IGNORECASE) and re.search(
+    if re.search(r"(?:\buav\b|\bdrone\b|无人机)", spaced, re.IGNORECASE) and re.search(
         r"(?:path planning|路径规划)",
-        topic,
+        spaced,
         re.IGNORECASE,
     ):
         focused.extend(["UAV path planning", "drone trajectory planning", "unmanned aerial vehicle navigation"])
     return _dedupe_queries(focused)
 
 
+_CJK_ASCII_BOUNDARY = re.compile(r"([\u4e00-\u9fff])([A-Za-z0-9])")
+_ASCII_CJK_BOUNDARY = re.compile(r"([A-Za-z0-9])([\u4e00-\u9fff])")
+
+
+def _insert_cjk_ascii_spaces(text: str) -> str:
+    """Insert spaces at CJK/ASCII boundaries so \\b works for synonym matching."""
+    text = _CJK_ASCII_BOUNDARY.sub(r"\1 \2", text)
+    text = _ASCII_CJK_BOUNDARY.sub(r"\1 \2", text)
+    return text
+
+
 def _expanded_domain_queries(topic: str) -> list[str]:
+    spaced_topic = _insert_cjk_ascii_spaces(topic)
     expansions: list[str] = []
     for pattern, synonyms in _SYNONYM_RULES:
-        if pattern.search(topic):
+        if pattern.search(spaced_topic):
             expansions.extend(synonyms)
     unique_expansions = _dedupe_queries(expansions)
     if not unique_expansions:
@@ -414,6 +510,11 @@ def _expanded_domain_queries(topic: str) -> list[str]:
     expanded = [" ".join(unique_expansions[:8])]
     if _contains_cjk(topic):
         expanded.append(f"{topic} {' '.join(unique_expansions[:6])}")
+    # Also include individual short synonyms so local-library sources
+    # (e.g. Zotero) can pick them as standalone queries.
+    for term in unique_expansions:
+        if len(term.split()) <= 3 and term not in expanded:
+            expanded.append(term)
     return expanded
 
 

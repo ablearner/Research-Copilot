@@ -36,6 +36,16 @@ ResearchSupervisorActionName = Literal[
 ]
 
 
+class PlanStep(BaseModel):
+    """A single step in a multi-step execution plan."""
+    step_id: int
+    action: str
+    instruction: str = ""
+    params: dict[str, Any] = Field(default_factory=dict)
+    depends_on: list[int] = Field(default_factory=list)
+    status: Literal["pending", "running", "done", "failed", "skipped"] = "pending"
+
+
 @dataclass(slots=True)
 class ResearchSupervisorState:
     goal: str
@@ -90,6 +100,7 @@ class ResearchSupervisorState:
     candidate_papers: list[dict[str, Any]] = field(default_factory=list)
     user_intent: dict[str, Any] = field(default_factory=dict)
     skill_context: str | None = None
+    execution_plan: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -120,6 +131,7 @@ class ResearchSupervisorLLMDecision(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     expected_output_schema: dict[str, Any] = Field(default_factory=dict)
     stop_reason: str | None = None
+    plan: list[PlanStep] = Field(default_factory=list)
 
 
 class ResearchSupervisorAgent:
@@ -238,6 +250,17 @@ class ResearchSupervisorAgent:
                     priority="high",
                 )
             context_slice = self._truncate_context_slice(context_slice)
+        # ── Plan-and-Execute: advance active plan ──
+        plan_decision = self._advance_plan(
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+            context_slice=context_slice,
+        )
+        if plan_decision is not None:
+            return plan_decision
         guardrail_hints: list[dict[str, Any]] = []
         intent_guardrail = self._intent_guardrail_decision(
             state=state,
@@ -328,31 +351,11 @@ class ResearchSupervisorAgent:
         replan_count: int,
     ) -> ResearchSupervisorDecision | None:
         intent_name = str(state.user_intent.get("intent") or "").strip()
-        if (
-            state.user_intent.get("needs_clarification")
-            and not state.has_document_input
-            and not state.has_chart_input
-            and state.mode not in {"document", "chart"}
-        ):
-            clarification = str(
-                state.user_intent.get("clarification_question")
-                or "当前追问的目标还不够明确，请补充你想继续哪个主题、哪篇论文或哪张图。"
-            ).strip()
-            return self._guardrail_clarify(
-                state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                clarification=clarification,
-            )
-        resolved_paper_ids = self._dedupe_ids(
-            [
-                str(item).strip()
-                for item in (state.user_intent.get("resolved_paper_ids") or [])
-                if str(item).strip()
-            ]
-        )
+        # ── Physical-input guardrails only ──
+        # Intent-based routing is handled by the Supervisor LLM, which
+        # receives state.user_intent as a hint.  Only physical attachment
+        # checks (chart image present) are kept here because they are
+        # unambiguous and independent of keyword classification.
         if (state.has_chart_input or state.mode == "chart") and not state.chart_understood:
             return self._guardrail_worker_action(
                 action_name="supervisor_understand_chart",
@@ -410,227 +413,95 @@ class ResearchSupervisorAgent:
                     },
                 },
             )
-        if intent_name == "literature_search":
-            action_name: ResearchSupervisorActionName = "search_literature"
-            rationale = "The parsed user intent indicates literature discovery rather than a direct general answer."
-            thought = "The user appears to want paper search or survey workflow, so the manager should start or refresh literature search."
-            extracted_topic = str(state.user_intent.get("extracted_topic") or "").strip()
-            source_constraints = list(state.user_intent.get("source_constraints") or [])
-            payload_overrides: dict[str, Any] = {
-                "trigger": "intent_guardrail",
-                "intent": intent_name,
-            }
-            if extracted_topic:
-                payload_overrides["query"] = extracted_topic
-            if source_constraints:
-                payload_overrides["source_constraints"] = source_constraints
-            requested_paper_count = state.user_intent.get("requested_paper_count")
-            if requested_paper_count is not None:
-                payload_overrides["requested_paper_count"] = int(requested_paper_count)
-            if state.has_task:
-                payload_overrides["refresh_reason"] = "user_requested_search"
-            return self._guardrail_worker_action(
-                action_name=action_name,
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=thought,
-                rationale=rationale,
-                phase="act",
-                estimated_gain=0.9,
-                estimated_cost=0.2,
-                payload_overrides=payload_overrides,
-                priority="high",
-            )
-        if intent_name == "sync_to_zotero" and state.has_task:
-            payload_overrides = {
-                "trigger": "intent_guardrail",
-                "intent": intent_name,
-            }
-            if resolved_paper_ids:
-                payload_overrides["paper_ids"] = resolved_paper_ids
-            return self._guardrail_worker_action(
-                action_name="sync_to_zotero",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user is asking to place the referenced candidate paper into Zotero, "
-                    "so the manager should trigger the existing library-sync action directly."
-                ),
-                rationale=(
-                    "Syncing to Zotero is already an existing worker action and should not be misrouted "
-                    "into literature search or generic QA when the user's request is library-oriented."
-                ),
-                phase="act",
-                estimated_gain=0.9,
-                estimated_cost=0.12,
-                payload_overrides=payload_overrides,
-                priority="high",
-            )
-        if intent_name == "paper_import" and state.has_task:
-            payload_overrides = {
-                "trigger": "intent_guardrail",
-                "intent": intent_name,
-            }
-            if resolved_paper_ids:
-                payload_overrides["paper_ids"] = resolved_paper_ids
-            return self._guardrail_worker_action(
-                action_name="import_papers",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user is asking to ingest the referenced paper into the current research workspace, "
-                    "so the manager should trigger the existing import action directly."
-                ),
-                rationale=(
-                    "Workspace import is an existing action for grounding later QA and analysis, "
-                    "and should not fall back to search or free-form report writing."
-                ),
-                phase="act",
-                estimated_gain=0.9,
-                estimated_cost=0.18,
-                payload_overrides=payload_overrides,
-                priority="high",
-            )
-        latest_was_general_answer = (
-            bool(results) and results[-1].task_type == "general_answer"
-        )
-        if intent_name == "general_answer" and not latest_was_general_answer:
-            return self._guardrail_worker_action(
-                action_name="general_answer",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user explicitly wants a general conversation turn, so the manager should bypass "
-                    "the research workflow and answer directly."
-                ),
-                rationale=(
-                    "General greetings, product questions, or explicit opt-outs from the current paper context "
-                    "should be handled by GeneralAnswerAgent even when a research task is active."
-                ),
-                phase="act",
-                estimated_gain=0.86,
-                estimated_cost=0.08,
-                payload_overrides={
-                    "trigger": "intent_guardrail",
-                    "intent": intent_name,
-                    "ignore_research_context": True,
-                },
-                priority="high",
-            )
-        already_tried_figures = any(
-            r.task_type == "analyze_paper_figures" for r in (results or [])
-        )
-        if intent_name == "figure_qa" and state.has_task and state.imported_document_count > 0 and not already_tried_figures:
-            payload_overrides = {
-                "trigger": "intent_guardrail",
-                "intent": intent_name,
-            }
-            if resolved_paper_ids:
-                payload_overrides["paper_ids"] = resolved_paper_ids
-            return self._guardrail_worker_action(
-                action_name="analyze_paper_figures",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user is asking about a figure, diagram, or chart in an imported paper, "
-                    "so the manager should extract and analyze the visual element from the PDF."
-                ),
-                rationale=(
-                    "When the user intent is figure_qa and imported documents exist, "
-                    "analyze_paper_figures can extract the actual figure from the PDF "
-                    "rather than relying on text-only evidence from answer_question."
-                ),
-                phase="act",
-                estimated_gain=0.92,
-                estimated_cost=0.2,
-                payload_overrides=payload_overrides,
-                priority="high",
-            )
-        latest_result = results[-1] if results else None
-        qa_recovery_in_progress = bool(
-            latest_result
-            and latest_result.task_type in {"answer_question", "general_answer"}
-            and latest_result.status == "skipped"
-        )
-        if (
-            state.mode == "qa"
-            and state.has_task
-            and not state.answer_attempted
-            and not state.has_document_input
-            and not (state.has_chart_input and not state.chart_understood)
-            and not qa_recovery_in_progress
-        ):
-            payload_overrides = {
-                "trigger": "qa_mode_guardrail",
-                "intent": intent_name or "research_qa",
-            }
-            if resolved_paper_ids:
-                payload_overrides["paper_ids"] = resolved_paper_ids
-            return self._guardrail_worker_action(
-                action_name="answer_question",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user explicitly selected QA mode, so the manager should route the turn "
-                    "to the task-level ResearchQAAgent instead of letting adjacent analysis or import "
-                    "actions steal the question."
-                ),
-                rationale=(
-                    "ResearchQAAgent is the canonical QA specialist under Supervisor; PaperAnalysisAgent "
-                    "remains available through explicit analysis actions, not as the default QA-mode worker."
-                ),
-                phase="act",
-                estimated_gain=0.82,
-                estimated_cost=0.18,
-                payload_overrides=payload_overrides,
-                priority="high",
-            )
-        if intent_name == "single_paper_qa" and resolved_paper_ids and state.has_task:
-            return self._guardrail_worker_action(
-                action_name="analyze_papers",
-                state=state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                thought=(
-                    "The user is targeting a specific candidate paper and asking for an explanation, "
-                    "so the manager should route to focused paper analysis instead of a general answer."
-                ),
-                rationale=(
-                    "A resolved single-paper reference with an active research task is best handled by "
-                    "PaperAnalysisAgent, which can explain the paper's contribution, method, and limitations."
-                ),
-                phase="act",
-                estimated_gain=0.88,
-                estimated_cost=0.2,
-                payload_overrides={
-                    "trigger": "intent_guardrail",
-                    "intent": intent_name,
-                    "paper_ids": resolved_paper_ids,
-                    "analysis_focus": "explain",
-                },
-                priority="high",
-            )
         return None
+
+    def _advance_plan(
+        self,
+        *,
+        state: ResearchSupervisorState,
+        all_messages: list[AgentMessage],
+        results: list[AgentResultMessage],
+        planner_runs: int,
+        replan_count: int,
+        context_slice: ResearchContextSlice | None,
+    ) -> ResearchSupervisorDecision | None:
+        """If an execution plan is active, advance to the next pending step.
+
+        Returns ``None`` when there is no plan, the plan is finished, or the
+        previous step failed (which clears the plan so the LLM can replan).
+        """
+        plan = state.execution_plan
+        if not plan:
+            return None
+
+        # Mark the previously running step based on latest result
+        latest = results[-1] if results else None
+        for step in plan:
+            if step.get("status") == "running":
+                if latest and latest.status in ("succeeded", "skipped"):
+                    step["status"] = "done"
+                elif latest and latest.status == "failed":
+                    step["status"] = "failed"
+                    # Clear the plan so the LLM can replan remaining steps
+                    logger.info(
+                        "Plan step %s (%s) failed; clearing plan for replan",
+                        step.get("step_id"),
+                        step.get("action"),
+                    )
+                    state.execution_plan = []
+                    return None
+
+        # Find the next pending step
+        next_step: dict[str, Any] | None = None
+        for step in plan:
+            if step.get("status") == "pending":
+                # Check dependencies are satisfied
+                deps = step.get("depends_on", [])
+                all_deps_done = all(
+                    any(
+                        s.get("step_id") == dep_id and s.get("status") == "done"
+                        for s in plan
+                    )
+                    for dep_id in deps
+                )
+                if all_deps_done:
+                    next_step = step
+                    break
+
+        if next_step is None:
+            # All steps done or no eligible step — clear plan
+            state.execution_plan = []
+            return None
+
+        # Mark step as running
+        next_step["status"] = "running"
+        action_name = self._normalize_action_name(next_step.get("action", "finalize"))
+        instruction = next_step.get("instruction", "")
+        payload = dict(next_step.get("params") or {})
+        step_index = next_step.get("step_id", 0)
+        total_steps = len(plan)
+        remaining = sum(1 for s in plan if s.get("status") == "pending")
+
+        return self._guardrail_worker_action(
+            action_name=action_name,
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+            thought=f"Executing plan step {step_index}/{total_steps}: {action_name}. {remaining} steps remaining.",
+            rationale=instruction or f"Plan step {step_index} requires {action_name}.",
+            phase="act",
+            estimated_gain=0.8,
+            estimated_cost=0.15,
+            payload_overrides={
+                "trigger": "plan_execution",
+                "plan_step_id": step_index,
+                "plan_total_steps": total_steps,
+                **payload,
+            },
+            priority="high",
+        )
 
     def _workflow_constraint_decision(
         self,
@@ -695,6 +566,18 @@ class ResearchSupervisorAgent:
         action_name = self._normalize_action_name(llm_output.action_name)
         thought = llm_output.thought.strip() or f"Manager selected {action_name} as the next best step."
         rationale = llm_output.rationale.strip() or "The manager chose the worker that can make the most progress."
+        # ── Plan-and-Execute: store multi-step plan ──
+        execution_plan: list[dict[str, Any]] = []
+        if len(llm_output.plan) > 1:
+            execution_plan = [step.model_dump() for step in llm_output.plan]
+            # Mark the first step as running (it's the action_name the LLM chose)
+            if execution_plan:
+                execution_plan[0]["status"] = "running"
+            logger.info(
+                "LLM generated %d-step plan: %s",
+                len(execution_plan),
+                " → ".join(s.get("action", "?") for s in execution_plan),
+            )
         metadata: dict[str, Any] = {
             "decision_source": "llm",
             "state_update": {
@@ -709,6 +592,7 @@ class ResearchSupervisorAgent:
                 "clarification_request": None,
                 "active_plan_id": None,
                 "new_topic_detected": state.new_topic_detected,
+                "execution_plan": execution_plan,
             },
         }
         if action_name == "finalize":
@@ -1628,7 +1512,13 @@ class ResearchSupervisorAgent:
             "When the user asks about a figure, diagram, chart, architecture, or system block diagram in an imported paper, choose analyze_paper_figures to extract and analyze the visual element directly from the PDF.\n"
             "When the user asks a general question that does not require literature search, paper import, local evidence retrieval, document parsing, or chart analysis, choose general_answer.\n"
             "When the user asks for broad, unscoped papers worth reading and the request should use the user's long-term interests instead of the current paper scope, choose recommend_from_preferences.\n"
-            "Do not produce a hardcoded plan or multiple steps. Decide the single best next worker action now.\n"
+            "For simple, single-intent requests, decide the single best next worker action now.\n"
+            "For complex, multi-intent requests (e.g. 'search papers, compare them, then import the best'), "
+            "produce a multi-step plan in the 'plan' field. Each step should have step_id, action, instruction, "
+            "params, and depends_on (list of step_ids this step depends on). Set action_name to the first step's action. "
+            "The runtime will execute steps in order, advancing automatically after each succeeds. "
+            "If a step fails, the plan is cleared and you will be called again to replan. "
+            "Only use plan for genuinely multi-step requests; do not plan for single actions.\n"
             "Use finalize when the workspace is already useful, a requested action is complete, a clarification is required, or no action has enough marginal value.\n"
             "Do not repeat a search, answer, paper analysis, import, or writing action that already succeeded in the recent results unless the state clearly changed.\n"
             "When selecting a worker action, provide a concrete instruction that helps the worker act independently.\n"
@@ -1715,6 +1605,8 @@ class ResearchSupervisorAgent:
                 {"index": i + 1, "paper_id": p.get("paper_id", ""), "title": p.get("title", "")}
                 for i, p in enumerate(list(state.candidate_papers)[:10])
             ]
+        if state.execution_plan:
+            snapshot["execution_plan"] = state.execution_plan
         return snapshot
 
     def _message_snapshot(self, message: AgentMessage) -> dict[str, Any]:

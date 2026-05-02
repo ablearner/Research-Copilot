@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -64,6 +65,12 @@ class ResearchFunctionServiceStub:
 class GraphRuntimeWithZoteroSyncStub(GraphRuntimeStub):
     def __init__(self) -> None:
         self.research_function_service = ResearchFunctionServiceStub()
+
+
+class GraphRuntimeSlowIndexWithZoteroSyncStub(GraphRuntimeWithZoteroSyncStub):
+    async def handle_index_document(self, **kwargs):
+        await asyncio.sleep(1)
+        return type("IndexResult", (), {"status": "succeeded"})()
 
 
 async def test_literature_research_service_imports_and_persists_ingest_status(tmp_path) -> None:
@@ -150,6 +157,54 @@ async def test_literature_research_service_syncs_imported_paper_to_zotero(tmp_pa
     persisted = report_service.load_papers("task_sync")
     assert persisted[0].metadata["zotero_sync"]["collection_name"] == "Research-Copilot"
     assert graph_runtime.research_function_service.calls[0].paper_id == "arxiv:sync-1"
+
+
+async def test_literature_research_service_keeps_import_when_index_times_out(tmp_path) -> None:
+    report_service = ResearchReportService(tmp_path / "research")
+    task = ResearchTask(
+        task_id="task_timeout",
+        topic="导入超时",
+        status="completed",
+        created_at="2026-04-17T00:00:00+00:00",
+        updated_at="2026-04-17T00:00:00+00:00",
+        sources=["arxiv"],
+        imported_document_ids=[],
+    )
+    report_service.save_task(task)
+    report_service.save_papers(
+        "task_timeout",
+        [
+            PaperCandidate(
+                paper_id="arxiv:timeout-1",
+                title="Slow Index Import",
+                authors=["Alice"],
+                abstract="A survey.",
+                source="arxiv",
+                pdf_url="https://arxiv.org/pdf/timeout-1.pdf",
+            )
+        ],
+    )
+    service = LiteratureResearchService(
+        paper_search_service=PaperSearchServiceStub(),
+        report_service=report_service,
+        paper_import_service=PaperImportServiceStub(),
+        import_index_timeout_seconds=0.01,
+    )
+    graph_runtime = GraphRuntimeSlowIndexWithZoteroSyncStub()
+
+    response = await service.import_papers(
+        ImportPapersRequest(task_id="task_timeout", paper_ids=["arxiv:timeout-1"]),
+        graph_runtime=graph_runtime,
+    )
+
+    assert response.imported_count == 1
+    assert response.failed_count == 0
+    assert response.results[0].indexed is False
+    assert response.results[0].metadata["index_status"] == "timeout"
+    assert response.results[0].metadata["zotero_sync"]["zotero_item_key"] == "ZOT123"
+    persisted = report_service.load_papers("task_timeout")
+    assert persisted[0].ingest_status == "ingested"
+    assert persisted[0].metadata["index_status"] == "timeout"
 
 
 class FakeAsyncClient:

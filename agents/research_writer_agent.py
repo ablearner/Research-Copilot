@@ -193,6 +193,7 @@ class ResearchWriterAgent:
             papers=state.curated_papers,
             warnings=state.warnings,
             language=language,
+            supervisor_instruction=getattr(state, "supervisor_instruction", None),
         )
         return self._finalize_report(base_report, state)
 
@@ -454,6 +455,10 @@ class ResearchWriterAgent:
             **(getattr(execution_context, "preference_context", None) or {}),
             **preference_context,
         }
+        _request_meta = getattr(state.request, "metadata", {}) or {}
+        _sup_instr = str(_request_meta.get("supervisor_instruction") or "").strip() or None
+        if _sup_instr:
+            preference_context["supervisor_instruction"] = _sup_instr
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
         selected_paper_analysis = await self._analyze_selected_papers(state)
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)

@@ -53,18 +53,11 @@ from tools.research.paper_search import PaperSearchService
 from adapters.storage.research_report_service import ResearchReportService
 from domain.research_workspace import build_workspace_state
 from memory.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
+from memory.research_context_manager import INTERNAL_CONVERSATION_MESSAGE_TITLES
 from services.research.paper_operations import PaperOperationsMixin
 from services.research.qa_router import QARoutingMixin
 
 logger = logging.getLogger(__name__)
-
-INTERNAL_CONVERSATION_MESSAGE_TITLES = {
-    "Manager 任务分解",
-    "Research Workspace",
-    "Agent 决策轨迹",
-    "TODO 动作回执",
-    "Research-Copilot",
-}
 
 
 class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperationsMixin):
@@ -85,6 +78,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         review_writing_skill: ReviewWriter | None = None,
         writing_polish_skill: WritingPolisher | None = None,
         import_concurrency: int = 2,
+        import_index_timeout_seconds: float | None = 60.0,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.report_service = report_service
@@ -135,6 +129,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         self.review_writing_skill = review_writing_skill or ReviewWriter()
         self.writing_polish_skill = writing_polish_skill or WritingPolisher()
         self.import_concurrency = max(1, import_concurrency)
+        self.import_index_timeout_seconds = import_index_timeout_seconds
         self._job_tasks: dict[str, asyncio.Task[None]] = {}
         self.observability_service = ResearchObservabilityService(
             report_service.storage_root / "observability"
@@ -838,107 +833,19 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         correlation_id: str | None = None,
         messages: list[ResearchMessage] | None = None,
     ) -> ResearchContextSummary:
-        metadata = dict(workspace.metadata or {})
-        if days_back is not None:
-            metadata["days_back"] = days_back
-        if max_papers is not None:
-            metadata["max_papers"] = max_papers
-        if sources is not None:
-            metadata["sources"] = list(sources)
-        if correlation_id:
-            metadata["correlation_id"] = correlation_id
-        compression_payload = metadata.get("context_compression")
-        recent_messages = list(messages or [])
-        compressed_history = self._build_compressed_history_summary(
-            recent_messages,
-            compression_payload=compression_payload if isinstance(compression_payload, dict) else None,
-        )
-        derived_findings = compressed_history.get("derived_findings", [])
-        derived_actions = compressed_history.get("derived_next_actions", [])
-        summary_version = 2 if compressed_history.get("compressed") else 1
-        return ResearchContextSummary(
-            summary_version=summary_version,
-            objective=workspace.objective,
-            current_stage=workspace.current_stage,
+        return self.research_context_manager.build_context_summary(
+            workspace=workspace,
             topic=topic,
-            paper_count=max(0, paper_count if paper_count is not None else metadata.get("paper_count", 0)),
-            imported_document_count=len(imported_document_ids or workspace.document_ids),
-            selected_paper_count=len(selected_paper_ids or []),
-            key_findings=list(dict.fromkeys([*workspace.key_findings[:5], *derived_findings]))[:5],
-            evidence_gaps=list(workspace.evidence_gaps[:5]),
-            next_actions=list(dict.fromkeys([*workspace.next_actions[:5], *derived_actions]))[:5],
-            status_summary=compressed_history.get("status_summary") or workspace.status_summary,
-            last_user_message=last_user_message or compressed_history.get("last_user_message"),
-            last_updated_at=_now_iso(),
+            days_back=days_back,
+            max_papers=max_papers,
+            sources=sources,
+            selected_paper_ids=selected_paper_ids,
+            paper_count=paper_count,
+            imported_document_ids=imported_document_ids,
+            last_user_message=last_user_message,
+            correlation_id=correlation_id,
+            messages=messages,
         )
-
-    def _build_compressed_history_summary(
-        self,
-        messages: list[ResearchMessage],
-        *,
-        compression_payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        if not messages and not compression_payload:
-            return {"compressed": False}
-        recent_meaningful = [
-            message
-            for message in messages
-            if (
-                ((message.content or "").strip() or (message.title or "").strip())
-                and message.title not in INTERNAL_CONVERSATION_MESSAGE_TITLES
-                and message.kind != "welcome"
-            )
-        ]
-        compressed = len(recent_meaningful) >= 8 or compression_payload is not None
-        last_user_message = next(
-            (
-                self._compact_text(message.content or message.title, limit=120)
-                for message in reversed(recent_meaningful)
-                if message.role == "user"
-            ),
-            None,
-        )
-        assistant_summaries = [
-            self._compact_text(
-                message.content or (
-                    message.title if message.kind not in {"candidates", "report"} else ""
-                ),
-                limit=160,
-            )
-            for message in recent_meaningful
-            if message.role == "assistant"
-            and (
-                (message.content or "").strip()
-                or (message.kind not in {"candidates", "report"} and (message.title or "").strip())
-            )
-        ]
-        derived_findings = assistant_summaries[:2] if compressed else []
-        derived_next_actions: list[str] = []
-        if compression_payload is not None:
-            paper_count = int(compression_payload.get("paper_count", 0))
-            summary_count = int(compression_payload.get("summary_count", 0))
-            derived_next_actions.append(
-                f"当前已压缩上下文：覆盖 {paper_count} 篇论文、{summary_count} 条摘要，可继续基于压缩视图追问。"
-            )
-        status_summary = None
-        if compressed:
-            fragments: list[str] = []
-            if last_user_message:
-                fragments.append(f"最近关注：{last_user_message}")
-            if compression_payload is not None:
-                fragments.append(
-                    f"已启用上下文压缩（papers={compression_payload.get('paper_count', 0)}，summaries={compression_payload.get('summary_count', 0)}）"
-                )
-            if assistant_summaries:
-                fragments.append(f"最近结论：{assistant_summaries[0]}")
-            status_summary = "；".join(fragments)[:280] if fragments else None
-        return {
-            "compressed": compressed,
-            "last_user_message": last_user_message,
-            "derived_findings": derived_findings,
-            "derived_next_actions": derived_next_actions,
-            "status_summary": status_summary,
-        }
 
     def _build_status_metadata(
         self,

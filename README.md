@@ -4,10 +4,14 @@
 
 ## 当前代码主线
 
-当前项目最值得先记住的是两层运行时：
+当前项目最值得先记住的是三层边界：
 
 - `services/research/`
-  高层 research 业务层，负责 conversation、task、paper pool、import job、collection QA、workspace、report 和 supervisor orchestration。
+  高层 research 业务服务层，负责 conversation、task、paper pool、import job、collection QA、workspace、report 和持久化收口。
+- `runtime/research/`
+  Supervisor Graph 运行时，负责构建 `ResearchAgentToolContext`、技能匹配、manager 决策、specialist agent 调度和最终响应聚合。
+- `tools/research/`
+  研究领域能力单元，负责 query planning、paper ranking、survey writing、paper import/search、QA routing、Zotero search 等可复用业务能力。
 - `rag_runtime/`
   底层 tool-first 执行层，负责 `parse / index / retrieve / answer / chart understanding`。
 
@@ -52,6 +56,7 @@ Browser (http://localhost:3000)
 -> /api/files/* -> Route Handler -> .data/storage/
 -> LiteratureResearchService
 -> ResearchSupervisorGraphRuntime
+-> runtime/research context builder / dispatcher / result aggregator
 -> specialist agents / research services
 -> RagRuntime
 -> DocumentTools / RetrievalTools / AnswerTools / ChartTools
@@ -63,9 +68,11 @@ Browser (http://localhost:3000)
 - `research discovery`
   根据研究主题搜索 arXiv、OpenAlex、Semantic Scholar、IEEE 等学术源，生成候选论文池和研究草稿。
 - `paper import`
-  对选中的论文执行 `download -> parse -> graph extraction -> embedding index -> graph index`。
+  对选中的论文执行 `download -> parse -> Zotero sync -> embedding index -> graph index`。索引阶段有 `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 超时保护；索引超时会保留已解析/已同步的论文，不再把整次导入判为失败。
 - `collection QA`
   基于已导入论文集合做混合检索和 grounded answer，必要时下钻到单文档或图表链路。
+- `paper question answering`
+  对已导入且索引成功的论文，问答优先走 `RAG 正文证据 -> 图谱/摘要证据 -> 元数据兜底`。如果论文仍是 `index_status=timeout|failed|skipped`，系统不会假装有全文证据，只会用标题、摘要、候选元数据做弱回答并暴露证据边界。
 - `advanced actions`
   做多论文对比、优先阅读推荐、上下文压缩，并写回 workspace。
 - `CLI terminal agent`
@@ -82,10 +89,10 @@ Browser (http://localhost:3000)
 
 默认配置下：
 
-- `SESSION_MEMORY_PROVIDER=auto`
-  有 MySQL 配置时使用 MySQL，否则退回内存。
-- `LONG_TERM_MEMORY_PROVIDER=json`
-  CLI / research service 默认使用 JSON 文件型 long-term memory；也支持 Qdrant 和纯内存。
+- `SESSION_MEMORY_PROVIDER=sqlite`
+  底层 `GraphSessionMemory` 默认写入 `RESEARCH_SQLITE_DB_PATH`。
+- `LONG_TERM_MEMORY_PROVIDER=sqlite`
+  runtime profile 显示为 sqlite；research service 内部的长期记忆仍由 `MemoryManager` 和本地 JSON store 承载业务画像/论文知识。
 - `VECTOR_STORE_PROVIDER=milvus`
 - `GRAPH_STORE_PROVIDER=memory`
 
@@ -96,17 +103,23 @@ Browser (http://localhost:3000)
 - `apps/api/`
   FastAPI 入口、依赖注入、runtime 装配和 HTTP 路由
 - `services/research/`
-  research 主业务、workspace 持久化和 supervisor orchestration
+  research 主业务 service、paper operations、QA router 和 workspace/report/conversation 持久化
+- `runtime/research/`
+  高层 Supervisor Graph runtime、context builder、unified action adapters、result aggregator 和 response formatter
 - `agents/`
   高层 specialist agents（10 个：Supervisor、Writer、PreferenceMemory、Knowledge、LiteratureScout、ChartAnalysis、GeneralAnswer、PaperAnalysis、ResearchQA、ResearchDocument）
 - `rag_runtime/`
   底层 RAG runtime
 - `tools/`
   文档、图表、检索、回答等稳定工具层
+- `tools/research/`
+  研究领域能力与工具：学术源搜索、Zotero search、query planning、paper ranking/reading/analysis、survey/review writing、QA routing 等
 - `retrieval/`
   vector / sparse / graph / graph summary 检索与重排
 - `adapters/`
   LLM、embedding、vector store、graph store 等基础设施适配
+- `adapters/mcp/zotero_local.py`
+  Zotero 本地 Connector 网关和进程内 MCP app
 - `adapters/storage/`
   数据持久化后端（JSON 文件 / SQLite），通过 `StorageBackend` 协议抽象
 - `observability/`
@@ -176,7 +189,6 @@ Browser (http://localhost:3000)
 - `trajectory`
 - `update-profile`
 - `models show|set`
-- `skills list|enable|disable|default`
 - `plugins list|enable|disable`
 - `agent`
 
@@ -195,11 +207,11 @@ Browser (http://localhost:3000)
 - stores
   `VECTOR_STORE_PROVIDER`、`GRAPH_STORE_PROVIDER`、`SESSION_MEMORY_PROVIDER`
 - external store config
-  `MILVUS_URI`、`NEO4J_URI`、`MYSQL_*`、`POSTGRES_DSN`
+  `MILVUS_URI`、`NEO4J_URI`
 - research persistence
   `RESEARCH_STORAGE_ROOT`、`RESEARCH_RESET_ON_STARTUP`
 - long-term memory
-  `LONG_TERM_MEMORY_PROVIDER`、`QDRANT_PATH`、`QDRANT_COLLECTION_NAME`
+  `LONG_TERM_MEMORY_PROVIDER`
 - uploads
   `UPLOAD_DIR`、`UPLOAD_MAX_BYTES`
 
@@ -208,13 +220,16 @@ Browser (http://localhost:3000)
 - `APP_ENV=local` 时会暴露 `/uploads/*`
 - `UPLOAD_MAX_BYTES` 默认 `25 MiB`
 - `VECTOR_STORE_PROVIDER` 默认 `milvus`
-- `GRAPH_STORE_PROVIDER` 代码默认 `memory`，`.env` 中配置为 `neo4j`
-- `SESSION_MEMORY_PROVIDER` 默认 `auto`
-- `LONG_TERM_MEMORY_PROVIDER` 默认 `json`
+- `MILVUS_URI` 代码默认 `http://localhost:19530`；仓库当前 `.env` 和 compose 映射常用 `http://localhost:19531`
+- `GRAPH_STORE_PROVIDER` 代码默认 `memory`，仓库当前 `.env` 中可配置为 `neo4j`
+- `SESSION_MEMORY_PROVIDER` 默认 `sqlite`
+- `LONG_TERM_MEMORY_PROVIDER` 默认 `sqlite`
+- `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 默认 `300`
 - `STORAGE_PROVIDER` 默认 `json`（可切换为 `sqlite`）
 - `CORS_ALLOW_ORIGINS` 默认允许 localhost:3000/3001
 - `RATE_LIMIT_MAX_REQUESTS` 默认 60 次/分钟/IP
 - `JSON_LOG_FORMAT` 默认 `false`，设为 `true` 启用结构化 JSON 日志
+- WSL 下 `kepler agent` 会在启动时尝试从默认网关自动注入 Windows 代理环境，避免 `api.bltcy.ai` 直连 DNS/443 不稳定导致 manager 或 embedding 调用卡住。可用 `KEPLER_WSL_PROXY_AUTO_ENABLE=0` 关闭。
 
 ## MCP 标准化架构
 
@@ -288,10 +303,16 @@ Browser (http://localhost:3000)
 ```text
 skills/
 ├── builtin/                  # 内置技能（git-tracked）
+│   ├── academic-concepts/
+│   ├── chart-analysis/
+│   ├── knowledge-management/
 │   ├── paper-comparison/     # 论文对比分析
+│   ├── paper-discovery/
+│   ├── paper-recommendation/
 │   ├── literature-survey/    # 文献综述写作
 │   ├── paper-reading/        # 论文深度阅读
-│   └── research-evaluation/  # 研究质量评估
+│   ├── research-evaluation/  # 研究质量评估
+│   └── research-qa/
 ├── community/                # 社区/外部技能（gitignored）
 └── .skill_config.json        # 技能启用/禁用配置（gitignored）
 ```
@@ -419,12 +440,13 @@ npm run dev
 5. [web/src/api.ts](web/src/api.ts)
 6. [web/src/components/ChatView.tsx](web/src/components/ChatView.tsx)
 7. [web/src/components/MessageBubble.tsx](web/src/components/MessageBubble.tsx)
-8. [services/research/research_supervisor_graph_runtime_core.py](services/research/research_supervisor_graph_runtime_core.py)
-9. [services/research/literature_research_service.py](services/research/literature_research_service.py)
-10. [services/research/research_function_service.py](services/research/research_function_service.py)
-11. [rag_runtime/runtime.py](rag_runtime/runtime.py)
-12. [memory/memory_manager.py](memory/memory_manager.py)
-13. [retrieval/hybrid_retriever.py](retrieval/hybrid_retriever.py)
+8. [runtime/research/supervisor_graph_runtime_core.py](runtime/research/supervisor_graph_runtime_core.py)
+9. [runtime/research/context_builder.py](runtime/research/context_builder.py)
+10. [services/research/literature_research_service.py](services/research/literature_research_service.py)
+11. [tools/research/paper_search.py](tools/research/paper_search.py)
+12. [rag_runtime/runtime.py](rag_runtime/runtime.py)
+13. [memory/memory_manager.py](memory/memory_manager.py)
+14. [retrieval/hybrid_retriever.py](retrieval/hybrid_retriever.py)
 
 ## 相关文档
 

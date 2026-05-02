@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from inspect import isawaitable
 from typing import Any
 
@@ -70,6 +72,7 @@ class MilvusVectorStore(BaseVectorStore):
         self.embedding_adapter = embedding_adapter
         self.client: Any | None = None
         self._collection_loaded = False
+        self._executor: ThreadPoolExecutor | None = None
 
     async def connect(self) -> None:
         if self.client is not None:
@@ -97,6 +100,9 @@ class MilvusVectorStore(BaseVectorStore):
             await self._call_sync(close)
         self.client = None
         self._collection_loaded = False
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
 
     async def upsert_embedding(self, record: MultimodalEmbeddingRecord) -> None:
         await self.upsert_embeddings([record])
@@ -113,6 +119,9 @@ class MilvusVectorStore(BaseVectorStore):
                 collection_name=self.collection_name,
                 data=entities,
             )
+            flush = getattr(self.client, "flush", None)
+            if callable(flush):
+                await self._call_sync(flush, collection_name=self.collection_name)
         except Exception as exc:
             logger.exception("Failed to upsert Milvus records", extra={"record_count": len(records)})
             raise VectorStoreError("Failed to upsert Milvus records") from exc
@@ -480,7 +489,19 @@ class MilvusVectorStore(BaseVectorStore):
         return normalized[:255]
 
     async def _call_sync(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
-        result = func(*args, **kwargs)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            self._ensure_executor(),
+            lambda: func(*args, **kwargs),
+        )
         if isawaitable(result):
             return await result
         return result
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="milvus-vector-store",
+            )
+        return self._executor

@@ -83,6 +83,9 @@ class ChartAnalysisAgent:
                 observation="no chart_image_path was provided for chart understanding",
                 metadata={"reason": "missing_chart_image_path"},
             )
+        chart_context = dict(chart_input.context or {})
+        if context.supervisor_instruction:
+            chart_context["supervisor_instruction"] = context.supervisor_instruction
         chart_result = await self.understand_chart(
             graph_runtime=context.graph_runtime,
             image_path=chart_input.image_path,
@@ -91,7 +94,7 @@ class ChartAnalysisAgent:
             page_number=chart_input.page_number,
             chart_id=chart_input.chart_id,
             session_id=chart_input.session_id,
-            context=chart_input.context,
+            context=chart_context,
             skill_name=chart_input.skill_name,
         )
         context.chart_result = chart_result
@@ -191,6 +194,7 @@ class ChartAnalysisAgent:
                 target_paper.paper_id,
                 figure_request,
                 graph_runtime=context.graph_runtime,
+                supervisor_instruction=context.supervisor_instruction,
             )
         except Exception as exc:
             logger.warning("Failed to analyze paper figure", exc_info=True)
@@ -399,6 +403,7 @@ class ChartAnalysisAgent:
         graph_runtime: Any,
         load_cached_figure_target,
         parse_imported_paper_document,
+        supervisor_instruction: str | None = None,
     ) -> AnalyzeResearchPaperFigureResponse:
         analyze_target = load_cached_figure_target(paper=paper, figure_id=request.figure_id)
         if analyze_target is None:
@@ -408,6 +413,19 @@ class ChartAnalysisAgent:
                 parsed_document=parsed_document,
                 request=request,
             )
+        chart_ctx: dict[str, Any] = {
+            "paper_id": paper.paper_id,
+            "paper_title": paper.title,
+            "figure_id": analyze_target.figure_id,
+            "figure_source": analyze_target.source,
+            "figure_title": analyze_target.metadata.get("title"),
+            "figure_caption": analyze_target.metadata.get("caption"),
+            "page_number": analyze_target.page_number,
+            "bbox": analyze_target.bbox.model_dump(mode="json") if analyze_target.bbox else None,
+            "selection_rationale": analyze_target.metadata.get("anchor_rationale"),
+        }
+        if supervisor_instruction:
+            chart_ctx["supervisor_instruction"] = supervisor_instruction
         chart_result = await self.understand_chart(
             graph_runtime=graph_runtime,
             image_path=analyze_target.image_path,
@@ -416,17 +434,7 @@ class ChartAnalysisAgent:
             page_number=analyze_target.page_number,
             chart_id=analyze_target.chart_id,
             session_id=None,
-            context={
-                "paper_id": paper.paper_id,
-                "paper_title": paper.title,
-                "figure_id": analyze_target.figure_id,
-                "figure_source": analyze_target.source,
-                "figure_title": analyze_target.metadata.get("title"),
-                "figure_caption": analyze_target.metadata.get("caption"),
-                "page_number": analyze_target.page_number,
-                "bbox": analyze_target.bbox.model_dump(mode="json") if analyze_target.bbox else None,
-                "selection_rationale": analyze_target.metadata.get("anchor_rationale"),
-            },
+            context=chart_ctx,
             skill_name="paper_chart_analysis",
         )
         figure_context = {

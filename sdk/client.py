@@ -217,6 +217,7 @@ class ResearchCopilotSDK:
             ),
             memory_manager=memory_manager,
             import_concurrency=settings.research_import_concurrency,
+            import_index_timeout_seconds=settings.research_import_index_timeout_seconds,
         )
         return cls(settings=settings, service=service, profile_store=profile_store, profile=profile)
 
