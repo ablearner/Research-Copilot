@@ -1964,13 +1964,46 @@ class ResearchRuntimeBase:
 
 
 class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
-    """High-level supervisor runtime backed by a LangGraph loop."""
+    """High-level supervisor runtime backed by a standard LangGraph state graph."""
+
+    SPECIALIST_NODES = [
+        "literature_scout_node",
+        "write_review_node",
+        "paper_import_node",
+        "zotero_sync_node",
+        "research_qa_node",
+        "general_answer_node",
+        "preference_memory_node",
+        "paper_analysis_node",
+        "context_compression_node",
+        "document_specialist_node",
+        "chart_specialist_node",
+        "paper_figure_analysis_node",
+    ]
+
+    ACTION_TO_NODE: dict[str, str] = {
+        "search_literature": "literature_scout_node",
+        "write_review": "write_review_node",
+        "import_papers": "paper_import_node",
+        "sync_to_zotero": "zotero_sync_node",
+        "answer_question": "research_qa_node",
+        "general_answer": "general_answer_node",
+        "recommend_from_preferences": "preference_memory_node",
+        "analyze_papers": "paper_analysis_node",
+        "compress_context": "context_compression_node",
+        "understand_document": "document_specialist_node",
+        "supervisor_understand_chart": "chart_specialist_node",
+        "analyze_paper_figures": "paper_figure_analysis_node",
+        "finalize": "finalize_node",
+    }
 
     def __init__(self, **kwargs: Any) -> None:
         from langgraph.graph import END, StateGraph
 
         super().__init__(**kwargs)
         graph = StateGraph(ResearchAgentGraphState)
+
+        # ── Nodes ──
         graph.add_node("bootstrap_context_node", self.bootstrap_context_node)
         graph.add_node("supervisor_node", self.supervisor_node)
         graph.add_node("literature_scout_node", self.literature_scout_node)
@@ -1986,9 +2019,49 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
         graph.add_node("chart_specialist_node", self.chart_specialist_node)
         graph.add_node("paper_figure_analysis_node", self.paper_figure_analysis_specialist_node)
         graph.add_node("finalize_node", self.finalize_node)
+
+        # ── Fixed edges ──
         graph.add_edge("__start__", "bootstrap_context_node")
+        graph.add_edge("bootstrap_context_node", "supervisor_node")
         graph.add_edge("finalize_node", END)
+
+        # ── Conditional edge: supervisor → specialist / finalize ──
+        supervisor_targets = {node: node for node in self.SPECIALIST_NODES}
+        supervisor_targets["finalize_node"] = "finalize_node"
+        graph.add_conditional_edges(
+            "supervisor_node",
+            self._route_after_supervisor_node,
+            supervisor_targets,
+        )
+
+        # ── Conditional edges: each specialist → supervisor / finalize ──
+        specialist_targets = {
+            "supervisor_node": "supervisor_node",
+            "finalize_node": "finalize_node",
+        }
+        for node_name in self.SPECIALIST_NODES:
+            graph.add_conditional_edges(
+                node_name,
+                self._route_after_specialist_node,
+                specialist_targets,
+            )
+
         self.graph = graph.compile()
+
+    def _route_after_supervisor_node(self, state: ResearchAgentGraphState) -> str:
+        """Conditional-edge router: supervisor_node → specialist / finalize."""
+        if state.get("exhausted"):
+            return "finalize_node"
+        decision = state.get("current_decision")
+        if decision is None:
+            return "finalize_node"
+        return self._goto_after_supervisor(decision)
+
+    def _route_after_specialist_node(self, state: ResearchAgentGraphState) -> str:
+        """Conditional-edge router: specialist → supervisor / finalize."""
+        if self._should_force_finalize(state):
+            return "finalize_node"
+        return "supervisor_node"
 
     async def run(self, request: ResearchAgentRunRequest, *, graph_runtime: Any, on_progress: Any | None = None) -> ResearchAgentRunResponse:
         context = await self._build_tool_context(request=request, graph_runtime=graph_runtime)
@@ -2144,8 +2217,6 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
         }
 
     async def bootstrap_context_node(self, state: ResearchAgentGraphState):
-        from langgraph.types import Command
-
         _update_runtime_progress(
             state["context"],
             stage="supervisor_graph",
@@ -2154,17 +2225,12 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             summary="Bootstrapping supervisor graph context.",
         )
 
-        return Command(
-            update={
-                "progress_signature": self._progress_signature(state),
-                "trace": list(state.get("trace", [])),
-            },
-            goto="supervisor_node",
-        )
+        return {
+            "progress_signature": self._progress_signature(state),
+            "trace": list(state.get("trace", [])),
+        }
 
     async def supervisor_node(self, state: ResearchAgentGraphState):
-        from langgraph.types import Command
-
         _update_runtime_progress(
             state["context"],
             stage="supervisor_graph",
@@ -2175,73 +2241,59 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
         )
         current_step_index = int(state.get("current_step_index", 0) or 0)
         if current_step_index >= self.max_steps:
-            return Command(update={"exhausted": True}, goto="finalize_node")
+            return {"exhausted": True}
         if self._should_force_finalize(state):
             decision = self._forced_finalize_decision(state)
             update = self._on_decision(state, current_step_index + 1, decision)
-            return Command(
-                update={
-                    "current_step_index": current_step_index + 1,
-                    "current_decision": decision,
-                    **update,
-                },
-                goto="finalize_node",
-            )
+            return {
+                "current_step_index": current_step_index + 1,
+                "current_decision": decision,
+                **update,
+            }
         step_index = current_step_index + 1
         decision = await self._decide_next_action(state)
         update = self._on_decision(state, step_index, decision)
-        goto = self._goto_after_supervisor(decision)
-        return Command(
-            update={
-                "current_step_index": step_index,
-                "current_decision": decision,
-                **update,
-            },
-            goto=goto,
-        )
+        return {
+            "current_step_index": step_index,
+            "current_decision": decision,
+            **update,
+        }
 
     async def literature_scout_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.search_literature_node)
+        return await self.search_literature_node(state)
 
     async def write_review_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.write_review_node)
+        return await self.write_review_node(state)
 
     async def paper_import_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.import_papers_node)
+        return await self.import_papers_node(state)
 
     async def zotero_sync_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.sync_to_zotero_node)
+        return await self.sync_to_zotero_node(state)
 
     async def research_qa_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.answer_question_node)
+        return await self.answer_question_node(state)
 
     async def general_answer_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.general_answer_node)
+        return await self.general_answer_node(state)
 
     async def preference_memory_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.recommend_from_preferences_node)
+        return await self.recommend_from_preferences_node(state)
 
     async def paper_analysis_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.analyze_papers_node)
+        return await self.analyze_papers_node(state)
 
     async def context_compression_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.compress_context_node)
+        return await self.compress_context_node(state)
 
     async def document_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.understand_document_node)
+        return await self.understand_document_node(state)
 
     async def chart_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.understand_chart_node)
+        return await self.understand_chart_node(state)
 
     async def paper_figure_analysis_specialist_node(self, state: ResearchAgentGraphState):
-        return await self._run_specialist_and_route(state, self.analyze_paper_figures_node)
-
-    async def _run_specialist_and_route(self, state: ResearchAgentGraphState, runner):
-        from langgraph.types import Command
-
-        update = await runner(state)
-        next_node = "finalize_node" if self._should_force_finalize({**state, **update}) else "supervisor_node"
-        return Command(update=update, goto=next_node)
+        return await self.analyze_paper_figures_node(state)
 
     def _goto_after_supervisor(self, decision: ResearchSupervisorDecision) -> str:
         action = self._route_decision(decision)

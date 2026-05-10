@@ -122,6 +122,19 @@ start_bridge() {
     return 0
   fi
 
+  # Pre-flight: verify Zotero is reachable on the remote host before starting socat.
+  # This prevents a wslrelay loop where socat binds 127.0.0.1 in WSL, wslrelay mirrors
+  # it to Windows, and requests loop: curl → wslrelay → socat → portproxy → wslrelay → ...
+  local remote_probe=""
+  remote_probe="$(http_probe "${remote_host}" "${REMOTE_PORT}")"
+  if [[ "${remote_probe}" == "ERR" ]]; then
+    echo "error: cannot reach Zotero at ${remote_host}:${REMOTE_PORT}" >&2
+    echo "hint: ensure Zotero is running on Windows, portproxy is configured," >&2
+    echo "      and iphlpsvc is not blocking the port (see docs/Zotero本地连接指南.md 4.3/4.7)" >&2
+    exit 1
+  fi
+  echo "pre-flight: Zotero reachable at ${remote_host}:${REMOTE_PORT} (HTTP ${remote_probe})"
+
   nohup socat \
     "TCP-LISTEN:${LOCAL_PORT},bind=${LOCAL_HOST},reuseaddr,fork" \
     "TCP:${remote_host}:${REMOTE_PORT}" \
