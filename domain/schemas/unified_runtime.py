@@ -233,7 +233,7 @@ class UnifiedLiteratureSearchInput(BaseModel):
             topic=self.topic,
             days_back=self.days_back,
             max_papers=self.max_papers,
-            sources=list(self.sources),
+            sources=[s.lower() for s in self.sources],
             run_immediately=self.run_immediately,
             conversation_id=self.conversation_id,
         )

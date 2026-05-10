@@ -368,8 +368,8 @@ class ZoteroLocalGateway:
             return payload if isinstance(payload, dict) else {}
 
         # Zotero 7 connector variants may reject GET for this endpoint and require
-        # a POST request with an explicit zero-length body.
-        fallback_response = await client.post(endpoint, content=b"")
+        # a POST request with a JSON content-type.
+        fallback_response = await client.post(endpoint, json={})
         fallback_response.raise_for_status()
         payload = fallback_response.json() if fallback_response.content else {}
         return payload if isinstance(payload, dict) else {}
