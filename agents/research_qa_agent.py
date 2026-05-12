@@ -13,8 +13,10 @@ from pydantic import BaseModel, Field
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
+from domain.schemas.research import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style  # noqa: F401
 from domain.schemas.retrieval import HybridRetrievalResult
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
+from tools.research.visual_intent import VisualIntentDecision, VisualIntentRouter
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import ToolCallTrace, ToolExecutionResult
@@ -77,14 +79,6 @@ class ResearchQAAgentError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# Reasoning style helpers – canonical location: domain.schemas.research
-# Re-exported here for backward compatibility.
-# ---------------------------------------------------------------------------
-
-from domain.schemas.research import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style  # noqa: F401
-
-
-# ---------------------------------------------------------------------------
 # Task-level ResearchQAAgent
 # ---------------------------------------------------------------------------
 
@@ -130,6 +124,29 @@ class ResearchQAAgent:
             task_id=task_response.task.task_id,
             active_message=active_message,
         )
+        visual_intent = await self._decide_visual_intent_for_context(
+            context=context,
+            question=qa_input.question,
+            explicit_image_path=qa_input.image_path,
+        )
+        if visual_intent.search_new_figure and not qa_input.image_path:
+            return ResearchToolResult(
+                status="skipped",
+                observation="the user asked to locate a new visual, so chart QA should not reuse the current image anchor",
+                metadata={
+                    "reason": "visual_search_requires_figure_selection",
+                    "visual_intent": visual_intent.model_dump(mode="json"),
+                    "observation_envelope": {
+                        "progress_made": False,
+                        "confidence": visual_intent.confidence,
+                        "suggested_next_actions": ["analyze_paper_figures"],
+                        "state_delta": {
+                            "target_description": visual_intent.target_description or qa_input.question,
+                            "exclude_figure_ids": list(visual_intent.exclude_figure_ids),
+                        },
+                    },
+                },
+            )
         exec_result = await self.execute_qa(
             context.research_service,
             task_response.task.task_id,
@@ -237,6 +254,94 @@ class ResearchQAAgent:
 
         return bool(metadata.get("fallback"))
 
+    async def _decide_visual_intent_for_context(
+        self,
+        *,
+        context: ResearchAgentToolContext,
+        question: str,
+        explicit_image_path: str | None,
+    ) -> VisualIntentDecision:
+        current_anchor = self._explicit_anchor_from_values(
+            image_path=explicit_image_path or getattr(context.request, "chart_image_path", None),
+            page_id=getattr(context.request, "page_id", None),
+            page_number=getattr(context.request, "page_number", None),
+            chart_id=getattr(context.request, "chart_id", None),
+        )
+        workspace = getattr(context, "workspace", None)
+        workspace_metadata = workspace.metadata if workspace is not None and isinstance(workspace.metadata, dict) else {}
+        if current_anchor is None:
+            current_anchor = self._anchor_from_metadata(workspace_metadata)
+        current_figure = self._figure_from_metadata(workspace_metadata)
+        router = self._visual_intent_router(context.research_service)
+        return await router.decide_async(
+            question=question,
+            current_visual_anchor=current_anchor,
+            current_figure=current_figure,
+            has_new_image=bool(explicit_image_path),
+        )
+
+    @staticmethod
+    def _visual_intent_router(research_service: Any) -> VisualIntentRouter:
+        router = getattr(research_service, "visual_intent_router", None)
+        if router is not None:
+            return router
+        llm_adapter = getattr(getattr(research_service, "chart_analysis_agent", None), "llm_adapter", None)
+        if llm_adapter is None:
+            llm_adapter = getattr(research_service, "llm_adapter", None)
+        return VisualIntentRouter(llm_adapter=llm_adapter)
+
+    @staticmethod
+    def _explicit_anchor_from_values(
+        *,
+        image_path: str | None,
+        page_id: str | None,
+        page_number: int | None,
+        chart_id: str | None,
+    ) -> dict[str, Any] | None:
+        resolved_image_path = str(image_path or "").strip()
+        if not resolved_image_path:
+            return None
+        anchor: dict[str, Any] = {"image_path": resolved_image_path}
+        if page_id:
+            anchor["page_id"] = str(page_id)
+        if page_number:
+            anchor["page_number"] = page_number
+        if chart_id:
+            anchor["chart_id"] = str(chart_id)
+        return anchor
+
+    @staticmethod
+    def _anchor_from_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
+        for key in ("latest_paper_figure_analysis", "last_visual_anchor", "visual_anchor"):
+            value = metadata.get(key)
+            if isinstance(value, dict) and str(value.get("image_path") or "").strip():
+                return dict(value)
+        figure = metadata.get("last_visual_anchor_figure")
+        if isinstance(figure, dict) and str(figure.get("image_path") or "").strip():
+            return dict(figure)
+        return None
+
+    @staticmethod
+    def _figure_from_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
+        for key in ("last_visual_anchor_figure", "latest_paper_figure_analysis"):
+            value = metadata.get(key)
+            if isinstance(value, dict):
+                return dict(value)
+        return None
+
+    def _restore_visual_figure_from_workspace(self, *, task: Any, report: Any | None) -> dict[str, Any] | None:
+        workspaces = [
+            getattr(task, "workspace", None),
+            getattr(report, "workspace", None) if report is not None else None,
+        ]
+        for workspace in workspaces:
+            metadata = getattr(workspace, "metadata", None)
+            if isinstance(metadata, dict):
+                figure = self._figure_from_metadata(metadata)
+                if figure is not None:
+                    return figure
+        return None
+
     # ------------------------------------------------------------------
     # Core QA execution (inlined from ResearchQAExecutor)
     # ------------------------------------------------------------------
@@ -280,6 +385,18 @@ class ResearchQAAgent:
             raise ValueError(
                 f"Research task has no imported documents or persisted research artifacts available for QA: {task_id}"
             )
+        explicit_visual_anchor = svc._extract_visual_anchor(request=request, metadata=request.metadata)
+        restored_visual_anchor = svc._restore_visual_anchor_from_workspace(task=task, report=report)
+        restored_visual_figure = self._restore_visual_figure_from_workspace(task=task, report=report)
+        visual_intent = await self._visual_intent_router(svc).decide_async(
+            question=request.question,
+            current_visual_anchor=explicit_visual_anchor or restored_visual_anchor,
+            current_figure=restored_visual_figure,
+            has_new_image=bool(request.image_path),
+        )
+        reusable_visual_anchor = explicit_visual_anchor or (
+            restored_visual_anchor if visual_intent.reuse_current_anchor else None
+        )
 
         routing_authority = str(request.metadata.get("routing_authority") or "").strip()
         preferred_qa_route = str(request.metadata.get("preferred_qa_route") or "").strip()
@@ -309,7 +426,7 @@ class ResearchQAAgent:
                     if str(item).strip()
                 ],
                 selected_paper_ids=list(scope.paper_ids),
-                has_visual_anchor=bool(request.image_path or request.chart_id or request.metadata.get("image_path")),
+                has_visual_anchor=reusable_visual_anchor is not None,
                 has_document_input=False,
             )
             resolved_intent_paper_ids = [
@@ -340,7 +457,7 @@ class ResearchQAAgent:
                 route=preferred_qa_route,
                 confidence=0.99,
                 rationale="Supervisor selected the QA route explicitly.",
-                visual_anchor=svc._extract_visual_anchor(request=request, metadata=request.metadata),
+                visual_anchor=reusable_visual_anchor,
             )
         else:
             qa_route_decision = await svc._select_qa_route(
@@ -350,6 +467,26 @@ class ResearchQAAgent:
                 document_ids=document_ids,
                 request=request,
                 metadata=request.metadata,
+            )
+            if visual_intent.search_new_figure and qa_route_decision.visual_anchor is not None:
+                qa_route_decision = ResearchQARouteDecision(
+                    route=qa_route_decision.route,
+                    confidence=qa_route_decision.confidence,
+                    rationale=f"{qa_route_decision.rationale} Visual intent requested a new figure search.",
+                    visual_anchor=None,
+                    recovery_count=qa_route_decision.recovery_count,
+                )
+
+        if visual_intent.search_new_figure and qa_route_decision.route != "chart_drilldown":
+            qa_route_decision = ResearchQARouteDecision(
+                route="chart_drilldown",
+                confidence=max(qa_route_decision.confidence, visual_intent.confidence, 0.85),
+                rationale=(
+                    f"{qa_route_decision.rationale} Visual intent requested locating a new figure, "
+                    "so chart drilldown is required."
+                ),
+                visual_anchor=None,
+                recovery_count=qa_route_decision.recovery_count,
             )
 
         logger.info(
@@ -365,6 +502,7 @@ class ResearchQAAgent:
                 document_ids=document_ids,
                 question=request.question,
                 graph_runtime=graph_runtime,
+                exclude_figure_ids=visual_intent.exclude_figure_ids,
             )
             if inferred_visual_anchor is not None:
                 qa_route_decision = ResearchQARouteDecision(
@@ -376,8 +514,11 @@ class ResearchQAAgent:
                     ),
                     visual_anchor=inferred_visual_anchor,
                 )
-        if qa_route_decision.route == "chart_drilldown" and qa_route_decision.visual_anchor is None:
-            restored_visual_anchor = svc._restore_visual_anchor_from_workspace(task=task, report=report)
+        if (
+            qa_route_decision.route == "chart_drilldown"
+            and qa_route_decision.visual_anchor is None
+            and visual_intent.reuse_current_anchor
+        ):
             if restored_visual_anchor is not None:
                 qa_route_decision = ResearchQARouteDecision(
                     route=qa_route_decision.route,
@@ -405,6 +546,7 @@ class ResearchQAAgent:
                     "selection_summary": scope.metadata.get("selection_summary"),
                     "scope_metadata": scope.metadata,
                     "user_intent": user_intent.model_dump(mode="json") if user_intent is not None else None,
+                    "visual_intent": visual_intent.model_dump(mode="json"),
                     "routing_authority": routing_authority or None,
                     "preferred_qa_route": preferred_qa_route or None,
                 }
@@ -480,6 +622,7 @@ class ResearchQAAgent:
                     "qa_route_confidence": qa_route_decision.confidence,
                     "qa_route_rationale": qa_route_decision.rationale,
                     "visual_anchor": qa_route_decision.visual_anchor,
+                    "visual_intent": visual_intent.model_dump(mode="json"),
                     "research_task_id": task_id,
                     "research_topic": task.topic,
                     "qa_scope_mode": scope.scope_mode,

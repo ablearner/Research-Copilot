@@ -22,6 +22,7 @@ from tools.research.research_evaluation import ResearchEvaluator
 from tools.research.review_writing import ReviewWriter
 from tools.research.survey_writing import SurveyWriter, SurveyWriterAgent
 from tools.research.visual_anchor import VisualAnchor
+from tools.research.visual_intent import VisualIntentDecision, VisualIntentRouter
 from tools.research.user_intent import ResearchIntentResolver, ResearchUserIntentResult
 from tools.research.writing_polish import WritingPolisher
 from tools.research.zotero_search_tool import ZoteroSearchTool
@@ -62,6 +63,8 @@ __all__ = [
     "TopicPlanner",
     "TopicPlannerAgent",
     "VisualAnchor",
+    "VisualIntentDecision",
+    "VisualIntentRouter",
     "WritingPolisher",
     "extract_core_terms",
     "ResearchQARouteDecision",

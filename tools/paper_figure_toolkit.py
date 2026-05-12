@@ -45,7 +45,7 @@ class PaperFigureTools:
         document_id: str,
         parsed_document: ParsedDocument,
         chart_candidates_by_page: dict[str, list[ChartCandidate]],
-        max_figures: int = 8,
+        max_figures: int = 24,
     ) -> tuple[list[ResearchPaperFigurePreview], list[PaperFigureAnalyzeTarget], list[str]]:
         previews: list[ResearchPaperFigurePreview] = []
         targets: list[PaperFigureAnalyzeTarget] = []
@@ -114,9 +114,10 @@ class PaperFigureTools:
             return None
         page_text = " ".join(block.text for block in page.text_blocks if block.text.strip()).lower()
         has_figure_marker = any(marker in page_text for marker in ("figure", "fig.", "图", "chart", "plot"))
-        if not has_figure_marker and page.page_number > 4:
-            return None
-        fallback_metadata = {"fallback": "page_image"}
+        fallback_metadata = {
+            "fallback": "page_image",
+            "fallback_reason": "figure_marker" if has_figure_marker else "page_without_detected_chart_candidate",
+        }
         inferred_title, inferred_caption = self._infer_page_fallback_figure_text(page)
         if inferred_title:
             fallback_metadata["title"] = inferred_title

@@ -95,7 +95,13 @@ def is_insufficient_answer(*, answer: str, confidence: float, evidence_count: in
         "insufficient evidence",
         "not enough evidence",
     )
-    return confidence < 0.45 or evidence_count < 2 or any(marker in lowered for marker in insufficient_markers)
+    if any(marker in lowered for marker in insufficient_markers):
+        return True
+    if evidence_count == 0:
+        return True
+    if confidence < 0.35:
+        return True
+    return False
 
 
 def build_answer_quality_check(
@@ -113,9 +119,11 @@ def build_answer_quality_check(
         evidence_count=evidence_count,
     )
     warnings: list[str] = []
-    if evidence_count < 2:
+    if evidence_count == 0:
+        warnings.append("no_evidence")
+    elif evidence_count < 3:
         warnings.append("low_evidence_count")
-    if confidence < 0.45:
+    if confidence < 0.35:
         warnings.append("low_confidence")
     if route in {"document_drilldown", "chart_drilldown"} and not document_ids:
         warnings.append("drilldown_without_document_scope")

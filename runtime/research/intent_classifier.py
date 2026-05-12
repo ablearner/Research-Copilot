@@ -286,14 +286,11 @@ def resolve_intent_flags(
         )
     )
 
+    multi_paper_scope = len(selected_paper_ids) >= 2 or len(active_paper_ids) >= 2
     paper_analysis_requested = (
         compare_requested
         or (recommend_requested and not preference_recommendation_requested)
         or advanced_action == "analyze"
-        or (
-            bool(selected_paper_ids or active_paper_ids)
-            and (explain_requested or paper_detail_requested)
-        )
     )
 
     analysis_focus = (

@@ -136,6 +136,45 @@ class FigureSelectionLLMStub:
         return response_model(figure_id=self.selected_figure_id, rationale="LLM reranked the candidates.")
 
 
+class VisualIntentAndFigureLLMStub:
+    def __init__(self, *, selected_figure_id: str) -> None:
+        self.selected_figure_id = selected_figure_id
+        self.calls: list[dict] = []
+
+    async def generate_structured(self, prompt: str, input_data: dict, response_model):
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "input_data": dict(input_data),
+                "response_fields": set(response_model.model_fields),
+            }
+        )
+        fields = set(response_model.model_fields)
+        if "intent" in fields:
+            return response_model(
+                intent="new_visual_search",
+                reuse_current_anchor=False,
+                search_new_figure=True,
+                target_description=input_data.get("question") or "实验结果直方图",
+                exclude_figure_ids=["paper-h:old"],
+                confidence=0.91,
+                rationale="The user asks for a new result histogram, not a follow-up on the current image.",
+            )
+        if "figure_id" in fields:
+            return response_model(
+                figure_id=self.selected_figure_id,
+                confidence=0.9,
+                rationale="The histogram candidate directly matches the requested experimental result chart.",
+            )
+        if "route" in fields:
+            return response_model(
+                route="chart_drilldown",
+                confidence=0.88,
+                rationale="The question asks for a figure.",
+            )
+        raise AssertionError(f"Unexpected structured response model: {response_model!r}")
+
+
 class QARoutingLLMStub:
     def __init__(self, *, route: str, confidence: float = 0.91, rationale: str = "LLM judged this as a chart question.") -> None:
         self.route = route
@@ -221,6 +260,55 @@ async def test_visual_anchor_prefers_explicit_figure_number_before_llm() -> None
     assert anchor is not None
     assert anchor["chart_id"] == "chart-2"
     assert anchor["anchor_selection"] == "deterministic_figure_reference"
+
+
+@pytest.mark.asyncio
+async def test_visual_anchor_llm_can_select_later_candidate_without_marker_terms() -> None:
+    selected_id = "paper-b:chart-12"
+    skill = VisualAnchor(llm_adapter=FigureSelectionLLMStub(selected_figure_id=selected_id))
+    figures = [
+        {
+            "figure_id": f"paper-b:chart-{index}",
+            "paper_id": "paper-b",
+            "document_id": "doc_2",
+            "page_id": f"page-{index}",
+            "page_number": index,
+            "chart_id": f"chart-{index}",
+            "image_path": f"/tmp/chart-{index}.png",
+            "title": f"Candidate {index}",
+            "caption": "",
+            "source": "chart_candidate",
+            "metadata": {},
+        }
+        for index in range(1, 13)
+    ]
+    paper = PaperCandidate(
+        paper_id="paper-b",
+        title="Paper B",
+        abstract="B",
+        source="arxiv",
+        ingest_status="ingested",
+        metadata={
+            "document_id": "doc_2",
+            "paper_figure_cache": {
+                "document_id": "doc_2",
+                "figures": figures,
+                "warnings": [],
+            },
+        },
+    )
+
+    anchor = await skill.infer_cached_visual_anchor(
+        papers=[paper],
+        document_ids=["doc_2"],
+        question="帮我找到我说的那张核心图。",
+        load_cached_figure_payload=lambda *, paper: paper.metadata.get("paper_figure_cache"),
+    )
+
+    assert anchor is not None
+    assert anchor["figure_id"] == selected_id
+    llm_candidates = skill.llm_adapter.calls[0]["input_data"]["candidates_json"]
+    assert any(item["figure_id"] == selected_id for item in llm_candidates)
 
 
 @pytest.mark.asyncio
@@ -2431,6 +2519,156 @@ async def test_ask_task_collection_restores_workspace_visual_anchor_for_fused_ch
     assert graph_runtime.last_handle_ask_fused_kwargs["page_id"] == "page-5"
     assert graph_runtime.last_handle_ask_fused_kwargs["chart_id"] == "chart-5"
     assert graph_runtime.last_handle_ask_document_kwargs is None
+
+
+@pytest.mark.asyncio
+async def test_ask_task_collection_finds_new_histogram_instead_of_reusing_workspace_anchor(tmp_path) -> None:
+    report_service = ResearchReportService(tmp_path / "research")
+    workspace = ResearchWorkspaceState(
+        metadata={
+            "last_visual_anchor": {
+                "figure_id": "paper-h:old",
+                "image_path": "/tmp/old.png",
+                "page_id": "page-1",
+                "page_number": 1,
+                "chart_id": "old",
+                "anchor_source": "workspace_memory",
+            },
+            "last_visual_anchor_figure": {
+                "figure_id": "paper-h:old",
+                "paper_id": "paper-h",
+                "document_id": "doc_h",
+                "page_id": "page-1",
+                "page_number": 1,
+                "chart_id": "old",
+                "image_path": "/tmp/old.png",
+                "title": "Qualitative Examples",
+                "caption": "Image examples from the benchmark.",
+                "source": "chart_candidate",
+                "metadata": {},
+            },
+        }
+    )
+    task = ResearchTask(
+        task_id="task_chart_route_histogram",
+        topic="agentic scientific QA",
+        status="completed",
+        created_at="2026-04-17T00:00:00+00:00",
+        updated_at="2026-04-17T00:00:00+00:00",
+        sources=["arxiv"],
+        paper_count=1,
+        imported_document_ids=["doc_h"],
+        report_id="report_chart_route_histogram",
+        workspace=workspace,
+    )
+    report_service.save_task(task)
+    report_service.save_report(
+        ResearchReport(
+            report_id="report_chart_route_histogram",
+            task_id=task.task_id,
+            topic=task.topic,
+            generated_at="2026-04-17T00:00:00+00:00",
+            markdown="# 文献调研报告：agentic scientific QA",
+            paper_count=1,
+            workspace=workspace,
+        )
+    )
+    report_service.save_papers(
+        task.task_id,
+        [
+            PaperCandidate(
+                paper_id="paper-h",
+                title="Histogram Benchmark Paper",
+                abstract="H",
+                source="arxiv",
+                ingest_status="ingested",
+                metadata={
+                    "document_id": "doc_h",
+                    "storage_uri": "/tmp/paper-h.pdf",
+                    "paper_figure_cache": {
+                        "document_id": "doc_h",
+                        "storage_uri": "/tmp/paper-h.pdf",
+                        "figures": [
+                            {
+                                "figure_id": "paper-h:old",
+                                "paper_id": "paper-h",
+                                "document_id": "doc_h",
+                                "page_id": "page-1",
+                                "page_number": 1,
+                                "chart_id": "old",
+                                "image_path": "/tmp/old.png",
+                                "title": "Qualitative Examples",
+                                "caption": "Image examples from the benchmark.",
+                                "source": "chart_candidate",
+                                "metadata": {},
+                            },
+                            {
+                                "figure_id": "paper-h:other",
+                                "paper_id": "paper-h",
+                                "document_id": "doc_h",
+                                "page_id": "page-2",
+                                "page_number": 2,
+                                "chart_id": "other",
+                                "image_path": "/tmp/other.png",
+                                "title": "Method Overview",
+                                "caption": "Pipeline stages and modules.",
+                                "source": "chart_candidate",
+                                "metadata": {},
+                            },
+                            {
+                                "figure_id": "paper-h:hist",
+                                "paper_id": "paper-h",
+                                "document_id": "doc_h",
+                                "page_id": "page-5",
+                                "page_number": 5,
+                                "chart_id": "hist",
+                                "image_path": "/tmp/hist.png",
+                                "title": "Experimental Result Histogram",
+                                "caption": "Histogram of experimental result distribution across test cases.",
+                                "source": "chart_candidate",
+                                "metadata": {},
+                            },
+                        ],
+                        "analyze_targets": {},
+                        "warnings": [],
+                    },
+                },
+            )
+        ],
+    )
+    llm_stub = VisualIntentAndFigureLLMStub(selected_figure_id="paper-h:hist")
+    service = LiteratureResearchService(
+        paper_search_service=PaperSearchServiceWithLLMStub(llm_adapter=llm_stub),
+        report_service=report_service,
+        paper_import_service=object(),
+    )
+    graph_runtime = GraphRuntimeDocumentDrilldownStub()
+
+    response = await service.ask_task_collection(
+        task.task_id,
+        ResearchTaskAskRequest(
+            question="给我提供实验结果直方图，并分析",
+            top_k=8,
+            paper_ids=["paper-h"],
+            metadata={
+                "routing_authority": "supervisor_llm",
+                "preferred_qa_route": "chart_drilldown",
+            },
+        ),
+        graph_runtime=graph_runtime,
+    )
+
+    assert response.qa.metadata["qa_route"] == "chart_drilldown"
+    assert response.qa.metadata["visual_intent"]["search_new_figure"] is True
+    assert response.qa.metadata["visual_anchor"]["figure_id"] == "paper-h:hist"
+    assert response.qa.metadata["visual_anchor"]["image_path"] == "/tmp/hist.png"
+    assert response.qa.metadata["visual_anchor_figure"]["figure_id"] == "paper-h:hist"
+    assert response.report is not None
+    assert response.report.workspace.metadata["last_visual_anchor_figure_id"] == "paper-h:hist"
+    assert graph_runtime.last_handle_ask_fused_kwargs is not None
+    assert graph_runtime.last_handle_ask_fused_kwargs["image_path"] == "/tmp/hist.png"
+    assert graph_runtime.last_handle_ask_fused_kwargs["chart_id"] == "hist"
+    assert all(call["input_data"].get("question") for call in llm_stub.calls)
 
 
 @pytest.mark.asyncio

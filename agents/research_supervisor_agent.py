@@ -1028,6 +1028,18 @@ class ResearchSupervisorAgent:
                     recovery_reason = state_delta.get("qa_recovery_reason")
                     if recovery_reason:
                         payload_overrides["qa_recovery_reason"] = recovery_reason
+            if suggestion == "analyze_paper_figures" and isinstance(state_delta, dict):
+                target_description = str(state_delta.get("target_description") or "").strip()
+                if target_description:
+                    payload_overrides["target_description"] = target_description
+                    payload_overrides["question"] = target_description
+                exclude_figure_ids = [
+                    str(item).strip()
+                    for item in (state_delta.get("exclude_figure_ids") or state_delta.get("excluded_figure_ids") or [])
+                    if str(item).strip()
+                ]
+                if exclude_figure_ids:
+                    payload_overrides["exclude_figure_ids"] = list(dict.fromkeys(exclude_figure_ids))
             return self._guardrail_worker_action(
                 action_name=suggestion,  # type: ignore[arg-type]
                 state=state,
@@ -1510,6 +1522,9 @@ class ResearchSupervisorAgent:
             "Use state.latest_result_task_type, state.latest_progress_made, state.latest_result_confidence, state.latest_missing_inputs, and state.latest_suggested_next_actions as strong feedback from the most recent worker execution.\n"
             "When state.route_mode is general_chat or state.should_ignore_research_context is true, avoid inheriting the previous paper scope unless the user explicitly re-enters it.\n"
             "When the user asks about a figure, diagram, chart, architecture, or system block diagram in an imported paper, choose analyze_paper_figures to extract and analyze the visual element directly from the PDF.\n"
+            "Use answer_question when the user asks a specific question about paper content (e.g. methods, results, contributions of a single paper). "
+            "Use analyze_papers only for multi-paper comparison, recommendation among candidates, or structured cross-paper analysis. "
+            "A single-paper detail question like '这篇论文的方法是什么' must use answer_question, not analyze_papers.\n"
             "When the user asks a general question that does not require literature search, paper import, local evidence retrieval, document parsing, or chart analysis, choose general_answer.\n"
             "When the user asks for broad, unscoped papers worth reading and the request should use the user's long-term interests instead of the current paper scope, choose recommend_from_preferences.\n"
             "For simple, single-intent requests, decide the single best next worker action now.\n"
@@ -1568,7 +1583,8 @@ class ResearchSupervisorAgent:
             "context_compression_needed": state.context_compression_needed,
             "context_compressed": state.context_compressed,
             "paper_analysis_completed": state.paper_analysis_completed,
-            "paper_analysis_requested": state.paper_analysis_requested,
+            "paper_analysis_hint": state.paper_analysis_requested,
+            "active_paper_count": len(state.active_paper_ids),
             "preference_recommendation_requested": state.preference_recommendation_requested,
             "analysis_focus": state.analysis_focus,
             "failed_actions": list(state.failed_actions),
@@ -1588,7 +1604,8 @@ class ResearchSupervisorAgent:
             "context_compression_needed": False,
             "context_compressed": False,
             "paper_analysis_completed": False,
-            "paper_analysis_requested": False,
+            "paper_analysis_hint": False,
+            "active_paper_count": 0,
             "preference_recommendation_requested": False,
             "analysis_focus": None,
             "failed_actions": [],

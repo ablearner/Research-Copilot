@@ -25,6 +25,11 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+_VISION_FIGURE_VERIFY_MAX = 24
+_NEGATIVE_FIGURE_FEEDBACK_RE = re.compile(
+    r"(这张不是|不是这张|不是这个|不是这幅|不对|找错|错图|换一张|下一张|继续找|重新找|not\s+this|wrong\s+(figure|image|chart)|try\s+another)",
+    re.IGNORECASE,
+)
 
 
 class ChartAnalysisAgent:
@@ -125,7 +130,7 @@ class ChartAnalysisAgent:
             )
         active_message = resolve_active_message(decision)
         payload = dict(active_message.payload or {}) if active_message is not None else {}
-        question = str(payload.get("question") or context.request.message or "").strip()
+        question = str(payload.get("question") or payload.get("target_description") or context.request.message or "").strip()
 
         paper_ids = [
             str(item).strip()
@@ -152,6 +157,12 @@ class ChartAnalysisAgent:
             )
         target_paper = target_papers[0]
         logger.info("analyze_paper_figures: target_paper=%s doc_id=%s", target_paper.paper_id, target_paper.metadata.get("document_id"))
+        excluded_figure_ids = self._excluded_figure_ids_from_feedback(
+            payload=payload,
+            context=context,
+            question=question,
+            paper_id=target_paper.paper_id,
+        )
 
         try:
             figure_list = await context.research_service.list_paper_figures(
@@ -174,11 +185,35 @@ class ChartAnalysisAgent:
                 metadata={"reason": "no_figures", "paper_id": target_paper.paper_id},
             )
 
+        available_figures = [
+            figure
+            for figure in figure_list.figures
+            if str(getattr(figure, "figure_id", "") or "").strip() not in excluded_figure_ids
+        ]
+        if excluded_figure_ids and not available_figures:
+            return ResearchToolResult(
+                status="skipped",
+                observation=f"all discovered figures in paper '{target_paper.title}' were already rejected",
+                metadata={
+                    "reason": "no_untried_figures",
+                    "paper_id": target_paper.paper_id,
+                    "excluded_figure_ids": sorted(excluded_figure_ids),
+                    "candidate_figure_count": len(figure_list.figures),
+                    "observation_envelope": {
+                        "progress_made": False,
+                        "missing_inputs": ["figure_scope"],
+                        "suggested_next_actions": ["clarify_request"],
+                        "state_delta": {"rejected_figure_ids": sorted(excluded_figure_ids)},
+                    },
+                },
+            )
+
         best_figure = await self._select_figure_via_anchor(
             question=question or "",
             target_paper=target_paper,
             figures=figure_list.figures,
             context=context,
+            excluded_figure_ids=excluded_figure_ids,
         )
 
         figure_request = AnalyzeResearchPaperFigureRequest(
@@ -211,6 +246,10 @@ class ChartAnalysisAgent:
         if exported_image_path and analysis_response.chart and hasattr(analysis_response.chart, "metadata"):
             analysis_response.chart.metadata["image_path"] = exported_image_path
 
+        if isinstance(analysis_response.metadata, dict):
+            analysis_response.metadata["paper_figure_rejected_ids"] = sorted(excluded_figure_ids)
+            analysis_response.metadata["paper_figure_candidate_count"] = len(figure_list.figures)
+            analysis_response.metadata["paper_figure_untried_count"] = len(available_figures)
         context.chart_result = analysis_response
         return ResearchToolResult(
             status="succeeded",
@@ -225,18 +264,37 @@ class ChartAnalysisAgent:
                 "key_points": analysis_response.key_points,
                 "chart_type": getattr(analysis_response.chart, "chart_type", None),
                 "image_path": exported_image_path,
+                "excluded_figure_ids": sorted(excluded_figure_ids),
+                "candidate_figure_count": len(figure_list.figures),
+                "untried_figure_count": len(available_figures),
             },
         )
 
-    async def _select_figure_via_anchor(self, question: str, target_paper: Any, figures: list, context: Any) -> Any:
-        if len(figures) == 1:
-            return figures[0]
+    async def _select_figure_via_anchor(
+        self,
+        question: str,
+        target_paper: Any,
+        figures: list,
+        context: Any,
+        excluded_figure_ids: set[str] | None = None,
+    ) -> Any:
+        excluded_ids = set(excluded_figure_ids or set())
+        candidate_figures = [
+            figure
+            for figure in figures
+            if str(getattr(figure, "figure_id", "") or "").strip() not in excluded_ids
+        ]
+        if not candidate_figures:
+            candidate_figures = list(figures)
+        if len(candidate_figures) == 1:
+            return candidate_figures[0]
         try:
             anchor = await self.infer_cached_visual_anchor(
                 papers=[target_paper],
                 document_ids=[str(target_paper.metadata.get("document_id") or "")],
                 question=question,
                 load_cached_figure_payload=context.research_service._load_cached_figure_payload,
+                exclude_figure_ids=excluded_ids,
             )
         except Exception:
             logger.debug("infer_cached_visual_anchor failed, using fallback", exc_info=True)
@@ -244,11 +302,159 @@ class ChartAnalysisAgent:
         if anchor is not None:
             anchor_figure_id = str(anchor.get("figure_id") or "").strip()
             if anchor_figure_id:
-                matched = next((f for f in figures if f.figure_id == anchor_figure_id), None)
+                matched = next((f for f in candidate_figures if f.figure_id == anchor_figure_id), None)
                 if matched is not None:
                     logger.info("analyze_paper_figures: anchor selected figure_id=%s", anchor_figure_id)
-                    return matched
-        return figures[0]
+                    vision_match = await self._select_figure_via_vision(
+                        question=question,
+                        figures=self._prioritize_figures(matched, candidate_figures),
+                        context=context,
+                    )
+                    return vision_match or matched
+        fallback = candidate_figures[0]
+        vision_match = await self._select_figure_via_vision(
+            question=question,
+            figures=candidate_figures,
+            context=context,
+        )
+        return vision_match or fallback
+
+    @staticmethod
+    def _coerce_figure_id_set(value: Any) -> set[str]:
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            raw_items = re.split(r"[\s,，]+", value)
+        elif isinstance(value, (list, tuple, set)):
+            raw_items = list(value)
+        else:
+            raw_items = [value]
+        return {str(item).strip() for item in raw_items if str(item).strip()}
+
+    @staticmethod
+    def _metadata_dict(value: Any) -> dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    def _excluded_figure_ids_from_feedback(
+        self,
+        *,
+        payload: dict[str, Any],
+        context: Any,
+        question: str,
+        paper_id: str,
+    ) -> set[str]:
+        excluded: set[str] = set()
+        for key in ("exclude_figure_ids", "excluded_figure_ids", "rejected_figure_ids", "attempted_figure_ids"):
+            excluded.update(self._coerce_figure_id_set(payload.get(key)))
+
+        request_metadata = self._metadata_dict(getattr(getattr(context, "request", None), "metadata", None))
+        for key in ("exclude_figure_ids", "excluded_figure_ids", "rejected_figure_ids", "attempted_figure_ids"):
+            excluded.update(self._coerce_figure_id_set(request_metadata.get(key)))
+
+        if not self._has_negative_figure_feedback(question):
+            return self._filter_figure_ids_for_paper(excluded, paper_id)
+
+        workspace_metadata = self._metadata_dict(getattr(getattr(context, "workspace", None), "metadata", None))
+        feedback = self._metadata_dict(workspace_metadata.get("paper_figure_feedback"))
+        excluded.update(self._coerce_figure_id_set(feedback.get("rejected_figure_ids")))
+        excluded.update(self._coerce_figure_id_set(workspace_metadata.get("rejected_paper_figure_ids")))
+
+        latest = self._metadata_dict(workspace_metadata.get("latest_paper_figure_analysis"))
+        excluded.update(self._coerce_figure_id_set(latest.get("rejected_figure_ids")))
+        excluded.update(self._coerce_figure_id_set(latest.get("figure_id")))
+        excluded.update(self._coerce_figure_id_set(workspace_metadata.get("last_visual_anchor_figure_id")))
+
+        report_metadata = self._metadata_dict(getattr(getattr(context, "report", None), "metadata", None))
+        excluded.update(self._coerce_figure_id_set(report_metadata.get("last_visual_anchor_figure_id")))
+
+        chart_result = getattr(context, "chart_result", None)
+        figure = getattr(chart_result, "figure", None)
+        excluded.update(self._coerce_figure_id_set(getattr(figure, "figure_id", None)))
+        return self._filter_figure_ids_for_paper(excluded, paper_id)
+
+    @staticmethod
+    def _has_negative_figure_feedback(question: str) -> bool:
+        return bool(_NEGATIVE_FIGURE_FEEDBACK_RE.search(question or ""))
+
+    @staticmethod
+    def _filter_figure_ids_for_paper(figure_ids: set[str], paper_id: str) -> set[str]:
+        prefix = f"{paper_id}:"
+        return {
+            figure_id
+            for figure_id in figure_ids
+            if not paper_id or figure_id.startswith(prefix) or ":" not in figure_id
+        }
+
+    @staticmethod
+    def _prioritize_figures(preferred: Any, figures: list[Any]) -> list[Any]:
+        preferred_id = str(getattr(preferred, "figure_id", "") or "").strip()
+        ordered = [preferred]
+        ordered.extend(
+            figure
+            for figure in figures
+            if str(getattr(figure, "figure_id", "") or "").strip() != preferred_id
+        )
+        return ordered
+
+    async def _select_figure_via_vision(self, *, question: str, figures: list[Any], context: Any) -> Any | None:
+        if not question.strip() or len(figures) <= 1:
+            return None
+        adapter = self._vision_adapter_from_context(context)
+        if adapter is None or not hasattr(adapter, "analyze_image_structured"):
+            return None
+        from pydantic import BaseModel, Field
+
+        class _FigureVisionMatch(BaseModel):
+            matches: bool = False
+            confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+            rationale: str = ""
+
+        best_match: tuple[float, Any] | None = None
+        for figure in figures[:_VISION_FIGURE_VERIFY_MAX]:
+            image_path = str(getattr(figure, "image_path", "") or "").strip()
+            if not image_path or not Path(image_path).is_file():
+                continue
+            prompt = (
+                "你是科研论文图像定位器。判断这张候选图是否就是用户要找的图。\n\n"
+                f"用户问题：{question.strip()}\n"
+                f"候选 figure_id：{getattr(figure, 'figure_id', '')}\n"
+                f"页码：{getattr(figure, 'page_number', None)}\n"
+                f"标题：{getattr(figure, 'title', None) or ''}\n"
+                f"图注：{getattr(figure, 'caption', None) or ''}\n\n"
+                "只根据图像内容和这些上下文判断是否匹配用户要找的图。"
+                "如果只是泛泛相关但不是目标图，matches=false。返回结构化字段。"
+            )
+            try:
+                result = await adapter.analyze_image_structured(
+                    prompt=prompt,
+                    image_path=image_path,
+                    response_model=_FigureVisionMatch,
+                )
+            except Exception:
+                logger.debug("paper figure vision verification failed", exc_info=True)
+                continue
+            confidence = float(result.confidence)
+            if result.matches and confidence >= 0.55:
+                if best_match is None or confidence > best_match[0]:
+                    best_match = (confidence, figure)
+                if confidence >= 0.78:
+                    break
+        if best_match is None:
+            return None
+        logger.info(
+            "analyze_paper_figures: vision selected figure_id=%s confidence=%.3f",
+            getattr(best_match[1], "figure_id", None),
+            best_match[0],
+        )
+        return best_match[1]
+
+    @staticmethod
+    def _vision_adapter_from_context(context: Any) -> Any | None:
+        chart_tools = getattr(getattr(context, "graph_runtime", None), "chart_tools", None)
+        adapter = getattr(chart_tools, "llm_adapter", None)
+        if adapter is not None:
+            return adapter
+        return getattr(context, "llm_adapter", None)
 
     @staticmethod
     def _export_figure_image(analysis_response: Any, task_id: str) -> str | None:
@@ -280,12 +486,14 @@ class ChartAnalysisAgent:
         document_ids: list[str],
         question: str,
         load_cached_figure_payload,
+        exclude_figure_ids: set[str] | None = None,
     ) -> dict[str, Any] | None:
         return await self.visual_anchor_skill.infer_cached_visual_anchor(
             papers=papers,
             document_ids=document_ids,
             question=question,
             load_cached_figure_payload=load_cached_figure_payload,
+            exclude_figure_ids=exclude_figure_ids,
         )
 
     def resolve_visual_anchor_figure(

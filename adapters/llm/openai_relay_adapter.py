@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 

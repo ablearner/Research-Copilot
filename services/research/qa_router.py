@@ -175,12 +175,14 @@ class QARoutingMixin:
         papers: list[PaperCandidate],
         document_ids: list[str],
         question: str,
+        exclude_figure_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
         return await self.chart_analysis_agent.infer_cached_visual_anchor(
             papers=papers,
             document_ids=document_ids,
             question=question,
             load_cached_figure_payload=self._load_cached_figure_payload,
+            exclude_figure_ids=set(exclude_figure_ids or []),
         )
 
     async def _infer_or_discover_visual_anchor(
@@ -191,11 +193,13 @@ class QARoutingMixin:
         document_ids: list[str],
         question: str,
         graph_runtime: Any,
+        exclude_figure_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
         inferred = await self._infer_cached_visual_anchor(
             papers=papers,
             document_ids=document_ids,
             question=question,
+            exclude_figure_ids=exclude_figure_ids,
         )
         if inferred is not None:
             return inferred
@@ -216,6 +220,7 @@ class QARoutingMixin:
             papers=scoped_papers,
             document_ids=document_ids,
             question=question,
+            exclude_figure_ids=exclude_figure_ids,
         )
 
     async def _discover_figures_for_scope(
@@ -492,4 +497,3 @@ class QARoutingMixin:
         if len(compacted) <= limit:
             return compacted
         return f"{compacted[: max(limit - 1, 1)].rstrip()}…"
-

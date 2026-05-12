@@ -12,13 +12,14 @@ from domain.schemas.research import PaperCandidate, ResearchCluster, ResearchRep
 
 logger = logging.getLogger(__name__)
 
-_CLUSTER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("路径规划与导航", ("path planning", "trajectory", "navigation", "route", "路径规划", "导航")),
-    ("检测与感知", ("detection", "perception", "tracking", "识别", "检测", "感知")),
-    ("群体协同与多智能体", ("swarm", "multi-agent", "cooperative", "群体", "协同")),
-    ("控制与定位", ("control", "localization", "state estimation", "定位", "控制")),
-    ("遥感与场景理解", ("remote sensing", "segmentation", "mapping", "遥感", "建图")),
-)
+_CLUSTER_STOPWORDS: set[str] = {
+    "a", "an", "the", "of", "for", "in", "on", "to", "and", "or", "is", "are",
+    "with", "by", "from", "as", "at", "its", "their", "this", "that", "using",
+    "based", "via", "towards", "toward", "through", "into", "about", "over",
+    "new", "novel", "approach", "method", "paper", "study", "research",
+    "proposed", "efficient", "improved", "learning", "deep",
+    "的", "了", "和", "与", "在", "对", "中", "基于", "一种", "面向", "研究",
+}
 
 _SURVEY_PROMPT = (
     "你是一个学术文献综述写作专家。请根据以下论文信息，生成一份结构化的中文文献调研报告。\n\n"
@@ -26,10 +27,11 @@ _SURVEY_PROMPT = (
     "写作风格：{style}\n"
     "论文数量：{paper_count}\n\n"
     "论文信息（JSON）：\n{papers_json}\n\n"
-    "论文分组：\n{clusters_json}\n\n"
     "要求：\n"
     "- 使用中文撰写（论文标题、专有名词可保留英文）\n"
-    "- 包含以下章节：研究背景、核心问题（按分组）、方法对比、关键发现、代表论文逐篇解读、研究空白与未来方向、证据边界与局限\n"
+    "- 包含以下章节：研究背景、核心问题（按主题分组）、方法对比、关键发现、代表论文逐篇解读、研究空白与未来方向、证据边界与局限\n"
+    "- **核心问题章节的子标题必须根据这些论文的实际研究内容自行归纳，不要使用预设的固定分类。**\n"
+    "  请从论文标题和摘要中提取共性主题，自主决定 2-5 个子方向，每个子方向的名称应准确反映该组论文的核心关注点。\n"
     "- 每篇论文用 [P1][P2] 等标记引用\n"
     "- 方法对比部分使用 markdown 表格\n"
     "- 对每篇论文的方法侧重点给出中文概括（不要直接复制英文摘要）\n"
@@ -43,10 +45,11 @@ _SURVEY_PROMPT_EN = (
     "Writing style: {style}\n"
     "Paper count: {paper_count}\n\n"
     "Papers (JSON-like list):\n{papers_json}\n\n"
-    "Paper groups:\n{clusters_json}\n\n"
     "Requirements:\n"
     "- Write in English, while keeping paper titles and technical identifiers in their original form\n"
-    "- Include these sections: Background, Core Problems (grouped), Method Comparison, Key Findings, Representative Papers, Research Gaps and Future Directions, Evidence Boundaries and Limitations\n"
+    "- Include these sections: Background, Core Problems (grouped by theme), Method Comparison, Key Findings, Representative Papers, Research Gaps and Future Directions, Evidence Boundaries and Limitations\n"
+    "- **The subsections under Core Problems must be derived from the actual research content of the papers. Do NOT use generic or predetermined categories.**\n"
+    "  Identify 2-5 thematic sub-directions from the paper titles and abstracts, and name each subsection to accurately reflect its group's research focus.\n"
     "- Cite each paper with markers like [P1][P2]\n"
     "- Use a markdown table for method comparison\n"
     "- Summarize each paper's method focus instead of copying raw abstract text\n"
@@ -155,7 +158,6 @@ class SurveyWriter:
             paper if paper.summary else paper.model_copy(update={"summary": _short_summary(paper.abstract)})
             for paper in papers
         ]
-        clusters = self._build_clusters(papers_with_summary)
         source_counts = Counter(paper.source for paper in papers_with_summary)
         citation_map = {
             paper.paper_id: f"P{index}"
@@ -168,17 +170,12 @@ class SurveyWriter:
             f'source={p.source}, abstract="{(p.abstract or "")[:180]}"'
             for p in papers_with_summary
         )
-        clusters_json = "\n".join(
-            f'  - {c.name}: [{", ".join(citation_map.get(pid, "?") for pid in c.paper_ids)}]'
-            for c in clusters
-        )
 
         input_data: dict[str, Any] = {
             "topic": topic,
             "style": style,
             "paper_count": str(len(papers_with_summary)),
             "papers_json": papers_json,
-            "clusters_json": clusters_json,
             "min_length": str(min_length),
         }
         if supervisor_instruction:
@@ -238,35 +235,68 @@ class SurveyWriter:
             paper_count=len(papers_with_summary),
             source_counts=dict(source_counts),
             highlights=highlights,
-            clusters=clusters,
+            clusters=self._build_clusters(papers_with_summary),
             gaps=gaps,
             metadata={"writer": "SurveyWriter+LLM"},
         )
 
     def _build_clusters(self, papers: list[PaperCandidate]) -> list[ResearchCluster]:
+        """Dynamically cluster papers by extracting frequent keywords from titles/abstracts."""
+        if not papers:
+            return []
+        # Extract keyword frequencies from paper titles
+        keyword_counter: Counter = Counter()
+        paper_keywords: dict[str, list[str]] = {}
+        for paper in papers:
+            text = f"{paper.title} {paper.abstract or ''}".lower()
+            tokens = re.findall(r"[\w\u4e00-\u9fff]{2,}", text)
+            meaningful = [t for t in tokens if t not in _CLUSTER_STOPWORDS and len(t) >= 2]
+            paper_keywords[paper.paper_id] = meaningful
+            keyword_counter.update(set(meaningful))  # count each keyword once per paper
+
+        # Pick top keywords that appear in multiple papers as cluster seeds
+        min_frequency = max(2, len(papers) // 4)
+        cluster_seeds = [
+            keyword for keyword, count in keyword_counter.most_common(20)
+            if count >= min_frequency
+        ]
+
         clusters: list[ResearchCluster] = []
-        remaining_ids = {paper.paper_id for paper in papers}
-        for cluster_name, keywords in _CLUSTER_RULES:
+        assigned_ids: set[str] = set()
+        used_seeds: set[str] = set()
+
+        for seed in cluster_seeds:
+            if len(clusters) >= 5:
+                break
+            if seed in used_seeds:
+                continue
             matched_ids = [
                 paper.paper_id
                 for paper in papers
-                if paper.paper_id in remaining_ids and any(keyword.lower() in f"{paper.title} {paper.abstract}".lower() for keyword in keywords)
+                if paper.paper_id not in assigned_ids
+                and seed in paper_keywords.get(paper.paper_id, [])
             ]
-            if matched_ids:
-                remaining_ids.difference_update(matched_ids)
-                clusters.append(
-                    ResearchCluster(
-                        name=cluster_name,
-                        paper_ids=matched_ids,
-                        description=f"该分组包含 {len(matched_ids)} 篇与 {cluster_name} 相关的候选论文。",
-                    )
+            if len(matched_ids) < 2:
+                continue
+            # Find a descriptive name: use the seed keyword, capitalized
+            cluster_name = seed if any("\u4e00" <= ch <= "\u9fff" for ch in seed) else seed.title()
+            used_seeds.add(seed)
+            assigned_ids.update(matched_ids)
+            clusters.append(
+                ResearchCluster(
+                    name=cluster_name,
+                    paper_ids=matched_ids,
+                    description=f"该分组包含 {len(matched_ids)} 篇与 {cluster_name} 相关的候选论文。",
                 )
+            )
+
+        remaining_ids = {paper.paper_id for paper in papers} - assigned_ids
         if remaining_ids:
             clusters.append(
                 ResearchCluster(
                     name="其他相关工作",
                     paper_ids=[paper.paper_id for paper in papers if paper.paper_id in remaining_ids],
-                    description="未明显落入预设分组的论文。",
+                    description=f"包含 {len(remaining_ids)} 篇未归入上述主题分组的论文。",
                 )
             )
         return clusters

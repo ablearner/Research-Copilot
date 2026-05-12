@@ -209,6 +209,39 @@ class ResearchCollectionKnowledgeCapability:
             "贡献": "contribution",
             "局限": "limitation",
             "创新": "novelty contribution",
+            "核心思路": "key idea core approach",
+            "技术路线": "technical approach pipeline",
+            "怎么做": "how method approach",
+            "做法": "method procedure",
+            "架构": "architecture design",
+            "损失函数": "loss function objective",
+            "优化": "optimization",
+            "推理": "inference",
+            "部署": "deployment",
+            "效果": "effectiveness results",
+            "准确率": "accuracy",
+            "精度": "precision",
+            "召回": "recall",
+            "指标": "metrics evaluation",
+            "背景": "background motivation",
+            "动机": "motivation",
+            "问题": "problem",
+            "挑战": "challenge",
+            "相关工作": "related work",
+            "总结": "summary conclusion",
+            "结论": "conclusion",
+            "未来工作": "future work",
+            "分析": "analysis",
+            "可视化": "visualization",
+            "案例": "case study example",
+            "样本": "sample example",
+            "预训练": "pretraining",
+            "微调": "finetuning",
+            "注意力": "attention mechanism",
+            "编码器": "encoder",
+            "解码器": "decoder",
+            "嵌入": "embedding",
+            "特征": "feature representation",
         }
         en_keywords = []
         for zh_key, en_val in keyword_map.items():
@@ -220,6 +253,10 @@ class ResearchCollectionKnowledgeCapability:
                 queries.append(f"{title} {' '.join(en_keywords[:3])}")
             else:
                 queries.append(title)
+        if en_keywords and not queries:
+            queries.append(' '.join(en_keywords[:4]))
+        if en_keywords and len(en_titles) > 0:
+            queries.append(' '.join(en_keywords[:4]))
         return queries
 
     def _scope_filters(self, state: Any) -> dict[str, Any]:

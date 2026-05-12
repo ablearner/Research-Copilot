@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """Structured error classification for LLM API failures.
 
 Replaces ad-hoc status code checks with a unified ClassifiedError
 that carries recovery hints (retryable, should_compress, should_fallback).
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum

@@ -8,8 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from adapters.vector_store.milvus_adapter import MilvusVectorStore
-from core.config import get_settings
+from adapters.vector_store.milvus_adapter import MilvusVectorStore  # noqa: E402
+from core.config import get_settings  # noqa: E402
 
 
 async def main() -> None:

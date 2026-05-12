@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from domain.schemas.research import ImportPapersRequest, PaperCandidate, normalize_reasoning_style
-from domain.schemas.retrieval import RetrievalHit
+from domain.schemas.retrieval import RetrievalHit, merge_retrieval_hits, retrieval_hit_score  # noqa: F401
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 
 if TYPE_CHECKING:
@@ -51,16 +51,16 @@ def tokenize_research_text(text: str) -> list[str]:
         tokens.append(normalized)
     return tokens
 
-
-# Retrieval helpers – canonical location: domain.schemas.retrieval
-# Re-exported here for backward compatibility.
-from domain.schemas.retrieval import merge_retrieval_hits, retrieval_hit_score  # noqa: F401
-
-
 def is_insufficient_research_answer(*, answer: str, confidence: float, evidence_count: int) -> bool:
     lowered = answer.lower()
     uncertainty_signals = ("证据不足", "无法确认", "不能确认", "信息不足", "insufficient evidence", "not enough evidence")
-    return confidence < 0.45 or evidence_count < 2 or any(signal in lowered for signal in uncertainty_signals)
+    if any(signal in lowered for signal in uncertainty_signals):
+        return True
+    if evidence_count == 0:
+        return True
+    if confidence < 0.35:
+        return True
+    return False
 
 
 class ResearchKnowledgeAgent:

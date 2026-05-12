@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.general_answer_agent import GeneralAnswerAgent
@@ -36,10 +36,6 @@ from domain.schemas.unified_runtime import (
     UnifiedAgentResult,
     UnifiedAgentTask,
 )
-from runtime.research.unified_runtime import (
-    serialize_unified_delegation_plan,
-)
-from typing import TYPE_CHECKING
 from domain.research_workspace import build_workspace_from_task, build_workspace_state
 from tools.research import PaperAnalyzer, PaperReader, ResearchIntentResolver, PaperCurator
 from tools.research.user_intent import ResearchUserIntentResult
@@ -60,26 +56,19 @@ from runtime.research.agent_protocol import (
     ResearchAgentToolContext,
     ResearchStateDelta,
     ResearchToolResult,
-    _message,
     _update_runtime_progress,
 )
-
-logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from services.research.literature_research_service import LiteratureResearchService
-
-
-# ---------------------------------------------------------------------------
-# Intent classification heuristics (extracted to intent_classifier.py)
-# ---------------------------------------------------------------------------
-
 from runtime.research.intent_classifier import (
     _route_mode_hint_for_request,
     _should_inherit_snapshot_scope,
     resolve_intent_flags,
     should_force_finalize as _should_force_finalize_impl,
 )
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from services.research.literature_research_service import LiteratureResearchService
 
 
 class ResearchRuntimeBase:
@@ -1906,6 +1895,30 @@ class ResearchRuntimeBase:
             ],
         }
 
+    def _latest_paper_figure_metadata(self, context: ResearchAgentToolContext) -> dict[str, Any] | None:
+        chart_result = context.chart_result
+        if chart_result is None:
+            return None
+        figure = getattr(chart_result, "figure", None)
+        if figure is None:
+            return None
+        result_metadata = getattr(chart_result, "metadata", None)
+        result_metadata = dict(result_metadata) if isinstance(result_metadata, dict) else {}
+        rejected_ids = [
+            str(item).strip()
+            for item in result_metadata.get("paper_figure_rejected_ids", [])
+            if str(item).strip()
+        ]
+        return {
+            "paper_id": str(getattr(chart_result, "paper_id", None) or getattr(figure, "paper_id", "") or ""),
+            "figure_id": str(getattr(figure, "figure_id", "") or ""),
+            "page_id": str(getattr(figure, "page_id", "") or ""),
+            "page_number": getattr(figure, "page_number", None),
+            "chart_id": str(getattr(figure, "chart_id", "") or ""),
+            "image_path": str(getattr(figure, "image_path", "") or ""),
+            "rejected_figure_ids": list(dict.fromkeys(rejected_ids)),
+        }
+
     def _resolve_workspace(
         self,
         *,
@@ -1921,6 +1934,12 @@ class ResearchRuntimeBase:
         metadata = {**self._workspace_runtime_metadata(), "trace_steps": len(trace)}
         extra_questions = [context.request.message] if context.request.message else []
         extra_findings = [context.qa_result.qa.answer] if context.qa_result is not None else []
+        latest_paper_figure = self._latest_paper_figure_metadata(context)
+        if latest_paper_figure is not None:
+            rejected_ids = list(latest_paper_figure.get("rejected_figure_ids") or [])
+            metadata["latest_paper_figure_analysis"] = latest_paper_figure
+            metadata["paper_figure_feedback"] = {"rejected_figure_ids": rejected_ids}
+            metadata["rejected_paper_figure_ids"] = rejected_ids
         if context.preference_recommendation_result is not None:
             metadata["latest_preference_recommendations"] = context.preference_recommendation_result.model_dump(mode="json")
         if context.workspace is not None:

@@ -39,6 +39,7 @@ from tools.research import (
     ResearchQARouter,
     ResearchEvaluator,
     ResearchIntentResolver,
+    VisualIntentRouter,
     ReviewWriter,
     WritingPolisher,
 )
@@ -109,6 +110,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         )
         self.qa_routing_skill = ResearchQARouter(llm_adapter=llm_adapter)
         self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
+        self.visual_intent_router = VisualIntentRouter(llm_adapter=llm_adapter)
         self.chart_analysis_agent = ChartAnalysisAgent(
             llm_adapter=llm_adapter,
             storage_root=report_service.storage_root / "assets",

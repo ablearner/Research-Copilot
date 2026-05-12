@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any, Callable
 
 from domain.schemas.research import PaperCandidate, ResearchPaperFigurePreview
@@ -74,6 +75,28 @@ def _keyword_terms(text: str) -> list[str]:
     return [term for term in terms if len(term) >= 2 or re.search(r"[\u4e00-\u9fff]", term)]
 
 
+def _compact_text(value: Any, *, limit: int = 400) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:limit]
+
+
+def _compact_metadata(metadata: Any) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for key, value in metadata.items():
+        key_text = str(key).strip()
+        if not key_text:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            compact[key_text] = _compact_text(value, limit=300) if isinstance(value, str) else value
+        if len(compact) >= 8:
+            break
+    return compact
+
+
 class VisualAnchor:
     name = "VisualAnchor"
 
@@ -87,7 +110,9 @@ class VisualAnchor:
         document_ids: list[str],
         question: str,
         load_cached_figure_payload: Callable[..., dict[str, Any] | None],
+        exclude_figure_ids: Iterable[str] | None = None,
     ) -> dict[str, Any] | None:
+        excluded_ids = {str(item).strip() for item in (exclude_figure_ids or []) if str(item).strip()}
         candidate_papers = list(papers)
         if len(document_ids) == 1:
             matched_paper = next(
@@ -121,6 +146,9 @@ class VisualAnchor:
                 image_path = str(item.get("image_path") or "").strip()
                 if not image_path:
                     continue
+                figure_id = str(item.get("figure_id") or "").strip()
+                if figure_id and figure_id in excluded_ids:
+                    continue
                 candidate_text_parts = [
                     str(item.get("title") or "").strip(),
                     str(item.get("caption") or "").strip(),
@@ -153,9 +181,9 @@ class VisualAnchor:
                         field_bonus += 4
                     if term in lowered_paper_title:
                         field_bonus += 1
-                source_bonus = 6 if candidate_source == "chart_candidate" else -8
                 caption_bonus = 2 if str(item.get("caption") or "").strip() else 0
                 title_bonus = 1 if str(item.get("title") or "").strip() else 0
+                source_bonus = 6 if candidate_source == "chart_candidate" else (-2 if caption_bonus or title_bonus else -8)
                 page_penalty = 0
                 raw_page_number = item.get("page_number")
                 try:
@@ -195,7 +223,6 @@ class VisualAnchor:
                 document_id = str(item.get("document_id") or paper.metadata.get("document_id") or "").strip()
                 if document_id:
                     anchor["document_id"] = document_id
-                figure_id = str(item.get("figure_id") or "").strip()
                 if figure_id:
                     anchor["figure_id"] = figure_id
                 page_id = str(item.get("page_id") or "").strip()
@@ -223,7 +250,7 @@ class VisualAnchor:
             }
         reranked_anchor = await self._llm_rerank_cached_figures(
             question=question,
-            ranked_candidates=ranked_candidates[:3],
+            ranked_candidates=ranked_candidates[:24],
         )
         if reranked_anchor is not None:
             return reranked_anchor
@@ -334,7 +361,8 @@ class VisualAnchor:
             "用户问题：{question}\n"
             "候选图表：\n{candidates_json}\n\n"
             "要求：\n"
-            "- 优先选择和问题最直接相关的 title、caption、axis、summary 线索\n"
+            "- 按用户问题的自然语言语义选择，不要只做关键词包含判断\n"
+            "- 优先选择和问题最直接相关的 title、caption、axis、summary、page/source/metadata 线索\n"
             "- 如果用户提到 Figure/Fig./图/第几张图，优先匹配对应编号、页码、图注或 chart_id\n"
             "- 如果问题问实验效果、消融、性能、结果，优先选择标题或图注含 evaluation/results/ablation/performance/实验/结果 的图\n"
             "- 如果没有完美匹配，也要选最可能相关的一张\n"
@@ -349,10 +377,10 @@ class VisualAnchor:
                 "chart_id": anchor.get("chart_id"),
                 "page_id": anchor.get("page_id"),
                 "page_number": anchor.get("page_number"),
-                "title": item.get("title"),
-                "caption": item.get("caption"),
+                "title": _compact_text(item.get("title")),
+                "caption": _compact_text(item.get("caption")),
                 "source": item.get("source"),
-                "metadata": item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+                "metadata": _compact_metadata(item.get("metadata")),
                 "heuristic_score": round(score, 4),
             }
             for index, (score, anchor, item) in enumerate(ranked_candidates)

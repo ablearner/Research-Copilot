@@ -274,7 +274,7 @@ class LocalDocumentParser(PdfService, OcrService, LayoutService):
         return page.text_blocks
 
     async def locate_chart_candidates(self, page: DocumentPage) -> list[dict]:
-        return []
+        return list(page.metadata.get("_image_candidates") or [])
 
     def _parse_pages(self, path: Path, document_id: str) -> list[DocumentPage]:
         suffix = path.suffix.lower()
@@ -341,6 +341,12 @@ class LocalDocumentParser(PdfService, OcrService, LayoutService):
                 )
                 rect = pdf_page.rect
                 page_image_uri = self._render_pdf_page_image(pdf_page=pdf_page, document_id=document_id, page_id=page_id)
+                image_candidates = self._extract_page_image_candidates(
+                    fitz_doc=document,
+                    fitz_page=pdf_page,
+                    document_id=document_id,
+                    page_id=page_id,
+                )
                 pages.append(
                     DocumentPage(
                         id=page_id,
@@ -356,6 +362,7 @@ class LocalDocumentParser(PdfService, OcrService, LayoutService):
                             "text_block_count": len(blocks),
                             "text_engine": "pymupdf",
                             "page_image_generated": bool(page_image_uri),
+                            "_image_candidates": image_candidates,
                         },
                     )
                 )
@@ -379,6 +386,88 @@ class LocalDocumentParser(PdfService, OcrService, LayoutService):
             logger.warning(
                 "Failed to render PDF page image",
                 extra={"document_id": document_id, "page_id": page_id},
+                exc_info=True,
+            )
+            return None
+
+    def _extract_page_image_candidates(
+        self,
+        *,
+        fitz_doc: Any,
+        fitz_page: Any,
+        document_id: str,
+        page_id: str,
+        min_size: int = 80,
+        min_area_ratio: float = 0.02,
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        page_rect = fitz_page.rect
+        page_area = page_rect.width * page_rect.height
+        if page_area <= 0:
+            return []
+        try:
+            images = fitz_page.get_images(full=True)
+        except Exception:
+            return []
+
+        seen_xrefs: set[int] = set()
+        candidate_index = 0
+        for img_info in images:
+            xref = img_info[0]
+            if xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+            img_width, img_height = img_info[2], img_info[3]
+            if img_width < min_size or img_height < min_size:
+                continue
+            try:
+                rects = fitz_page.get_image_rects(img_info)
+            except Exception:
+                continue
+            for rect in rects:
+                if rect.is_empty or rect.is_infinite:
+                    continue
+                if (rect.width * rect.height) / page_area < min_area_ratio:
+                    continue
+                candidate_index += 1
+                chart_id = f"{page_id}_img_{candidate_index}"
+                image_path = self._save_extracted_image(
+                    fitz_doc=fitz_doc, xref=xref, document_id=document_id, chart_id=chart_id,
+                )
+                candidates.append({
+                    "id": chart_id,
+                    "bbox": {
+                        "x0": float(rect.x0),
+                        "y0": float(rect.y0),
+                        "x1": float(rect.x1),
+                        "y1": float(rect.y1),
+                        "unit": "point",
+                    },
+                    "image_uri": image_path or "",
+                    "confidence": 0.7,
+                    "source": "pymupdf_native",
+                    "native_width": img_width,
+                    "native_height": img_height,
+                })
+        return candidates
+
+    def _save_extracted_image(
+        self, *, fitz_doc: Any, xref: int, document_id: str, chart_id: str,
+    ) -> str | None:
+        try:
+            import fitz
+
+            target_path = self.storage_root / "extracted_images" / document_id / f"{chart_id}.png"
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            pix = fitz.Pixmap(fitz_doc, xref)
+            if pix.n - pix.alpha > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            pix.save(str(target_path))
+            return str(target_path)
+        except Exception:
+            logger.warning(
+                "Failed to save extracted image",
+                extra={"document_id": document_id, "chart_id": chart_id},
                 exc_info=True,
             )
             return None

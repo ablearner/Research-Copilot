@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from tools.research.document_capability import ResearchDocumentCapability
 
 if TYPE_CHECKING:

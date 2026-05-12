@@ -53,3 +53,29 @@ def test_page_fallback_candidate_uses_figure_marker_from_paragraph(tmp_path) -> 
     assert candidate is not None
     assert candidate.metadata["caption"] == "Fig. 3: Three-stage workflow with encoder, planner, and executor."
     assert candidate.metadata["title"] == "Three-stage workflow with encoder, planner, and executor."
+
+
+def test_page_fallback_candidate_allows_unmarked_page_for_visual_rerank(tmp_path) -> None:
+    toolkit = PaperFigureTools(storage_root=tmp_path)
+    page = DocumentPage(
+        id="p4",
+        document_id="doc1",
+        page_number=4,
+        image_uri="/tmp/page.png",
+        text_blocks=[
+            TextBlock(
+                id="tb1",
+                document_id="doc1",
+                page_id="p4",
+                page_number=4,
+                text="A method section paragraph without explicit visual labels.",
+                block_type="paragraph",
+            )
+        ],
+    )
+
+    candidate = toolkit._page_fallback_candidate(page)
+
+    assert candidate is not None
+    assert candidate.metadata["fallback"] == "page_image"
+    assert candidate.metadata["fallback_reason"] == "page_without_detected_chart_candidate"
