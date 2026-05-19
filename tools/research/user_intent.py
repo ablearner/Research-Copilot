@@ -283,7 +283,7 @@ class IntentResolutionTool:
                 markers,
                 "The user explicitly requested a general conversation turn rather than a research follow-up.",
             )
-        if has_visual_anchor or has_any(_FIGURE_MARKERS):
+        if has_any(_FIGURE_MARKERS):
             resolved_ids = resolved_target_ids()
             ambiguous = self._has_ambiguous_reference(normalized) and not resolved_ids
             return self._result(

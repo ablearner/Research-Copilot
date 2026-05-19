@@ -431,6 +431,26 @@ def test_user_intent_keeps_resolved_paper_scope_for_figure_question() -> None:
     assert result.reference_type == "ordinal"
 
 
+def test_user_intent_does_not_promote_plain_paper_question_to_figure_qa_from_visual_anchor() -> None:
+    skill = IntentResolutionTool()
+
+    result = skill.resolve(
+        message="请介绍这篇论文的核心思路、方法和实验结果。",
+        has_task=True,
+        candidate_paper_count=1,
+        candidate_papers=[
+            {"index": 1, "paper_id": "paper-1", "title": "Paper One"},
+        ],
+        active_paper_ids=["paper-1"],
+        selected_paper_ids=["paper-1"],
+        has_visual_anchor=True,
+        has_document_input=False,
+    )
+
+    assert result.intent == "single_paper_qa"
+    assert result.resolved_paper_ids == ["paper-1"]
+
+
 @pytest.mark.asyncio
 async def test_qa_routing_prefers_structured_visual_anchor_over_marker_logic() -> None:
     skill = QARoutingTool(llm_adapter=QARoutingLLMStub(route="collection_qa"))

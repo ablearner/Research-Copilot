@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal
-from uuid import uuid4
 
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.general_answer_agent import GeneralAnswerAgent
@@ -655,66 +654,6 @@ class ResearchRuntimeBase:
                     "fast_route": True,
                     "route_mode": route_mode,
                     "intent": intent_name,
-                },
-            )
-        visual_anchor = self._visual_anchor_from_request_metadata(context.request.metadata)
-        if (
-            intent_name == "figure_qa"
-            and visual_anchor
-            and has_task
-            and is_first_step
-            and context.task is not None
-            and context.task.imported_document_ids
-        ):
-            paper_id = str(visual_anchor.get("paper_id") or "").strip()
-            payload: dict[str, Any] = {
-                "goal": context.request.message,
-                "mode": context.request.mode,
-                "question": context.request.message,
-                "visual_anchor": visual_anchor,
-            }
-            if paper_id:
-                payload["paper_ids"] = [paper_id]
-            if visual_anchor.get("figure_id"):
-                payload["figure_id"] = str(visual_anchor["figure_id"])
-            if visual_anchor.get("chart_id"):
-                payload["chart_id"] = str(visual_anchor["chart_id"])
-            active_message = AgentMessage(
-                task_id=f"fast_route_task_{uuid4().hex[:12]}",
-                agent_from="ResearchSupervisorAgent",
-                agent_to="ChartAnalysisAgent",
-                task_type="analyze_paper_figures",
-                instruction=(
-                    "Reuse the latest visual anchor from the previous paper figure analysis "
-                    "to answer the user's follow-up. Do not ask which figure again unless the anchor is rejected."
-                ),
-                payload=payload,
-                context_slice={},
-                priority="high",
-                expected_output_schema={"paper_id": "str", "figure_id": "str", "answer": "str"},
-                metadata={
-                    "decision_source": "fast_route",
-                    "manager_action": "analyze_paper_figures",
-                    "visual_anchor": visual_anchor,
-                },
-            )
-            logger.info("Fast-route: figure_qa + visual_anchor → analyze_paper_figures")
-            return ResearchSupervisorDecision(
-                action_name="analyze_paper_figures",
-                thought="The user is following up on the latest analyzed paper figure, so the persisted visual anchor can resolve the reference.",
-                rationale="fast_route:visual_anchor_followup",
-                phase="act",
-                estimated_gain=0.78,
-                estimated_cost=0.2,
-                action_input={**payload, "instruction": active_message.instruction},
-                metadata={
-                    "worker_agent": "ChartAnalysisAgent",
-                    "worker_task_type": "analyze_paper_figures",
-                    "active_message": active_message,
-                    "fast_route": True,
-                    "route_mode": route_mode,
-                    "intent": intent_name,
-                    "visual_anchor": visual_anchor,
                 },
             )
         return None

@@ -594,7 +594,7 @@ def test_research_supervisor_graph_hydrates_visual_anchor_from_snapshot_workspac
     assert hydrated_request.metadata["context"]["active_paper_ids"] == ["paper-figure"]
 
 
-def test_research_supervisor_fast_routes_visual_anchor_followup_to_figure_agent(tmp_path) -> None:
+def test_research_supervisor_does_not_fast_route_visual_anchor_followup(tmp_path) -> None:
     service = build_service(tmp_path)
     runtime = ResearchSupervisorGraphRuntime(research_service=service)
     task = ResearchTask(
@@ -633,11 +633,72 @@ def test_research_supervisor_fast_routes_visual_anchor_followup_to_figure_agent(
         state={"current_step_index": 0},
     )
 
-    assert decision is not None
-    assert decision.action_name == "analyze_paper_figures"
-    assert decision.metadata["worker_agent"] == "ChartAnalysisAgent"
-    assert decision.metadata["active_message"].payload["figure_id"] == "paper-figure:chart-2"
-    assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-figure"]
+    assert decision is None
+
+
+def test_research_supervisor_fast_route_does_not_use_visual_anchor_for_plain_paper_question(tmp_path) -> None:
+    service = build_service(tmp_path)
+    runtime = ResearchSupervisorGraphRuntime(research_service=service)
+    task = ResearchTask(
+        task_id="task-figure",
+        topic="Figure follow-up",
+        status="completed",
+        created_at="2026-04-25T00:00:00+00:00",
+        updated_at="2026-04-25T00:00:00+00:00",
+        imported_document_ids=["doc-figure"],
+    )
+    request = ResearchAgentRunRequest(
+        message="请介绍这篇论文的核心思路、方法和实验结果。",
+        mode="qa",
+        task_id=task.task_id,
+        selected_paper_ids=["paper-figure"],
+        metadata={
+            "context": {
+                "visual_anchor": {
+                    "paper_id": "paper-figure",
+                    "figure_id": "paper-figure:chart-2",
+                    "image_path": "/tmp/chart-2.png",
+                }
+            }
+        },
+    )
+    context = ResearchAgentToolContext(
+        request=request,
+        research_service=service,
+        graph_runtime=GraphRuntimeStub(),
+        task_response=ResearchTaskResponse(task=task, papers=[], report=None, warnings=[]),
+    )
+    user_intent = runtime.user_intent_resolver.resolve(
+        message=request.message,
+        has_task=True,
+        candidate_paper_count=1,
+        candidate_papers=[{"index": 1, "paper_id": "paper-figure", "title": "Paper With Figure"}],
+        active_paper_ids=["paper-figure"],
+        selected_paper_ids=["paper-figure"],
+        has_visual_anchor=True,
+    )
+
+    decision = runtime._try_fast_route(
+        context=context,
+        user_intent=user_intent,
+        session_ctx={"route_mode": "research_follow_up"},
+        state={"current_step_index": 0},
+    )
+    supervisor_state = runtime._state_from_context(
+        context,
+        user_intent=user_intent,
+        session_context={
+            "route_mode": "research_follow_up",
+            "active_thread_id": None,
+            "active_thread_topic": "",
+            "previous_topic": "",
+        },
+    )
+
+    assert user_intent.intent == "single_paper_qa"
+    assert supervisor_state.has_visual_anchor is True
+    assert supervisor_state.latest_visual_anchor["figure_id"] == "paper-figure:chart-2"
+    assert decision is None
 
 
 @pytest.mark.asyncio
