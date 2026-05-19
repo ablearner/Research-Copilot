@@ -5,7 +5,7 @@ from typing import Any
 from domain.schemas.sub_manager import TaskEvaluation
 
 
-class ResearchEvaluator:
+class ResearchEvaluationTool:
     """Score research-task outputs against instruction, completeness, and schema expectations."""
 
     def evaluate_result(
@@ -30,7 +30,7 @@ class ResearchEvaluator:
                     "format_compliance": 1.0,
                     "research_quality": 1.0,
                 },
-                metadata={"task_instruction": task_instruction, "skill": "ResearchEvaluator"},
+                metadata={"task_instruction": task_instruction, "skill": "ResearchEvaluationTool"},
             )
 
         issues: list[str] = []
@@ -103,5 +103,5 @@ class ResearchEvaluator:
                     for issue in issues
                 ) else 4.0,
             },
-            metadata={"task_instruction": task_instruction, "skill": "ResearchEvaluator"},
+            metadata={"task_instruction": task_instruction, "skill": "ResearchEvaluationTool"},
         )

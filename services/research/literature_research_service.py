@@ -34,14 +34,14 @@ from memory.long_term_memory import JsonLongTermMemoryStore, LongTermMemory
 from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
 from memory.session_memory import JsonSessionMemoryStore, SessionMemory
 from tools.research import (
-    PaperAnalyzer,
-    PaperReader,
-    ResearchQARouter,
-    ResearchEvaluator,
-    ResearchIntentResolver,
-    VisualIntentRouter,
-    ReviewWriter,
-    WritingPolisher,
+    PaperAnalysisTool,
+    PaperReadingTool,
+    QARoutingTool,
+    ResearchEvaluationTool,
+    IntentResolutionTool,
+    VisualIntentRoutingTool,
+    ReviewWritingTool,
+    WritingPolishTool,
 )
 from tools.research.collection_qa_capability import ResearchCollectionQACapability
 from domain.schemas.research_context import ResearchExecutionContext
@@ -74,10 +74,10 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         research_context_manager: ResearchContextManager | None = None,
         memory_manager: MemoryManager | None = None,
         paper_selector_service: PaperSelectorService | None = None,
-        paper_reading_skill: PaperReader | None = None,
-        evaluation_skill: ResearchEvaluator | None = None,
-        review_writing_skill: ReviewWriter | None = None,
-        writing_polish_skill: WritingPolisher | None = None,
+        paper_reading_tool: PaperReadingTool | None = None,
+        evaluation_tool: ResearchEvaluationTool | None = None,
+        review_writing_tool: ReviewWritingTool | None = None,
+        writing_polish_tool: WritingPolishTool | None = None,
         import_concurrency: int = 2,
         import_index_timeout_seconds: float | None = 60.0,
     ) -> None:
@@ -101,16 +101,16 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             ),
         )
         self.paper_selector_service = paper_selector_service or PaperSelectorService()
-        self.paper_reading_skill = paper_reading_skill or PaperReader()
+        self.paper_reading_tool = paper_reading_tool or PaperReadingTool()
         llm_adapter = getattr(paper_search_service, "llm_adapter", None)
         self.llm_adapter = llm_adapter
         self.research_collection_qa_capability = ResearchCollectionQACapability(
             llm_adapter=llm_adapter,
-            paper_analysis_skill=PaperAnalyzer(llm_adapter=llm_adapter),
+            paper_analysis_tool=PaperAnalysisTool(llm_adapter=llm_adapter),
         )
-        self.qa_routing_skill = ResearchQARouter(llm_adapter=llm_adapter)
-        self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
-        self.visual_intent_router = VisualIntentRouter(llm_adapter=llm_adapter)
+        self.qa_routing_tool = QARoutingTool(llm_adapter=llm_adapter)
+        self.user_intent_resolver = IntentResolutionTool(llm_adapter=llm_adapter)
+        self.visual_intent_router = VisualIntentRoutingTool(llm_adapter=llm_adapter)
         self.chart_analysis_agent = ChartAnalysisAgent(
             llm_adapter=llm_adapter,
             storage_root=report_service.storage_root / "assets",
@@ -118,7 +118,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         self.memory_gateway = ResearchMemoryGateway(
             memory_manager=self.memory_manager,
             research_context_manager=self.research_context_manager,
-            paper_reading_skill=self.paper_reading_skill,
+            paper_reading_tool=self.paper_reading_tool,
             compact_text=lambda value: self._compact_text(value, limit=280),
         )
         self.preference_memory_agent = PreferenceMemoryAgent(
@@ -127,9 +127,9 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             paper_search_service=self.paper_search_service,
             storage_root=report_service.storage_root,
         )
-        self.evaluation_skill = evaluation_skill or ResearchEvaluator()
-        self.review_writing_skill = review_writing_skill or ReviewWriter()
-        self.writing_polish_skill = writing_polish_skill or WritingPolisher()
+        self.evaluation_tool = evaluation_tool or ResearchEvaluationTool()
+        self.review_writing_tool = review_writing_tool or ReviewWritingTool()
+        self.writing_polish_tool = writing_polish_tool or WritingPolishTool()
         self.import_concurrency = max(1, import_concurrency)
         self.import_index_timeout_seconds = import_index_timeout_seconds
         self._job_tasks: dict[str, asyncio.Task[None]] = {}
@@ -302,7 +302,7 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         compressed_summaries = self.research_context_manager.compress_papers(
             papers=resolved_papers,
             selected_paper_ids=resolved_selected_paper_ids,
-            paper_reading_skill=self.paper_reading_skill,
+            paper_reading_tool=self.paper_reading_tool,
         )
         research_context = self.research_context_manager.build_from_artifacts(
             task=task,

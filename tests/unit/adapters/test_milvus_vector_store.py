@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from pymilvus import DataType, FunctionType
 
 from adapters.vector_store.milvus_adapter import MilvusVectorStore
 from adapters.vector_store.base import VectorStoreError
@@ -160,7 +161,10 @@ async def test_ensure_collection_rejects_dimension_mismatch() -> None:
         describe_collection=lambda collection_name: {
             "fields": [
                 {"name": "vector", "params": {"dim": 1024}},
-            ]
+                {"name": "content", "params": {"enable_analyzer": True}},
+                {"name": "sparse"},
+            ],
+            "functions": [{"name": "content_bm25"}],
         },
     )
 
@@ -179,7 +183,14 @@ async def test_upsert_embeddings_flushes_after_write() -> None:
 
         def describe_collection(self, collection_name: str) -> dict:
             calls.append("describe_collection")
-            return {"fields": [{"name": "vector", "params": {"dim": 2}}]}
+            return {
+                "fields": [
+                    {"name": "vector", "params": {"dim": 2}},
+                    {"name": "content", "params": {"enable_analyzer": True}},
+                    {"name": "sparse"},
+                ],
+                "functions": [{"name": "content_bm25"}],
+            }
 
         def load_collection(self, collection_name: str) -> None:
             calls.append("load_collection")
@@ -210,3 +221,108 @@ async def test_upsert_embeddings_flushes_after_write() -> None:
     await store.upsert_embeddings([record])
 
     assert calls[-2:] == ["upsert", "flush"]
+
+
+def test_build_schema_enables_milvus_bm25_sparse_function() -> None:
+    store = MilvusVectorStore(collection_name="test_collection")
+
+    schema = store._build_schema(2).to_dict()
+
+    content_field = next(field for field in schema["fields"] if field["name"] == "content")
+    sparse_field = next(field for field in schema["fields"] if field["name"] == "sparse")
+    assert content_field["params"]["enable_analyzer"] is True
+    assert sparse_field["type"] is DataType.SPARSE_FLOAT_VECTOR
+    assert schema["functions"] == [
+        {
+            "name": "content_bm25",
+            "description": "",
+            "type": FunctionType.BM25,
+            "input_field_names": ["content"],
+            "output_field_names": ["sparse"],
+            "params": {},
+        }
+    ]
+
+
+def test_build_index_params_adds_sparse_inverted_index() -> None:
+    store = MilvusVectorStore(collection_name="test_collection")
+    store.client = SimpleNamespace(prepare_index_params=__import__("pymilvus").MilvusClient.prepare_index_params)
+
+    index_params = [index.to_dict() for index in store._build_index_params()]
+
+    assert any(index["field_name"] == "vector" for index in index_params)
+    sparse_index = next(index for index in index_params if index["field_name"] == "sparse")
+    assert sparse_index["index_type"] == "SPARSE_INVERTED_INDEX"
+    assert sparse_index["metric_type"] == "BM25"
+    assert sparse_index["inverted_index_algo"] == "DAAT_MAXSCORE"
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_rejects_existing_collection_without_bm25_schema() -> None:
+    store = MilvusVectorStore(collection_name="test_collection", dimension=2)
+    store.client = SimpleNamespace(
+        has_collection=lambda collection_name: True,
+        describe_collection=lambda collection_name: {
+            "fields": [
+                {"name": "vector", "params": {"dim": 2}},
+                {"name": "content", "params": {"max_length": 65535}},
+            ]
+        },
+    )
+
+    with pytest.raises(VectorStoreError, match="missing native BM25 sparse schema"):
+        await store._ensure_collection(2)
+
+
+@pytest.mark.asyncio
+async def test_search_sparse_text_uses_milvus_bm25_search() -> None:
+    calls: list[dict] = []
+
+    class FakeClient:
+        def has_collection(self, collection_name: str) -> bool:
+            return True
+
+        def describe_collection(self, collection_name: str) -> dict:
+            return {
+                "fields": [
+                    {"name": "vector", "params": {"dim": 2}},
+                    {"name": "content", "params": {"enable_analyzer": True}},
+                    {"name": "sparse"},
+                ],
+                "functions": [{"name": "content_bm25"}],
+            }
+
+        def load_collection(self, collection_name: str) -> None:
+            return None
+
+        def search(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                [
+                    {
+                        "id": "rec1",
+                        "distance": 3.2,
+                        "entity": {
+                            "id": "rec1",
+                            "document_id": "doc1",
+                            "source_type": "text_block",
+                            "source_id": "tb1",
+                            "content": "BM25 sparse retrieval",
+                            "modality": "text",
+                            "metadata_json": "{}",
+                        },
+                    }
+                ]
+            ]
+
+    store = MilvusVectorStore(collection_name="test_collection", dimension=2)
+    store.client = FakeClient()
+
+    hits = await store.search_sparse_text("BM25 retrieval", top_k=5, filters={"document_ids": ["doc1"]})
+
+    assert calls[0]["anns_field"] == "sparse"
+    assert calls[0]["data"] == ["BM25 retrieval"]
+    assert calls[0]["search_params"]["metric_type"] == "BM25"
+    assert calls[0]["filter"] == 'document_id in ["doc1"]'
+    assert hits[0].sparse_score == 3.2
+    assert hits[0].vector_score is None

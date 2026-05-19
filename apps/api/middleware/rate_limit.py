@@ -31,11 +31,20 @@ class RateLimiter:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Starlette middleware that rejects requests over the rate limit."""
 
-    def __init__(self, app: object, max_requests: int = 60, window_seconds: int = 60) -> None:
+    def __init__(
+        self,
+        app: object,
+        max_requests: int = 60,
+        window_seconds: int = 60,
+        enabled: bool = True,
+    ) -> None:
         super().__init__(app)  # type: ignore[arg-type]
+        self._enabled = enabled and max_requests > 0 and window_seconds > 0
         self._limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if not self._enabled or request.method == "OPTIONS":
+            return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
         if not self._limiter.check(client_ip):
             return JSONResponse(

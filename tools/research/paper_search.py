@@ -14,7 +14,7 @@ from domain.schemas.research import (
     ResearchReport,
     ResearchTopicPlan,
 )
-from tools.research import CodeLinker, PaperRanker, SurveyWriter, TopicPlanner
+from tools.research import CodeLinkingTool, PaperRankingTool, SurveyWritingTool, TopicPlanningTool
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
 from tools.research import (
     ArxivSearchTool,
@@ -70,10 +70,10 @@ class PaperSearchService:
         zotero_tool: Any | None = None,
         external_tool_gateway: ResearchExternalToolGateway | None = None,
         external_tool_registry: Any | None = None,
-        topic_planner: TopicPlanner | None = None,
-        paper_ranker: PaperRanker | None = None,
-        survey_writer: SurveyWriter | None = None,
-        code_linking_skill: CodeLinker | None = None,
+        topic_planner: TopicPlanningTool | None = None,
+        paper_ranker: PaperRankingTool | None = None,
+        survey_writer: SurveyWritingTool | None = None,
+        code_linking_tool: CodeLinkingTool | None = None,
         llm_adapter: Any | None = None,
         ranking_mode: str = "heuristic",
     ) -> None:
@@ -86,13 +86,13 @@ class PaperSearchService:
             registry=external_tool_registry
         )
         self.llm_adapter = llm_adapter
-        self.topic_planner = topic_planner or TopicPlanner(llm_adapter=llm_adapter)
-        self.paper_ranker = paper_ranker or PaperRanker(
+        self.topic_planner = topic_planner or TopicPlanningTool(llm_adapter=llm_adapter)
+        self.paper_ranker = paper_ranker or PaperRankingTool(
             llm_adapter=llm_adapter,
             default_mode=ranking_mode,
         )
-        self.survey_writer = survey_writer or SurveyWriter(llm_adapter=llm_adapter)
-        self.code_linking_skill = code_linking_skill
+        self.survey_writer = survey_writer or SurveyWritingTool(llm_adapter=llm_adapter)
+        self.code_linking_tool = code_linking_tool
 
     async def search(
         self,
@@ -178,8 +178,8 @@ class PaperSearchService:
             len(ranked_papers),
             " | ".join(paper.title for paper in ranked_papers[:5]),
         )
-        if self.code_linking_skill is not None:
-            ranked_papers = await self.code_linking_skill.enrich_papers(ranked_papers)
+        if self.code_linking_tool is not None:
+            ranked_papers = await self.code_linking_tool.enrich_papers(ranked_papers)
         # Use async generate if LLM is available
         if self.llm_adapter is not None:
             report = await self.survey_writer.generate_async(topic=topic, task_id=task_id, papers=ranked_papers, warnings=warnings)

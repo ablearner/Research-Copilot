@@ -480,8 +480,8 @@ class ResearchAgentRunRequest(BaseModel):
     recommendation_goal: str | None = None
     recommendation_top_k: int = Field(default=3, ge=1, le=10)
     force_context_compression: bool = False
-    auto_import: bool = True
-    import_top_k: int = Field(default=3, ge=0, le=20)
+    auto_import: bool = False
+    import_top_k: int = Field(default=0, ge=0, le=20)
     include_graph: bool = True
     include_embeddings: bool = True
     top_k: int = Field(default=10, ge=1, le=100)

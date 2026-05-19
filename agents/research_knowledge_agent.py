@@ -251,7 +251,7 @@ class ResearchKnowledgeAgent:
         compressed = context.research_service.research_context_manager.compress_papers(
             papers=list(context.papers),
             selected_paper_ids=selected_paper_ids,
-            paper_reading_skill=context.research_service.paper_reading_skill,
+            paper_reading_tool=context.research_service.paper_reading_tool,
         )
         if not compressed:
             return ResearchToolResult(status="skipped", observation="no paper summary could be built for compression", metadata={"reason": "no_papers"})

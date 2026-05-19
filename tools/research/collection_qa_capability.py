@@ -407,9 +407,14 @@ class ResearchCollectionKnowledgeCapability:
 
 
 class ResearchCollectionAnswerCapability:
-    def __init__(self, *, llm_adapter: Any | None = None, paper_analysis_skill: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm_adapter: Any | None = None,
+        paper_analysis_tool: Any | None = None,
+    ) -> None:
         self.llm_adapter = llm_adapter
-        self.paper_analysis_skill = paper_analysis_skill
+        self.paper_analysis_tool = paper_analysis_tool
 
     async def answer_collection_question(
         self,
@@ -566,12 +571,12 @@ class ResearchCollectionAnswerCapability:
         )
 
     async def _analyze_selected_papers(self, state: Any):
-        if self.paper_analysis_skill is None:
+        if self.paper_analysis_tool is None:
             return None
         paper_ids = list(getattr(state.request, "paper_ids", []) or [])
         if not paper_ids or not getattr(state, "papers", None):
             return None
-        return await self.paper_analysis_skill.analyze_async(
+        return await self.paper_analysis_tool.analyze_async(
             question=str(getattr(state, "original_question", state.question)),
             papers=list(state.papers),
             task_topic=getattr(state.task, "topic", ""),
@@ -749,12 +754,12 @@ class ResearchCollectionQACapability:
         self,
         *,
         llm_adapter: Any | None = None,
-        paper_analysis_skill: Any | None = None,
+        paper_analysis_tool: Any | None = None,
     ) -> None:
         self.knowledge = ResearchCollectionKnowledgeCapability(llm_adapter=llm_adapter)
         self.answer = ResearchCollectionAnswerCapability(
             llm_adapter=llm_adapter,
-            paper_analysis_skill=paper_analysis_skill,
+            paper_analysis_tool=paper_analysis_tool,
         )
 
     async def run_collection_qa(

@@ -122,7 +122,7 @@ def build_phase1_unified_blueprint(
             supported_task_types=["plan", "replan", "finalize", "delegate"],
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_supervisor", capability_profile_names),
-                service_names=["ResearchEvaluator"],
+                service_names=["ResearchEvaluationTool"],
                 notes=[
                     "Currently owns planning plus evaluation responsibilities.",
                     "Target state is scheduler-only with evaluation moved to a normal tool or reviewer agent.",
@@ -232,7 +232,7 @@ def build_phase1_unified_blueprint(
             supported_task_types=["write_review"],
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_report", capability_profile_names),
-                service_names=["ReviewWriter", "WritingPolisher", "PaperAnalyzer"],
+                service_names=["ReviewWritingTool", "WritingPolishTool", "PaperAnalysisTool"],
                 notes=["Capability classes live in services.research.capabilities."],
             ),
             preferred_tool_names=["generate_review", "answer_with_evidence", "compare_papers", "recommend_papers"],
@@ -248,7 +248,7 @@ def build_phase1_unified_blueprint(
             supported_task_types=["analyze_papers"],
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_report", capability_profile_names),
-                service_names=["PaperAnalyzer", "PaperReader"],
+                service_names=["PaperAnalysisTool", "PaperReadingTool"],
             ),
             preferred_tool_names=["extract_paper_structure", "ask_paper", "parse_document", "index_document"],
             available_tool_names=tool_names,

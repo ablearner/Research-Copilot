@@ -148,7 +148,7 @@ def _source_quality_adjustment(paper: PaperCandidate) -> float:
     return adjustment
 
 
-class PaperRanker:
+class PaperRankingTool:
     """Rank paper candidates using LLM relevance assessment with deterministic fallback.
     
     When llm_adapter is provided, uses LLM for intelligent relevance scoring.
@@ -289,7 +289,3 @@ class PaperRanker:
         pdf_bonus = 0.1 if paper.pdf_url else 0.0
         oa_bonus = 0.05 if paper.is_open_access else 0.0
         return round(max(0.0, (keyword_score * 0.65) + pdf_bonus + oa_bonus + quality_adjustment), 4)
-
-
-# Compatibility alias for the previous agent-like name.
-PaperRankerAgent = PaperRanker

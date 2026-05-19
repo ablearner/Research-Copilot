@@ -11,8 +11,12 @@ from memory.long_term_memory import (
     deterministic_memory_vector,
 )
 from memory.memory_manager import MemoryManager
-from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
-from memory.session_memory import JsonSessionMemoryStore, SessionMemory
+from memory.paper_knowledge_memory import (
+    JsonPaperKnowledgeStore,
+    PaperKnowledgeMemory,
+    SQLitePaperKnowledgeStore,
+)
+from memory.session_memory import JsonSessionMemoryStore, SQLiteSessionMemoryStore, SessionMemory
 from memory.working_memory import WorkingMemory
 
 
@@ -65,6 +69,26 @@ def test_session_memory_json_store_recreates_missing_directory_on_save(tmp_path)
     assert memory.load("session-reset").context.research_topic == "resilient session memory"
 
 
+def test_session_memory_sqlite_store_persists_summary(tmp_path) -> None:
+    db_path = tmp_path / "kepler.db"
+    memory = SessionMemory(SQLiteSessionMemoryStore(db_path))
+    context = ResearchContext(
+        research_topic="SQLite session memory",
+        research_goals=["persist research context"],
+    )
+
+    memory.update_context("session-sqlite", context)
+    memory.append_question("session-sqlite", "How should session memory persist?")
+    memory.append_conclusion("session-sqlite", "Use a dedicated research_session_memory table.")
+    finalized = memory.finalize_session("session-sqlite")
+
+    reloaded = SessionMemory(SQLiteSessionMemoryStore(db_path)).load("session-sqlite")
+    assert finalized.summary is not None
+    assert reloaded.summary is not None
+    assert reloaded.context.research_topic == "SQLite session memory"
+    assert reloaded.summary.conclusions == ["Use a dedicated research_session_memory table."]
+
+
 def test_session_memory_clear_removes_persisted_record(tmp_path) -> None:
     memory = SessionMemory(JsonSessionMemoryStore(tmp_path / "session"))
 
@@ -96,6 +120,28 @@ def test_paper_knowledge_store_recreates_missing_directory_on_upsert(tmp_path) -
     expected_path = store.root_dir / f"{store._path_for('paper-1').name}"
     assert expected_path.exists()
     assert memory.load("paper-1") is not None
+
+
+def test_paper_knowledge_sqlite_store_round_trip(tmp_path) -> None:
+    db_path = tmp_path / "kepler.db"
+    memory = PaperKnowledgeMemory(SQLitePaperKnowledgeStore(db_path))
+    record = PaperKnowledgeRecord(
+        paper_id="paper-1",
+        document_id="doc-1",
+        title="Robust Agents",
+        knowledge_card=PaperKnowledgeCard(
+            paper_id="paper-1",
+            title="Robust Agents",
+            summary="Persist paper knowledge in SQLite.",
+        ),
+    )
+
+    memory.upsert(record)
+
+    reloaded = PaperKnowledgeMemory(SQLitePaperKnowledgeStore(db_path)).load("paper-1")
+    assert reloaded is not None
+    assert reloaded.document_id == "doc-1"
+    assert reloaded.knowledge_card.summary == "Persist paper knowledge in SQLite."
 
 
 def test_memory_manager_finalize_promotes_summary_to_long_term() -> None:

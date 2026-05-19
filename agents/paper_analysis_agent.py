@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from tools.research import PaperAnalyzer
+from tools.research import PaperAnalysisTool
 
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
@@ -43,9 +43,9 @@ class PaperAnalysisAgent:
     def __init__(
         self,
         *,
-        paper_analysis_skill: PaperAnalyzer,
+        paper_analysis_tool: PaperAnalysisTool,
     ) -> None:
-        self.paper_analysis_skill = paper_analysis_skill
+        self.paper_analysis_tool = paper_analysis_tool
 
     def _dedupe_ids(self, values: list[str]) -> list[str]:
         return list(dict.fromkeys(values))
@@ -257,7 +257,7 @@ class PaperAnalysisAgent:
         evidence_hits: list[RetrievalHit] | None = None,
         supervisor_instruction: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
-        return await self.paper_analysis_skill.analyze_async(
+        return await self.paper_analysis_tool.analyze_async(
             question=question,
             papers=papers,
             task_topic=task_topic,

@@ -88,12 +88,26 @@ async def test_research_supervisor_agent_uses_llm_to_route_selected_paper_analys
             paper_analysis_requested=True,
             analysis_focus="compare",
             comparison_dimensions=["method", "experiment", "year"],
+            skill_candidates=[
+                {
+                    "name": "knowledge-management",
+                    "score": 1.0,
+                    "match_reason": "trigger:导入.*论文",
+                },
+                {
+                    "name": "paper-comparison",
+                    "score": 1.0,
+                    "match_reason": "trigger:方法.*差异",
+                },
+            ],
         )
     )
 
     assert decision.action_name == "analyze_papers"
     assert decision.metadata["worker_agent"] == "PaperAnalysisAgent"
     assert decision.metadata["active_message"].payload["dimensions"] == ["method", "experiment", "year"]
+    assert decision.metadata["selected_skill_names"] == ["paper-comparison"]
+    assert decision.metadata["active_message"].metadata["selected_skill_names"] == ["paper-comparison"]
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 import pytest
 
 from domain.schemas.research import PaperCandidate
-from tools.research.survey_writing import SurveyWriter
+from tools.research.survey_writing import SurveyWritingTool
 
 
 class _MiniLLMStub:
@@ -12,7 +12,7 @@ class _MiniLLMStub:
 
 
 def test_survey_writing_skill_generates_structured_cited_review() -> None:
-    skill = SurveyWriter()
+    skill = SurveyWritingTool()
     papers = [
         PaperCandidate(
             paper_id="p1",
@@ -54,7 +54,7 @@ def test_survey_writing_skill_generates_structured_cited_review() -> None:
 
 
 def test_survey_writing_skill_supports_english_output() -> None:
-    skill = SurveyWriter()
+    skill = SurveyWritingTool()
     papers = [
         PaperCandidate(
             paper_id="p1",
@@ -83,7 +83,7 @@ def test_survey_writing_skill_supports_english_output() -> None:
 
 @pytest.mark.asyncio
 async def test_survey_writing_skill_reduces_min_length_for_mini_models() -> None:
-    skill = SurveyWriter(llm_adapter=_MiniLLMStub())
+    skill = SurveyWritingTool(llm_adapter=_MiniLLMStub())
     papers = [
         PaperCandidate(
             paper_id="p1",

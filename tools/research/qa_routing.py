@@ -60,8 +60,8 @@ class ResearchQARouteResult(BaseModel):
     source: Literal["llm", "heuristic"] = "heuristic"
 
 
-class ResearchQARouter:
-    name = "ResearchQARouter"
+class QARoutingTool:
+    name = "QARoutingTool"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter

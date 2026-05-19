@@ -9,7 +9,7 @@ from domain.schemas.api import QAResponse
 from domain.schemas.research import ResearchReport, ResearchTodoItem
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
 from retrieval.evidence_builder import build_evidence_bundle
-from tools.research import PaperAnalyzer
+from tools.research import PaperAnalysisTool
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 
 if TYPE_CHECKING:
@@ -34,11 +34,11 @@ class ResearchWriterAgent:
         paper_search_service: PaperSearchService | None = None,
         *,
         llm_adapter: Any | None = None,
-        paper_analysis_skill: PaperAnalyzer | None = None,
+        paper_analysis_tool: PaperAnalysisTool | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
-        self.paper_analysis_skill = paper_analysis_skill or PaperAnalyzer(llm_adapter=self.llm_adapter)
+        self.paper_analysis_tool = paper_analysis_tool or PaperAnalysisTool(llm_adapter=self.llm_adapter)
 
     # ------------------------------------------------------------------
     # New unified entry point (SpecialistAgent protocol)
@@ -242,7 +242,7 @@ class ResearchWriterAgent:
                     **base_report.metadata,
                     "writer": self.name,
                     "manager_agent": "ResearchSupervisorAgent",
-                    "agent_architecture": "main_agents_plus_skills",
+                    "agent_architecture": "main_agents_plus_tools",
                     "autonomy_mode": "lead_agent_loop",
                     "autonomy_rounds": state.round_index + 1,
                     "autonomy_trace_steps": len(state.trace),
@@ -562,7 +562,7 @@ class ResearchWriterAgent:
         paper_ids = list(getattr(state.request, "paper_ids", []) or [])
         if not paper_ids or not getattr(state, "papers", None):
             return None
-        return await self.paper_analysis_skill.analyze_async(
+        return await self.paper_analysis_tool.analyze_async(
             question=str(getattr(state, "original_question", state.question)),
             papers=list(state.papers),
             task_topic=getattr(state.task, "topic", ""),

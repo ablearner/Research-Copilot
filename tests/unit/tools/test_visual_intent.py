@@ -1,6 +1,6 @@
 import pytest
 
-from tools.research.visual_intent import VisualIntentRouter
+from tools.research.visual_intent import VisualIntentRoutingTool
 
 
 class VisualIntentLLMStub:
@@ -15,7 +15,7 @@ class VisualIntentLLMStub:
 
 @pytest.mark.asyncio
 async def test_visual_intent_llm_overrides_marker_hints_for_new_search() -> None:
-    router = VisualIntentRouter(
+    router = VisualIntentRoutingTool(
         llm_adapter=VisualIntentLLMStub(
             {
                 "intent": "new_visual_search",
@@ -44,7 +44,7 @@ async def test_visual_intent_llm_overrides_marker_hints_for_new_search() -> None
 
 @pytest.mark.asyncio
 async def test_visual_intent_fallback_reuses_current_anchor_only_for_current_reference() -> None:
-    router = VisualIntentRouter()
+    router = VisualIntentRoutingTool()
 
     decision = await router.decide_async(
         question="这张图里横轴表示什么？",

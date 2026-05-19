@@ -3,28 +3,26 @@ from tools.research.ieee_metadata_search_tool import IEEEMetadataSearchTool
 from tools.research.openalex_search_tool import OpenAlexSearchTool
 from tools.research.semantic_scholar_search_tool import SemanticScholarSearchTool
 
-from tools.research.paper_analysis import PaperAnalyzer
-from tools.research.paper_chart_analysis import PaperChartAnalyzer
-from tools.research.code_linking import CodeLinker, CodeRepositoryCandidate
-from tools.research.paper_curation import PaperCurator, PaperCuratorAgent
-from tools.research.paper_ranking import PaperRanker, PaperRankerAgent
-from tools.research.paper_reading import PaperReader
-from tools.research.qa_routing import ResearchQARouteResult, ResearchQARouter
+from tools.research.paper_analysis import PaperAnalysisTool
+from tools.research.paper_chart_analysis import PaperChartAnalysisTool
+from tools.research.code_linking import CodeLinkingTool, CodeRepositoryCandidate
+from tools.research.paper_curation import PaperCurationTool
+from tools.research.paper_ranking import PaperRankingTool
+from tools.research.paper_reading import PaperReadingTool
+from tools.research.qa_routing import ResearchQARouteResult, QARoutingTool
 from tools.research.query_planning import (
-    ResearchQueryRewriteAgent,
     ResearchQueryRewriteResult,
-    ResearchQueryRewriter,
-    TopicPlanner,
-    TopicPlannerAgent,
+    QueryRewriteTool,
+    TopicPlanningTool,
     extract_core_terms,
 )
-from tools.research.research_evaluation import ResearchEvaluator
-from tools.research.review_writing import ReviewWriter
-from tools.research.survey_writing import SurveyWriter, SurveyWriterAgent
-from tools.research.visual_anchor import VisualAnchor
-from tools.research.visual_intent import VisualIntentDecision, VisualIntentRouter
-from tools.research.user_intent import ResearchIntentResolver, ResearchUserIntentResult
-from tools.research.writing_polish import WritingPolisher
+from tools.research.research_evaluation import ResearchEvaluationTool
+from tools.research.review_writing import ReviewWritingTool
+from tools.research.survey_writing import SurveyWritingTool
+from tools.research.visual_anchor import VisualAnchorTool
+from tools.research.visual_intent import VisualIntentDecision, VisualIntentRoutingTool
+from tools.research.user_intent import IntentResolutionTool, ResearchUserIntentResult
+from tools.research.writing_polish import WritingPolishTool
 from tools.research.zotero_search_tool import ZoteroSearchTool
 from tools.research.qa_schemas import ResearchQARouteDecision
 from tools.research.qa_decisions import (
@@ -40,32 +38,27 @@ __all__ = [
     "OpenAlexSearchTool",
     "SemanticScholarSearchTool",
     "IEEEMetadataSearchTool",
-    "CodeLinker",
+    "CodeLinkingTool",
     "CodeRepositoryCandidate",
-    "PaperAnalyzer",
-    "PaperChartAnalyzer",
-    "PaperCurator",
-    "PaperCuratorAgent",
-    "PaperRanker",
-    "PaperRankerAgent",
-    "PaperReader",
+    "PaperAnalysisTool",
+    "PaperChartAnalysisTool",
+    "PaperCurationTool",
+    "PaperRankingTool",
+    "PaperReadingTool",
     "ResearchQARouteResult",
-    "ResearchQARouter",
-    "ResearchQueryRewriteAgent",
+    "QARoutingTool",
     "ResearchQueryRewriteResult",
-    "ResearchQueryRewriter",
-    "ResearchEvaluator",
-    "ResearchIntentResolver",
+    "QueryRewriteTool",
+    "ResearchEvaluationTool",
+    "IntentResolutionTool",
     "ResearchUserIntentResult",
-    "ReviewWriter",
-    "SurveyWriter",
-    "SurveyWriterAgent",
-    "TopicPlanner",
-    "TopicPlannerAgent",
-    "VisualAnchor",
+    "ReviewWritingTool",
+    "SurveyWritingTool",
+    "TopicPlanningTool",
+    "VisualAnchorTool",
     "VisualIntentDecision",
-    "VisualIntentRouter",
-    "WritingPolisher",
+    "VisualIntentRoutingTool",
+    "WritingPolishTool",
     "extract_core_terms",
     "ResearchQARouteDecision",
     "ResearchQAToolset",

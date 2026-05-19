@@ -36,7 +36,7 @@ class QARoutingMixin:
 
     * ``report_service``
     * ``paper_selector_service``
-    * ``qa_routing_skill``
+    * ``qa_routing_tool``
     * ``user_intent_resolver``
     * ``chart_analysis_agent``
     * ``memory_gateway``
@@ -84,7 +84,7 @@ class QARoutingMixin:
         metadata: dict[str, Any] | None = None,
     ) -> ResearchQARouteDecision:
         visual_anchor = self._extract_visual_anchor(request=request, metadata=metadata)
-        route_result = await self.qa_routing_skill.classify_async(
+        route_result = await self.qa_routing_tool.classify_async(
             question=question,
             scope_mode=scope_mode,
             paper_ids=paper_ids,

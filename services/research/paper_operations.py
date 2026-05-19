@@ -51,7 +51,7 @@ class PaperOperationsMixin:
     Assumes the host class exposes (from ``LiteratureResearchService``):
 
     * ``report_service``, ``paper_import_service``, ``paper_search_service``
-    * ``chart_analysis_agent``, ``literature_scout_agent``, ``paper_curation_skill``
+    * ``chart_analysis_agent``, ``literature_scout_agent``, ``paper_curation_tool``
     * ``research_writer_agent``, ``observability_service``
     * ``import_concurrency``, ``_job_tasks``
     * ``get_task(...)``, ``save_task_state(...)``, ``save_job_state(...)``

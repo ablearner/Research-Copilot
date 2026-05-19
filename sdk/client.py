@@ -15,15 +15,7 @@ from domain.schemas.research import (
     ResearchConversationResponse,
     ResearchMessage,
 )
-from memory.long_term_memory import (
-    InMemoryLongTermMemoryStore,
-    JsonLongTermMemoryStore,
-    LongTermMemory,
-    SQLiteLongTermMemoryStore,
-)
-from memory.memory_manager import MemoryManager
-from memory.paper_knowledge_memory import JsonPaperKnowledgeStore, PaperKnowledgeMemory
-from memory.session_memory import JsonSessionMemoryStore, SessionMemory
+from memory.factory import build_memory_manager
 from services.research.literature_research_service import LiteratureResearchService
 from tools.research.paper_import import PaperImportService
 from tools.research.paper_search import PaperSearchService
@@ -70,24 +62,6 @@ def _preferred_answer_language_from_text(text: str | None) -> str:
     if cjk_count > 0 and cjk_count >= max(1, latin_count // 2):
         return "zh-CN"
     return "en-US"
-
-
-def _build_long_term_memory(settings: Settings) -> LongTermMemory:
-    provider = str(settings.long_term_memory_provider or "json").strip().lower()
-    if provider in {"json", "file"}:
-        return LongTermMemory(
-            JsonLongTermMemoryStore(
-                settings.resolve_path(settings.research_long_term_memory_dir)
-            )
-        )
-    if provider == "sqlite":
-        return LongTermMemory(
-            SQLiteLongTermMemoryStore(
-                db_path=settings.resolve_path(settings.research_sqlite_db_path),
-                max_records=settings.long_term_memory_max_records,
-            )
-        )
-    return LongTermMemory(InMemoryLongTermMemoryStore())
 
 
 def _can_connect(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -199,15 +173,7 @@ class ResearchCopilotSDK:
             ),
             ranking_mode=settings.research_default_ranking_mode,
         )
-        memory_manager = MemoryManager(
-            session_memory=SessionMemory(
-                JsonSessionMemoryStore(settings.resolve_path(settings.research_session_memory_dir))
-            ),
-            long_term_memory=_build_long_term_memory(settings),
-            paper_knowledge_memory=PaperKnowledgeMemory(
-                JsonPaperKnowledgeStore(settings.resolve_path(settings.research_paper_knowledge_dir))
-            ),
-        )
+        memory_manager = build_memory_manager(settings)
         service = LiteratureResearchService(
             paper_search_service=search_service,
             report_service=report_service,

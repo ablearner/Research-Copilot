@@ -95,15 +95,16 @@ class ResearchContextManager:
         *,
         papers: list[PaperCandidate],
         selected_paper_ids: list[str] | None = None,
-        paper_reading_skill: Any | None = None,
+        paper_reading_tool: Any | None = None,
         max_papers: int = 6,
     ) -> list[CompressedPaperSummary]:
         if not papers:
             return []
-        if paper_reading_skill is None:
-            from tools.research import PaperReader
+        reader_tool = paper_reading_tool
+        if reader_tool is None:
+            from tools.research import PaperReadingTool
 
-            paper_reading_skill = PaperReader()
+            reader_tool = PaperReadingTool()
         selected = set(selected_paper_ids or [])
         ranked_papers = list(papers)
         ranked_papers.sort(
@@ -117,7 +118,7 @@ class ResearchContextManager:
         )
         summaries: list[CompressedPaperSummary] = []
         for paper in ranked_papers[: max(1, max_papers)]:
-            card = paper_reading_skill.extract(paper=paper)
+            card = reader_tool.extract(paper=paper)
             paragraph_summary = self._compact_text(
                 card.summary or paper.summary or paper.abstract or paper.title,
                 limit=180,

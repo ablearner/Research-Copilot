@@ -9,7 +9,7 @@
 - `services/research/`
   高层 research 业务服务层，负责 conversation、task、paper pool、import job、collection QA、workspace、report 和持久化收口。
 - `runtime/research/`
-  Supervisor Graph 运行时，负责构建 `ResearchAgentToolContext`、技能匹配、manager 决策、specialist agent 调度和最终响应聚合。
+  Supervisor Graph 运行时，负责构建 `ResearchAgentToolContext`、Markdown skill 候选召回、manager 决策、specialist agent 调度和最终响应聚合。
 - `tools/research/`
   研究领域能力单元，负责 query planning、paper ranking、survey writing、paper import/search、QA routing、Zotero search 等可复用业务能力。
 - `rag_runtime/`
@@ -62,7 +62,7 @@ Browser (http://localhost:3000)
 -> specialist agents / research services
 -> RagRuntime
 -> DocumentTools / RetrievalTools / AnswerTools / ChartTools
--> Milvus (vector) / Neo4j (graph) / session memory / local persistence
+-> Milvus (vector + Sparse-BM25) / Neo4j (graph) / session memory / local persistence
 ```
 
 ## 当前主能力
@@ -92,13 +92,15 @@ Browser (http://localhost:3000)
 代码默认配置下：
 
 - `SESSION_MEMORY_PROVIDER=sqlite`
-  底层 `GraphSessionMemory` 默认写入 `RESEARCH_SQLITE_DB_PATH`。
+  底层 `GraphSessionMemory` 默认写入 `RESEARCH_SQLITE_DB_PATH` 的 `session_memory` 表；research agent 的 `SessionMemory` 默认写入同一个 DB 的 `research_session_memory` 表。
 - `LONG_TERM_MEMORY_PROVIDER=sqlite`
-  runtime profile 显示为 sqlite；research service 内部的长期记忆仍由 `MemoryManager` 和本地 JSON store 承载业务画像/论文知识。
+  `MemoryManager` 默认通过 `memory.factory.build_memory_manager()` 统一构造，长期记忆写入 `long_term_memory` + `long_term_memory_fts`。
+- `PAPER_KNOWLEDGE_PROVIDER=sqlite`
+  论文知识卡片默认写入同一个 `kepler.db` 的 `research_paper_knowledge` 表。JSON store 仅保留为 legacy/test/migration 兼容后端。
 - `VECTOR_STORE_PROVIDER=milvus`
 - `GRAPH_STORE_PROVIDER=memory`
 
-本机常用业务配置会覆盖上述代码默认值。当前业务运行一般使用 `RUNTIME_BACKEND=business`、OpenAI-compatible LLM/embedding、Milvus compose 暴露端口 `19531`、`GRAPH_STORE_PROVIDER=neo4j`。在这种配置下 Neo4j 是必需服务；如果保持代码默认的 `GRAPH_STORE_PROVIDER=memory`，则不需要启动 Neo4j。
+本机常用业务配置会覆盖上述代码默认值。当前业务运行一般使用 `RUNTIME_BACKEND=business`、OpenAI-compatible LLM/embedding、Milvus compose 暴露端口 `19531`、`GRAPH_STORE_PROVIDER=neo4j`。Milvus 同时承载向量检索和原生 Sparse-BM25 关键词检索；在这种配置下 Neo4j 是必需服务。如果保持代码默认的 `GRAPH_STORE_PROVIDER=memory`，则不需要启动 Neo4j。
 
 ## 主要目录
 
@@ -215,13 +217,13 @@ Browser (http://localhost:3000)
 - embedding / reranker
   `EMBEDDING_PROVIDER`、`EMBEDDING_MODEL`、`RERANKER_MODEL`、`RERANKER_UNAVAILABLE_POLICY`
 - stores
-  `VECTOR_STORE_PROVIDER`、`GRAPH_STORE_PROVIDER`、`SESSION_MEMORY_PROVIDER`
+  `VECTOR_STORE_PROVIDER`、`GRAPH_STORE_PROVIDER`、`SESSION_MEMORY_PROVIDER`、`LONG_TERM_MEMORY_PROVIDER`、`PAPER_KNOWLEDGE_PROVIDER`
 - external store config
   `MILVUS_URI`、`NEO4J_URI`
 - research persistence
   `RESEARCH_STORAGE_ROOT`、`RESEARCH_RESET_ON_STARTUP`
 - long-term memory
-  `LONG_TERM_MEMORY_PROVIDER`
+  `LONG_TERM_MEMORY_PROVIDER`、`MEMORY_QUALITY_GATE_ENABLED`、`MEMORY_MIN_QUALITY_SCORE`
 - uploads
   `UPLOAD_DIR`、`UPLOAD_MAX_BYTES`
 
@@ -232,11 +234,14 @@ Browser (http://localhost:3000)
 - `VECTOR_STORE_PROVIDER` 默认 `milvus`
 - `MILVUS_URI` 代码默认 `http://localhost:19530`；使用仓库的 `docker-compose.milvus.yml` 时需要配置为 `http://localhost:19531`
 - `MILVUS_DIMENSION` 代码默认自动跟随 embedding adapter；如果用 `text-embedding-3-large`，本地通常配置为 `3072`
+- Milvus collection 会同时创建 dense vector 字段和 Sparse-BM25 字段；已有旧 collection 需要重建后才能使用原生 BM25
 - `GRAPH_STORE_PROVIDER` 代码默认 `memory`；业务 `.env` 可配置为 `neo4j`，此时后端启动会要求 `NEO4J_URI`、`NEO4J_USER`、`NEO4J_PASSWORD` 且 Neo4j 可连接
 - `SESSION_MEMORY_PROVIDER` 默认 `sqlite`
 - `LONG_TERM_MEMORY_PROVIDER` 默认 `sqlite`
+- `PAPER_KNOWLEDGE_PROVIDER` 默认 `sqlite`
+- `MEMORY_QUALITY_GATE_ENABLED` 默认开启，低质量/无证据 QA 结论只保留在会话记忆，不写入长期记忆
 - `RESEARCH_IMPORT_INDEX_TIMEOUT_SECONDS` 默认 `300`
-- `STORAGE_PROVIDER` 默认 `json`（可切换为 `sqlite`）
+- `STORAGE_PROVIDER` 默认 `sqlite`（可切换为 `json` 用于 legacy/test/migration 兼容）
 - `CORS_ALLOW_ORIGINS` 默认允许 localhost:3000/3001
 - `RATE_LIMIT_MAX_REQUESTS` 默认 60 次/分钟/IP
 - `JSON_LOG_FORMAT` 默认 `false`，设为 `true` 启用结构化 JSON 日志
@@ -307,7 +312,13 @@ Browser (http://localhost:3000)
 
 ## Skill 系统
 
-项目实现了标准化的技能系统，支持内置技能和外部社区技能的即插即用。
+项目实现了标准化 Markdown skill 系统，支持内置 skill 和外部社区 skill 的即插即用。
+
+当前边界：
+
+- Markdown skill 是 `skills/**/SKILL.md` 中的工作流指令包，不是可执行工具，也不是 Agent。
+- Python 业务能力统一放在 `tools/research/`，只保留 `PaperReadingTool`、`PaperAnalysisTool`、`PaperRankingTool`、`ResearchEvaluationTool` 等 `*Tool` 命名。
+- 每次请求先召回轻量 `skill_candidates` 给 Supervisor；Supervisor 输出 `selected_skill_names`；完整 `SKILL.md` 正文只注入被调度的 specialist message。
 
 ### 目录结构
 
@@ -333,8 +344,9 @@ skills/
 | 文件 | 职责 |
 |-----|------|
 | `core/skill_registry.py` | SkillRegistry — 扫描、索引、三级渐进加载（L1 元数据 / L2 指令 / L3 引用文件） |
-| `core/skill_matcher.py` | SkillMatcher — trigger 正则匹配 + tag/description 关键词匹配 |
+| `core/skill_matcher.py` | SkillMatcher — trigger 正则匹配 + tag/description 关键词匹配，可接 embedding/reranker |
 | `core/skill_validator.py` | SkillValidator — prompt injection 检测、路径安全、大小限制 |
+| `tools/research/skill_resolver.py` | ResearchSkillResolver — 先生成候选，再按 Supervisor 选择加载正文 |
 
 ### 添加外部技能
 
@@ -367,6 +379,8 @@ requires:
 具体的执行步骤和输出格式要求...
 ```
 
+更完整的链路见 [docs/RC技能系统选取加载使用详解.md](docs/RC技能系统选取加载使用详解.md)。
+
 ## 本地启动
 
 ### 常用启动顺序
@@ -379,6 +393,8 @@ cd /home/myc/Research-Copilot
 docker-compose -f docker-compose.milvus.yml up -d
 # 等待端口 19531 就绪（约 15-30 秒）
 # 检查：curl -s http://localhost:9092/healthz  →  应返回 "OK"
+# 如果看到 orphan container `kepler-opensearch` 提示，说明旧 OpenSearch 服务已从 compose 中移除；
+# 可执行 `docker-compose -f docker-compose.milvus.yml up -d --remove-orphans` 清理旧容器。
 
 # 2. 如果 GRAPH_STORE_PROVIDER=neo4j，启动 Neo4j（Docker 容器，数据挂载在 .data/neo4j/）
 docker start kepler-neo4j
@@ -398,7 +414,7 @@ cd /home/myc/Research-Copilot
   --host 127.0.0.1 --port 8000 --reload \
   --reload-dir apps --reload-dir services --reload-dir rag_runtime \
   --reload-dir agents --reload-dir tools --reload-dir adapters \
-  --reload-dir memory --reload-dir retrieval --reload-dir domain
+  --reload-dir memory --reload-dir retrieval --reload-dir skills --reload-dir domain
 # 等待日志出现 "Application startup complete"
 # 如果卡在 "Waiting for application startup"，优先检查 Milvus；若 GRAPH_STORE_PROVIDER=neo4j，再检查 Neo4j
 # 注意：必须用 --reload-dir 限制监视目录，否则 watchfiles 会因 web/node_modules 文件过多而崩溃
@@ -416,7 +432,7 @@ npm run dev
 
 | 服务 | 端口 | 启动方式 |
 |------|------|------|
-| Milvus | 19531 (映射到容器内 19530) | `docker-compose -f docker-compose.milvus.yml up -d`（在 Research-Copilot 目录下） |
+| Milvus | 19531 (映射到容器内 19530) | 向量检索 + Sparse-BM25 关键词检索，`docker-compose -f docker-compose.milvus.yml up -d` |
 | Neo4j | 7474/7687 | 仅 `GRAPH_STORE_PROVIDER=neo4j` 时需要，常用 `docker start kepler-neo4j` |
 | Zotero Bridge | 23119 | 仅需要本地 Zotero 时启动，`bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
@@ -428,6 +444,8 @@ npm run dev
 - `wsl --shutdown` 后所有服务需要重新启动
 - 如果 Docker daemon 配置了 HTTP 代理（如 `systemd` proxy），容器会继承代理设置，导致 Milvus 内部组件（etcd、minio）之间通信失败（502 Bad Gateway）。`docker-compose.milvus.yml` 中已为所有服务设置 `no_proxy="*"` 解决此问题
 - Milvus v2.5.4 在某些 WSL2 内核版本下可能出现 SIGABRT 崩溃，确保使用 `docker-compose` 方式启动（含 `security_opt: seccomp:unconfined`）
+- 如果旧 Milvus collection 是在 Sparse-BM25 支持前创建的，启动时会提示缺少 BM25 sparse schema；需要重置 collection 并重新索引文档：
+  `/home/myc/miniconda3/envs/Research-Copilot/bin/python scripts/reindex_milvus_research_papers.py`
 
 ### CLI
 
@@ -462,9 +480,8 @@ npm run dev
 ## 相关文档
 
 - [docs/系统运行指南.md](docs/系统运行指南.md)
-- [docs/系统完整运行流程说明.md](docs/系统完整运行流程说明.md)
 - [docs/Milvus学习文档.md](docs/Milvus学习文档.md)
+- [docs/关键词匹配与稀疏检索详解.md](docs/关键词匹配与稀疏检索详解.md)
 - [docs/rag流程详解.md](docs/rag流程详解.md)
 - [docs/Zotero本地连接指南.md](docs/Zotero本地连接指南.md)
-- [docs/当前项目结构图.md](docs/当前项目结构图.md)
 - [docs/CLI终端使用文档.md](docs/CLI终端使用文档.md)

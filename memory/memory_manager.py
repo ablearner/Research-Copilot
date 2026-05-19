@@ -8,6 +8,7 @@ from domain.schemas.research_memory import LongTermMemoryQuery, LongTermMemoryRe
 from domain.schemas.sub_manager import SubManagerState, TaskStep
 from memory.long_term_memory import LongTermMemory
 from memory.paper_knowledge_memory import PaperKnowledgeMemory
+from memory.quality_gate import MemoryQualityGate
 from memory.session_memory import SessionMemory
 from memory.user_profile_memory import UserProfileMemory
 from memory.working_memory import WorkingMemory
@@ -21,12 +22,14 @@ class MemoryManager:
         session_memory: SessionMemory | None = None,
         long_term_memory: LongTermMemory | None = None,
         paper_knowledge_memory: PaperKnowledgeMemory | None = None,
+        quality_gate: MemoryQualityGate | None = None,
     ) -> None:
         self.working_memory = working_memory or WorkingMemory()
         self.session_memory = session_memory or SessionMemory()
         self.long_term_memory = long_term_memory or LongTermMemory()
         self.user_profile_memory = UserProfileMemory(self.long_term_memory)
         self.paper_knowledge_memory = paper_knowledge_memory
+        self.quality_gate = quality_gate or MemoryQualityGate()
         self._session_snapshots: dict[str, dict] = {}
 
     def save_context(self, session_id: str, context: ResearchContext) -> SessionMemoryRecord:
@@ -175,7 +178,23 @@ class MemoryManager:
         keywords: list[str] | None = None,
         related_paper_ids: list[str] | None = None,
         metadata: dict | None = None,
-    ) -> LongTermMemoryRecord:
+    ) -> LongTermMemoryRecord | None:
+        quality_decision = self.quality_gate.evaluate_conclusion(
+            content=conclusion,
+            topic=topic,
+            keywords=list(keywords or []),
+            related_paper_ids=list(related_paper_ids or []),
+            metadata=metadata or {},
+        )
+        if not quality_decision.allowed:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Skipped long-term conclusion memory for session %s: %s",
+                session_id,
+                quality_decision.reason,
+            )
+            return None
         stable_id = uuid5(NAMESPACE_URL, f"{session_id}:{topic}:{conclusion.strip().lower()}")
         record = LongTermMemoryRecord(
             memory_id=f"conclusion:{stable_id}",
@@ -185,7 +204,11 @@ class MemoryManager:
             keywords=list(keywords or []),
             related_paper_ids=list(related_paper_ids or []),
             source_session_id=session_id,
-            metadata={"source": "qa_answer", **(metadata or {})},
+            metadata={
+                "source": "qa_answer",
+                "quality_gate": quality_decision.model_dump(mode="json"),
+                **(metadata or {}),
+            },
         )
         return self.long_term_memory.upsert(record)
 

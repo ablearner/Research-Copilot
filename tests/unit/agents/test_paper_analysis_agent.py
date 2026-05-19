@@ -6,7 +6,7 @@ import pytest
 import agents.paper_analysis_agent as paper_analysis_module
 from agents.paper_analysis_agent import PaperAnalysisAgent
 from domain.schemas.research import PaperCandidate
-from tools.research import PaperAnalyzer
+from tools.research import PaperAnalysisTool
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_paper_analysis_skips_unqueryable_import_index() -> None:
         async def query_graph_summary(self, **kwargs):  # pragma: no cover - should not be called
             raise AssertionError("graph summary should be skipped for unindexed papers")
 
-    agent = PaperAnalysisAgent(paper_analysis_skill=PaperAnalyzer())
+    agent = PaperAnalysisAgent(paper_analysis_tool=PaperAnalysisTool())
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Imported But Not Indexed",
@@ -56,7 +56,7 @@ async def test_paper_analysis_evidence_collection_times_out(monkeypatch: pytest.
             await asyncio.sleep(0.5)
 
     monkeypatch.setattr(paper_analysis_module, "_ANALYSIS_EVIDENCE_TIMEOUT_SECONDS", 0.01)
-    agent = PaperAnalysisAgent(paper_analysis_skill=PaperAnalyzer())
+    agent = PaperAnalysisAgent(paper_analysis_tool=PaperAnalysisTool())
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Indexed Paper",

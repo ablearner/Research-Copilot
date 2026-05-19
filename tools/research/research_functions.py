@@ -38,10 +38,10 @@ from domain.schemas.research_functions import (
 )
 from domain.schemas.sub_manager import TaskEvaluation, TaskStep
 from tools.research import (
-    PaperAnalyzer,
-    PaperReader,
-    ResearchEvaluator,
-    ReviewWriter,
+    PaperAnalysisTool,
+    PaperReadingTool,
+    ResearchEvaluationTool,
+    ReviewWritingTool,
 )
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
 from tools.research.knowledge_access import ResearchKnowledgeAccess
@@ -106,16 +106,25 @@ class ResearchFunctionService:
         self.memory_gateway = getattr(research_service, "memory_gateway", None) or _FunctionServiceMemoryGateway(
             getattr(research_service, "memory_manager", None)
         )
-        self.paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReader()
-        self.paper_analysis_skill = PaperAnalyzer(
-            paper_reading_skill=self.paper_reading_skill,
+        self.paper_reading_tool = (
+            getattr(research_service, "paper_reading_tool", None)
+            or PaperReadingTool()
+        )
+        self.paper_analysis_tool = PaperAnalysisTool(
+            paper_reading_tool=self.paper_reading_tool,
             llm_adapter=self._get_llm_adapter() if graph_runtime is not None else None,
         )
         self.paper_analysis_agent = PaperAnalysisAgent(
-            paper_analysis_skill=self.paper_analysis_skill,
+            paper_analysis_tool=self.paper_analysis_tool,
         )
-        self.review_writing_skill = getattr(research_service, "review_writing_skill", None) or ReviewWriter()
-        self.evaluation_skill = getattr(research_service, "evaluation_skill", None) or ResearchEvaluator()
+        self.review_writing_tool = (
+            getattr(research_service, "review_writing_tool", None)
+            or ReviewWritingTool()
+        )
+        self.evaluation_tool = (
+            getattr(research_service, "evaluation_tool", None)
+            or ResearchEvaluationTool()
+        )
         self.external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
         _llm = None
         if graph_runtime is not None:
@@ -218,7 +227,7 @@ class ResearchFunctionService:
     async def extract_paper_structure(self, *, paper_id: str):
         paper = self._locate_paper(paper_id)
         if paper is None:
-            knowledge_card = self.paper_reading_skill.extract(
+            knowledge_card = self.paper_reading_tool.extract(
                 paper=PaperCandidate(paper_id=paper_id, title=paper_id, source="arxiv"),
             )
             return ExtractPaperStructureFunctionOutput(
@@ -230,7 +239,7 @@ class ResearchFunctionService:
                 figures=knowledge_card.figures,
                 knowledge_card=knowledge_card,
             )
-        knowledge_card = self.paper_reading_skill.extract(paper=paper)
+        knowledge_card = self.paper_reading_tool.extract(paper=paper)
         record = PaperKnowledgeRecord(
             paper_id=paper.paper_id,
             document_id=str(paper.metadata.get("document_id") or "") or None,
@@ -264,7 +273,7 @@ class ResearchFunctionService:
             paper_ids=paper_ids,
         )
         rows: list[ComparisonTableRow] = []
-        cards = {paper.paper_id: self.paper_reading_skill.extract(paper=paper) for paper in papers}
+        cards = {paper.paper_id: self.paper_reading_tool.extract(paper=paper) for paper in papers}
         if not dimensions:
             dimensions = ["contribution", "method", "experiment", "limitation"]
         for dimension in dimensions:
@@ -291,7 +300,7 @@ class ResearchFunctionService:
         # Use async LLM-powered generation if available
         llm_adapter = self._get_llm_adapter()
         if llm_adapter is not None:
-            report = await self.review_writing_skill.generate_async(
+            report = await self.review_writing_tool.generate_async(
                 topic=self._topic_for_papers(papers),
                 task_id=None,
                 papers=papers,
@@ -301,7 +310,7 @@ class ResearchFunctionService:
                 include_citations=include_citations,
             )
         else:
-            report = self.review_writing_skill.generate(
+            report = self.review_writing_tool.generate(
                 topic=self._topic_for_papers(papers),
                 task_id=None,
                 papers=papers,
@@ -342,7 +351,7 @@ class ResearchFunctionService:
             except Exception:  # noqa: BLE001
                 pass  # Fall through to heuristic
         # Heuristic fallback
-        cards = [self.paper_reading_skill.extract(paper=paper) for paper in papers]
+        cards = [self.paper_reading_tool.extract(paper=paper) for paper in papers]
         lines = ["## 直接回答", f"问题：{question}"]
         citations: list[AnswerCitation] = []
         related_sections: list[RelatedSection] = []
@@ -607,7 +616,7 @@ class ResearchFunctionService:
         task_instruction: str,
         expected_schema: dict[str, Any],
     ) -> TaskEvaluation:
-        return self.evaluation_skill.evaluate_result(
+        return self.evaluation_tool.evaluate_result(
             task_type=str(result.get("task_type") or "research"),
             result_status=str(result.get("status") or "succeeded"),
             payload=dict(result),

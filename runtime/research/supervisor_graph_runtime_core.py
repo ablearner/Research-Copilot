@@ -37,7 +37,7 @@ from domain.schemas.unified_runtime import (
     UnifiedAgentTask,
 )
 from domain.research_workspace import build_workspace_from_task, build_workspace_state
-from tools.research import PaperAnalyzer, PaperReader, ResearchIntentResolver, PaperCurator
+from tools.research import PaperAnalysisTool, PaperReadingTool, IntentResolutionTool, PaperCurationTool
 from tools.research.user_intent import ResearchUserIntentResult
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
@@ -49,7 +49,7 @@ from runtime.research.context_builder import ResearchAgentContextBuilder
 from runtime.research.response_formatter import ResearchResponseFormatter
 from runtime.research.result_aggregator import ResearchAgentResultAggregator
 from tools.research.capability_registry import ResearchCapabilityRegistry
-from tools.research.skill_resolver import ResearchSkillResolver
+from tools.research.skill_resolver import ResearchSkillResolver, ResearchSkillSelection
 
 from runtime.research.agent_protocol import (
     ResearchAgentGraphState,
@@ -82,14 +82,17 @@ class ResearchRuntimeBase:
         max_steps: int = 8,
     ) -> None:
         self.research_service = research_service
-        paper_reading_skill = getattr(research_service, "paper_reading_skill", None) or PaperReader()
+        paper_reading_tool = (
+            getattr(research_service, "paper_reading_tool", None)
+            or PaperReadingTool()
+        )
         llm_adapter = getattr(getattr(research_service, "paper_search_service", None), "llm_adapter", None)
         if llm_adapter is None:
-            llm_adapter = getattr(paper_reading_skill, "llm_adapter", None)
+            llm_adapter = getattr(paper_reading_tool, "llm_adapter", None)
         self.manager_agent = manager_agent or ResearchSupervisorAgent(llm_adapter=llm_adapter)
         if getattr(self.manager_agent, "llm_adapter", None) is None:
             self.manager_agent.llm_adapter = llm_adapter
-        self.user_intent_resolver = ResearchIntentResolver(llm_adapter=llm_adapter)
+        self.user_intent_resolver = IntentResolutionTool(llm_adapter=llm_adapter)
         self.max_steps = max_steps
         self.literature_scout_agent = LiteratureScoutAgent(
             research_service.paper_search_service,
@@ -105,8 +108,8 @@ class ResearchRuntimeBase:
             llm_adapter=llm_adapter,
         )
         self.paper_analysis_agent = PaperAnalysisAgent(
-            paper_analysis_skill=PaperAnalyzer(
-                paper_reading_skill=paper_reading_skill,
+            paper_analysis_tool=PaperAnalysisTool(
+                paper_reading_tool=paper_reading_tool,
                 llm_adapter=llm_adapter,
             )
         )
@@ -120,8 +123,8 @@ class ResearchRuntimeBase:
             llm_adapter=llm_adapter,
         )
         self.literature_scout_agent.research_writer_agent = self.research_writer_agent
-        self.paper_curation_skill = PaperCurator(research_service.paper_search_service)
-        self.literature_scout_agent.curation_skill = self.paper_curation_skill
+        self.paper_curation_tool = PaperCurationTool(research_service.paper_search_service)
+        self.literature_scout_agent.curation_tool = self.paper_curation_tool
         self._context_compressor = ContextCompressor(
             llm_adapter=llm_adapter,
             target_budget_ratio=0.75,
@@ -548,21 +551,66 @@ class ResearchRuntimeBase:
         context: ResearchAgentToolContext,
     ) -> ResearchSupervisorDecision:
         selection = context.skill_selection
-        if selection is None or not selection.active_skill_names:
+        if selection is None:
             return decision
-        active_skill_names = list(selection.active_skill_names)
+        active_message = self._active_message(decision)
+        raw_selected = decision.metadata.get("selected_skill_names") or []
+        selected_skill_names = [
+            str(name).strip()
+            for name in raw_selected
+            if str(name).strip()
+        ]
+        if not selected_skill_names and active_message is not None:
+            raw_selected = active_message.metadata.get("selected_skill_names") or []
+            selected_skill_names = [
+                str(name).strip()
+                for name in raw_selected
+                if str(name).strip()
+            ]
+        if not selected_skill_names:
+            selected_skill_names = self._fallback_skill_names_for_decision(
+                action_name=decision.action_name,
+                selection=selection,
+            )
+        if not selected_skill_names:
+            return decision
+        decision.metadata.setdefault("selected_skill_names", list(selected_skill_names))
+        candidate_names = [candidate.name for candidate in selection.candidate_skills]
+        loaded_selection = self.skill_resolver.load_selected_skills(
+            selected_skill_names=selected_skill_names,
+            candidate_skill_names=candidate_names,
+            available_tool_names=(
+                self._available_tool_names_for_agent(
+                    context,
+                    agent_name=active_message.agent_to,
+                )
+                if active_message is not None
+                else []
+            ),
+        )
+        if not loaded_selection.active_skill_names:
+            return decision
+
+        selection.active_skill_names = list(loaded_selection.active_skill_names)
+        selection.skill_context = loaded_selection.skill_context
+        selection.required_tools = list(loaded_selection.required_tools)
+        selection.missing_tools = dict(loaded_selection.missing_tools)
+        selection.validation_warnings.extend(loaded_selection.validation_warnings)
+        context.skill_context = loaded_selection.skill_context
+
+        active_skill_names = list(loaded_selection.active_skill_names)
         skill_payload = {
+            "selected_skill_names": list(selected_skill_names),
             "active_skill_names": active_skill_names,
-            "skill_context": context.skill_context,
+            "skill_context": loaded_selection.skill_context,
         }
         decision.metadata.setdefault("active_skill_names", active_skill_names)
-        decision.metadata.setdefault("skill_context", context.skill_context)
+        decision.metadata.setdefault("skill_context", loaded_selection.skill_context)
         if active_skill_names:
             decision.metadata.setdefault(
                 "skill_name",
                 (context.request.skill_name or "").strip() or active_skill_names[0],
             )
-        active_message = self._active_message(decision)
         if active_message is None:
             return decision
         preferred_skill_name = (context.request.skill_name or "").strip() or active_skill_names[0]
@@ -588,6 +636,37 @@ class ResearchRuntimeBase:
                 for message in state_update.get("agent_messages", [])
             ]
         return decision
+
+    def _fallback_skill_names_for_decision(
+        self,
+        *,
+        action_name: str,
+        selection: ResearchSkillSelection,
+    ) -> list[str]:
+        action_skill_names: dict[str, set[str]] = {
+            "analyze_papers": {"paper-comparison", "paper-recommendation", "paper-reading"},
+            "answer_question": {"research-qa", "paper-comparison", "paper-reading"},
+            "search_literature": {"paper-discovery", "literature-survey"},
+            "write_review": {"literature-survey"},
+            "evaluate_result": {"research-evaluation"},
+            "import_papers": {"knowledge-management"},
+            "sync_to_zotero": {"knowledge-management"},
+            "analyze_paper_figures": {"chart-analysis"},
+            "understand_chart": {"chart-analysis"},
+            "ask_document": {"paper-reading", "research-qa"},
+        }
+        allowed_names = action_skill_names.get(action_name, set())
+        if not allowed_names:
+            return []
+        selected: list[str] = []
+        for candidate in selection.candidate_skills:
+            if candidate.name not in allowed_names or candidate.name in selected:
+                continue
+            if candidate.score >= 0.95 or (
+                candidate.score >= 0.8 and candidate.match_reason.startswith("trigger:")
+            ):
+                selected.append(candidate.name)
+        return selected[:2]
 
     def _route_decision(self, decision: ResearchSupervisorDecision) -> str:
         return "finalize" if decision.action_name in {"finalize", "clarify_request"} else decision.action_name
@@ -1569,6 +1648,11 @@ class ResearchRuntimeBase:
             candidate_papers=self._candidate_paper_scope_for_manager(papers),
             user_intent=user_intent.model_dump(mode="json"),
             skill_context=context.skill_context,
+            skill_candidates=(
+                context.skill_selection.metadata().get("candidate_skills", [])
+                if context.skill_selection is not None
+                else []
+            ),
             execution_plan=list(execution_plan or []),
         )
 
@@ -1885,13 +1969,13 @@ class ResearchRuntimeBase:
                 "PreferenceMemoryAgent",
             ],
             "primary_runtime_workers": [],
-            "primary_skills": [
-                "PaperCurator",
-                "TopicPlanner",
-                "ResearchQueryRewriter",
-                "PaperRanker",
-                "SurveyWriter",
-                "PaperAnalyzer",
+            "primary_tools": [
+                "PaperCurationTool",
+                "TopicPlanningTool",
+                "QueryRewriteTool",
+                "PaperRankingTool",
+                "SurveyWritingTool",
+                "PaperAnalysisTool",
             ],
         }
 
@@ -2206,13 +2290,13 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
                 "PreferenceMemoryAgent",
             ],
             "primary_runtime_workers": [],
-            "primary_skills": [
-                "PaperCurator",
-                "TopicPlanner",
-                "ResearchQueryRewriter",
-                "PaperRanker",
-                "SurveyWriter",
-                "PaperAnalyzer",
+            "primary_tools": [
+                "PaperCurationTool",
+                "TopicPlanningTool",
+                "QueryRewriteTool",
+                "PaperRankingTool",
+                "SurveyWritingTool",
+                "PaperAnalysisTool",
             ],
             "supervisor_graph": {
                 "entry_node": "bootstrap_context_node",

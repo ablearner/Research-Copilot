@@ -48,6 +48,73 @@ class JsonPaperKnowledgeStore:
         return record
 
 
+class InMemoryPaperKnowledgeStore:
+    def __init__(self) -> None:
+        self._records: dict[str, PaperKnowledgeRecord] = {}
+
+    def get(self, paper_id: str) -> PaperKnowledgeRecord | None:
+        return self._records.get(paper_id)
+
+    def put(self, record: PaperKnowledgeRecord) -> PaperKnowledgeRecord:
+        self._records[record.paper_id] = record
+        return record
+
+
+class SQLitePaperKnowledgeStore:
+    """SQLite store for per-paper knowledge cards."""
+
+    def __init__(self, db_path: str | Path) -> None:
+        import sqlite3
+
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS research_paper_knowledge (
+                paper_id TEXT PRIMARY KEY,
+                document_id TEXT,
+                title TEXT,
+                payload_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_research_paper_knowledge_document_id
+            ON research_paper_knowledge(document_id);
+            """
+        )
+
+    def get(self, paper_id: str) -> PaperKnowledgeRecord | None:
+        row = self._conn.execute(
+            "SELECT payload_json FROM research_paper_knowledge WHERE paper_id = ?",
+            (paper_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PaperKnowledgeRecord.model_validate_json(row[0])
+
+    def put(self, record: PaperKnowledgeRecord) -> PaperKnowledgeRecord:
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO research_paper_knowledge "
+                "(paper_id, document_id, title, payload_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    record.paper_id,
+                    record.document_id,
+                    record.title,
+                    record.model_dump_json(),
+                    record.updated_at.isoformat(),
+                ),
+            )
+        return record
+
+
 class PaperKnowledgeMemory:
     def __init__(self, store: PaperKnowledgeStore) -> None:
         self.store = store

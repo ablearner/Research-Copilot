@@ -44,10 +44,7 @@ class HybridRetriever:
         self.vector_retriever = vector_retriever
         fallback_sparse_retriever = sparse_retriever
         if fallback_sparse_retriever is None:
-            vector_store = getattr(vector_retriever, "vector_store", None)
-            fallback_sparse_retriever = (
-                SparseRetriever(vector_store) if vector_store is not None else _NoopSparseRetriever()
-            )
+            fallback_sparse_retriever = _NoopSparseRetriever()
         self.sparse_retriever = fallback_sparse_retriever
         self.graph_summary_retriever = graph_summary_retriever
         if reranker is None:

@@ -83,7 +83,7 @@ def _effective_min_length(llm_adapter: Any | None, requested_min_length: int) ->
     return requested_min_length
 
 
-class SurveyWriter:
+class SurveyWritingTool:
     """Produce literature survey reports using LLM with deterministic fallback.
     
     When llm_adapter is provided, uses LLM for intelligent report generation.
@@ -237,7 +237,7 @@ class SurveyWriter:
             highlights=highlights,
             clusters=self._build_clusters(papers_with_summary),
             gaps=gaps,
-            metadata={"writer": "SurveyWriter+LLM"},
+            metadata={"writer": "SurveyWritingTool+LLM"},
         )
 
     def _build_clusters(self, papers: list[PaperCandidate]) -> list[ResearchCluster]:
@@ -650,7 +650,3 @@ class SurveyWriter:
                 f"来源于 {paper.source}，其摘要可提炼为“{paper.summary or _short_summary(paper.abstract)}” {citation}".rstrip()
             )
         return "\n".join(lines)
-
-
-# Compatibility alias for the previous agent-like name.
-SurveyWriterAgent = SurveyWriter

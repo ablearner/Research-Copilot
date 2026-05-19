@@ -10,7 +10,6 @@ from adapters.embedding.base import BaseEmbeddingAdapter
 from adapters.vector_store.base import BaseVectorStore, VectorStoreError
 from domain.schemas.embedding import EmbeddingVector, MultimodalEmbeddingRecord
 from domain.schemas.retrieval import RetrievalHit
-from retrieval.lexical import bm25_score_texts
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,8 @@ class MilvusVectorStore(BaseVectorStore):
         "uri",
         "metadata_json",
     ]
+    _SPARSE_FIELD = "sparse"
+    _BM25_FUNCTION = "content_bm25"
 
     def __init__(
         self,
@@ -122,6 +123,8 @@ class MilvusVectorStore(BaseVectorStore):
             flush = getattr(self.client, "flush", None)
             if callable(flush):
                 await self._call_sync(flush, collection_name=self.collection_name)
+        except VectorStoreError:
+            raise
         except Exception as exc:
             logger.exception("Failed to upsert Milvus records", extra={"record_count": len(records)})
             raise VectorStoreError("Failed to upsert Milvus records") from exc
@@ -149,6 +152,8 @@ class MilvusVectorStore(BaseVectorStore):
                 search_params=self._search_params(safe_top_k),
             )
             return self._search_results_to_hits(result)
+        except VectorStoreError:
+            raise
         except Exception as exc:
             logger.exception("Failed to search Milvus records")
             raise VectorStoreError("Failed to search Milvus records") from exc
@@ -170,26 +175,27 @@ class MilvusVectorStore(BaseVectorStore):
             if not collection_exists:
                 return []
             filter_expr = self._build_filter_expression(filters or {})
-            candidate_limit = max(100, min(max(top_k, 1) * 20, 1000))
-            rows = await self._call_sync(
-                self.client.query,
+            safe_top_k = max(1, min(top_k, 100))
+            result = await self._call_sync(
+                self.client.search,
                 collection_name=self.collection_name,
+                data=[text],
+                anns_field=self._SPARSE_FIELD,
+                limit=safe_top_k,
                 filter=filter_expr,
                 output_fields=self._OUTPUT_FIELDS,
-                limit=candidate_limit,
+                search_params=self._sparse_search_params(),
             )
-            hits = self._query_results_to_hits(rows)
-            contents = [hit.content or "" for hit in hits]
-            scores = bm25_score_texts(query=text, texts=contents)
-            rescored: list[RetrievalHit] = []
-            for hit, score in zip(hits, scores, strict=True):
-                if score <= 0:
-                    continue
-                rescored.append(hit.model_copy(update={"sparse_score": score}))
-            return sorted(rescored, key=lambda item: item.sparse_score or 0.0, reverse=True)[:top_k]
+            hits = self._search_results_to_hits(result)
+            return [
+                hit.model_copy(update={"sparse_score": hit.vector_score, "vector_score": None})
+                for hit in hits
+            ]
+        except VectorStoreError:
+            raise
         except Exception as exc:
-            logger.exception("Failed to search Milvus records with sparse retrieval")
-            raise VectorStoreError("Failed to search Milvus records with sparse retrieval") from exc
+            logger.exception("Failed to search Milvus BM25 sparse index")
+            raise VectorStoreError("Failed to search Milvus BM25 sparse index") from exc
 
     async def delete_by_doc_id(self, doc_id: str) -> None:
         try:
@@ -201,6 +207,8 @@ class MilvusVectorStore(BaseVectorStore):
                 collection_name=self.collection_name,
                 filter=f'document_id == "{self._escape_string(doc_id)}"',
             )
+        except VectorStoreError:
+            raise
         except Exception as exc:
             logger.exception("Failed to delete Milvus records", extra={"document_id": doc_id})
             raise VectorStoreError("Failed to delete Milvus records") from exc
@@ -243,6 +251,7 @@ class MilvusVectorStore(BaseVectorStore):
                     "Update MILVUS_DIMENSION to match the embedding model and reset the collection "
                     "with `python scripts/reset_milvus_collection.py`."
                 )
+        await self._ensure_sparse_bm25_schema()
         if not self._collection_loaded:
             await self._load_collection_quietly()
         return True
@@ -312,13 +321,45 @@ class MilvusVectorStore(BaseVectorStore):
                 return None
         return None
 
+    async def _ensure_sparse_bm25_schema(self) -> None:
+        try:
+            description = await self._call_sync(
+                self.client.describe_collection,
+                collection_name=self.collection_name,
+            )
+        except Exception:
+            logger.info("Milvus sparse BM25 schema check skipped", exc_info=True)
+            return
+
+        fields = description.get("fields", []) if isinstance(description, dict) else []
+        field_names = {field.get("name") for field in fields if isinstance(field, dict)}
+        content_field = next(
+            (field for field in fields if isinstance(field, dict) and field.get("name") == "content"),
+            {},
+        )
+        content_params = content_field.get("params") or {}
+        functions = description.get("functions", []) if isinstance(description, dict) else []
+        function_names = {function.get("name") for function in functions if isinstance(function, dict)}
+        if (
+            self._SPARSE_FIELD in field_names
+            and str(content_params.get("enable_analyzer")).lower() == "true"
+            and self._BM25_FUNCTION in function_names
+        ):
+            return
+        raise VectorStoreError(
+            "Milvus collection is missing native BM25 sparse schema. "
+            "Reset the collection with `python scripts/reset_milvus_collection.py` "
+            "and re-index documents so Milvus can create the sparse field and BM25 function."
+        )
+
     def _build_schema(self, dimension: int) -> Any:
-        from pymilvus import DataType, MilvusClient
+        from pymilvus import DataType, Function, FunctionType, MilvusClient
 
         schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=512)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dimension)
-        schema.add_field("content", DataType.VARCHAR, max_length=65535)
+        schema.add_field("content", DataType.VARCHAR, max_length=65535, enable_analyzer=True)
+        schema.add_field(self._SPARSE_FIELD, DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field("document_id", DataType.VARCHAR, max_length=512)
         schema.add_field("source_type", DataType.VARCHAR, max_length=64)
         schema.add_field("source_id", DataType.VARCHAR, max_length=512)
@@ -328,6 +369,14 @@ class MilvusVectorStore(BaseVectorStore):
         schema.add_field("embedding_dimensions", DataType.INT64)
         schema.add_field("uri", DataType.VARCHAR, max_length=2048)
         schema.add_field("metadata_json", DataType.VARCHAR, max_length=65535)
+        schema.add_function(
+            Function(
+                name=self._BM25_FUNCTION,
+                function_type=FunctionType.BM25,
+                input_field_names=["content"],
+                output_field_names=[self._SPARSE_FIELD],
+            )
+        )
         return schema
 
     def _build_index_params(self) -> Any:
@@ -341,6 +390,16 @@ class MilvusVectorStore(BaseVectorStore):
             metric_type=self.metric_type,
             params=params,
         )
+        index_params.add_index(
+            field_name=self._SPARSE_FIELD,
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+            params={
+                "inverted_index_algo": "DAAT_MAXSCORE",
+                "bm25_k1": 1.2,
+                "bm25_b": 0.75,
+            },
+        )
         return index_params
 
     def _search_params(self, top_k: int) -> dict[str, Any]:
@@ -348,6 +407,9 @@ class MilvusVectorStore(BaseVectorStore):
         if self.index_type == "HNSW":
             params["ef"] = max(64, top_k)
         return {"metric_type": self.metric_type, "params": params}
+
+    def _sparse_search_params(self) -> dict[str, Any]:
+        return {"metric_type": "BM25", "params": {}}
 
     def _record_to_entity(self, record: MultimodalEmbeddingRecord) -> dict[str, Any]:
         metadata = {

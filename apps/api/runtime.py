@@ -15,6 +15,7 @@ from adapters.llm.dashscope_adapter import DashScopeLLMAdapter
 from adapters.vector_store.milvus_adapter import MilvusVectorStore
 from core.config import Settings
 from core.prompt_resolver import PromptResolver
+from memory.factory import resolve_memory_db_path
 from rag_runtime.checkpoint import build_checkpointer
 from rag_runtime.memory import GraphSessionMemory, SQLiteSessionMemoryStore
 from rag_runtime.runtime import GraphRuntime, RagRuntime
@@ -112,7 +113,10 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
             reasoning_strategies=reasoning_strategies,
         ),
         graph_index_service=GraphIndexService(graph_store),
-        embedding_index_service=EmbeddingIndexService(embedding_adapter, vector_store),
+        embedding_index_service=EmbeddingIndexService(
+            embedding_adapter,
+            vector_store,
+        ),
         checkpointer=build_checkpointer(),
         session_memory=session_memory,
         llm_adapter=llm_adapter,
@@ -285,11 +289,11 @@ def _build_session_memory(settings: Settings) -> GraphSessionMemory:
         return GraphSessionMemory()
     if provider == "sqlite":
         return GraphSessionMemory(
-            SQLiteSessionMemoryStore(db_path=settings.research_sqlite_db_path)
+            SQLiteSessionMemoryStore(db_path=resolve_memory_db_path(settings))
         )
     if provider == "auto":
         return GraphSessionMemory(
-            SQLiteSessionMemoryStore(db_path=settings.research_sqlite_db_path)
+            SQLiteSessionMemoryStore(db_path=resolve_memory_db_path(settings))
         )
     raise RuntimeError(f"Unsupported SESSION_MEMORY_PROVIDER: {settings.session_memory_provider}")
 

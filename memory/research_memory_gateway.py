@@ -14,12 +14,12 @@ class ResearchMemoryGateway:
         *,
         memory_manager: Any,
         research_context_manager: Any,
-        paper_reading_skill: Any,
+        paper_reading_tool: Any | None = None,
         compact_text: Callable[[str | None], str],
     ) -> None:
         self.memory_manager = memory_manager
         self.research_context_manager = research_context_manager
-        self.paper_reading_skill = paper_reading_skill
+        self.paper_reading_tool = paper_reading_tool
         self.compact_text = compact_text
 
     def load_user_profile(self, *, user_id: str = "local-user"):
@@ -201,7 +201,7 @@ class ResearchMemoryGateway:
             paper_summaries=self.research_context_manager.compress_papers(
                 papers=papers,
                 selected_paper_ids=selected_paper_ids,
-                paper_reading_skill=self.paper_reading_skill,
+                paper_reading_tool=self.paper_reading_tool,
             ),
             metadata=cleaned_metadata,
         )

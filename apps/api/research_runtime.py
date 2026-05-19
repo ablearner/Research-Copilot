@@ -3,12 +3,12 @@ import logging
 from core.config import Settings
 from rag_runtime.runtime import RagRuntime
 from tools.research import (
-    CodeLinker,
-    PaperReader,
-    ResearchEvaluator,
-    ReviewWriter,
-    SurveyWriter,
-    WritingPolisher,
+    CodeLinkingTool,
+    PaperReadingTool,
+    ResearchEvaluationTool,
+    ReviewWritingTool,
+    SurveyWritingTool,
+    WritingPolishTool,
 )
 from tools.research.research_functions import ResearchFunctionService
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
@@ -28,6 +28,7 @@ from tools.research import (
 )
 
 from tools.research.zotero_search_tool import ZoteroSearchTool
+from memory.factory import build_memory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +66,13 @@ def build_literature_research_service(
     academic_search_dependencies = build_academic_search_mcp_dependencies(settings)
     external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
     llm_adapter = getattr(graph_runtime, "llm_adapter", None) if graph_runtime is not None else None
-    writing_polish_skill = WritingPolisher(llm_adapter=llm_adapter)
-    review_writing_skill = ReviewWriter(
-        survey_writer=SurveyWriter(llm_adapter=llm_adapter),
-        polish_skill=writing_polish_skill,
+    writing_polish_tool = WritingPolishTool(llm_adapter=llm_adapter)
+    review_writing_tool = ReviewWritingTool(
+        survey_writer=SurveyWritingTool(llm_adapter=llm_adapter),
+        polish_tool=writing_polish_tool,
     )
-    paper_reading_skill = PaperReader(llm_adapter=llm_adapter)
-    evaluation_skill = ResearchEvaluator()
+    paper_reading_tool = PaperReadingTool(llm_adapter=llm_adapter)
+    evaluation_tool = ResearchEvaluationTool()
     paper_search_service = PaperSearchService(
         arxiv_tool=academic_search_dependencies.arxiv_tool,
         openalex_tool=academic_search_dependencies.openalex_tool,
@@ -79,8 +80,8 @@ def build_literature_research_service(
         ieee_tool=academic_search_dependencies.ieee_tool,
         zotero_tool=ZoteroSearchTool(graph_runtime=graph_runtime),
         external_tool_gateway=external_tool_gateway,
-        survey_writer=review_writing_skill,
-        code_linking_skill=CodeLinker(enable_remote_lookup=False),
+        survey_writer=review_writing_tool,
+        code_linking_tool=CodeLinkingTool(enable_remote_lookup=False),
         llm_adapter=llm_adapter,
     )
     if getattr(settings, "storage_provider", "json") == "sqlite":
@@ -101,10 +102,11 @@ def build_literature_research_service(
         report_service=report_service,
         paper_import_service=paper_import_service,
         research_runtime=None,
-        paper_reading_skill=paper_reading_skill,
-        evaluation_skill=evaluation_skill,
-        review_writing_skill=review_writing_skill,
-        writing_polish_skill=writing_polish_skill,
+        paper_reading_tool=paper_reading_tool,
+        evaluation_tool=evaluation_tool,
+        review_writing_tool=review_writing_tool,
+        writing_polish_tool=writing_polish_tool,
+        memory_manager=build_memory_manager(settings),
         import_concurrency=settings.research_import_concurrency,
         import_index_timeout_seconds=settings.research_import_index_timeout_seconds,
     )

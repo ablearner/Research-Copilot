@@ -6,12 +6,12 @@ that the _route_mode_hint_for_request uses intent results when confident.
 
 import pytest
 
-from tools.research.user_intent import ResearchIntentResolver
+from tools.research.user_intent import IntentResolutionTool
 
 
 @pytest.fixture
 def resolver():
-    return ResearchIntentResolver(llm_adapter=None)
+    return IntentResolutionTool(llm_adapter=None)
 
 
 class TestIntentRoutingHeuristic:

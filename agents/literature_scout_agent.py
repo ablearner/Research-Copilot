@@ -139,12 +139,12 @@ class LiteratureScoutAgent:
         *,
         llm_adapter: Any | None = None,
         research_writer_agent: Any | None = None,
-        curation_skill: Any | None = None,
+        curation_tool: Any | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
         self.research_writer_agent = research_writer_agent
-        self.curation_skill = curation_skill
+        self.curation_tool = curation_tool
 
     # ------------------------------------------------------------------
     # SpecialistAgent protocol — owns the full discovery pipeline
@@ -188,9 +188,9 @@ class LiteratureScoutAgent:
             self.research_writer_agent
             or getattr(context.research_service, "research_writer_agent", None)
         )
-        curation_skill = (
-            self.curation_skill
-            or getattr(context.research_service, "paper_curation_skill", None)
+        curation_tool = (
+            self.curation_tool
+            or getattr(context.research_service, "paper_curation_tool", None)
         )
         exec_ctx = context.research_service.build_execution_context(
             graph_runtime=context.graph_runtime,
@@ -240,7 +240,7 @@ class LiteratureScoutAgent:
         state.warnings = list(search_warnings)
 
         _update_runtime_progress(context, stage="search_literature", node="search_literature:curation", status="running", summary="Curating candidate papers.")
-        curated_papers, must_read_ids, ingest_candidate_ids = curation_skill.curate(
+        curated_papers, must_read_ids, ingest_candidate_ids = curation_tool.curate(
             topic=search_request.topic,
             raw_papers=raw_papers,
             max_papers=search_request.max_papers,
@@ -279,14 +279,14 @@ class LiteratureScoutAgent:
                 "metadata": {
                     **report.metadata,
                     "autonomy_mode": "lead_agent_loop",
-                    "agent_architecture": "main_agents_plus_skills",
+                    "agent_architecture": "main_agents_plus_tools",
                     "decision_model": "supervisor_direct_execution",
                     "primary_agents": [
                         "ResearchSupervisorAgent",
                         "LiteratureScoutAgent",
                         "ResearchWriterAgent",
                     ],
-                    "primary_skills": ["PaperCurator"],
+                    "primary_tools": ["PaperCurationTool"],
                     "supervisor_agent_architecture": "supervisor_direct_execution",
                     "supervisor_decision_model": "supervisor_direct_execution",
                     "autonomy_rounds": 1,
@@ -599,7 +599,7 @@ class LiteratureScoutAgent:
             **base_plan.metadata,
             "planner": self.name,
             "manager_agent": "ResearchSupervisorAgent",
-            "agent_architecture": "main_agents_plus_skills",
+            "agent_architecture": "main_agents_plus_tools",
         }
         if self._should_use_plan_and_execute(state) and self.llm_adapter is not None:
             reasoning_plan = await self._plan_queries(

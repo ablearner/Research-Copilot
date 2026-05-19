@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     dashscope_max_retries: int = 2
     dashscope_retry_delay_seconds: float = 2.0
     cors_allow_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3001,http://localhost:3001"
-    rate_limit_max_requests: int = 60
+    rate_limit_max_requests: int = 0
     rate_limit_window_seconds: int = 60
     json_log_format: bool = False
-    storage_provider: str = "json"
+    storage_provider: str = "sqlite"
     research_storage_root: str = ".data/research"
     research_sqlite_db_path: str = ".data/research/kepler.db"
     research_reset_on_startup: bool = False
@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     research_paper_knowledge_dir: str = ".data/research/paper_knowledge"
     long_term_memory_provider: str = "sqlite"
     long_term_memory_max_records: int = 5000
+    paper_knowledge_provider: str = "sqlite"
+    memory_quality_gate_enabled: bool = True
+    memory_min_quality_score: float = 0.35
     local_code_execution_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("LOCAL_CODE_EXECUTION_ENABLED", "MCP_CODE_EXECUTION_ENABLED"),

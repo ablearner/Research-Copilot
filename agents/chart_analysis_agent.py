@@ -13,8 +13,8 @@ from domain.schemas.research import (
     ResearchPaperFigureListResponse,
     ResearchPaperFigurePreview,
 )
-from tools.research.paper_chart_analysis import PaperChartAnalyzer
-from tools.research.visual_anchor import VisualAnchor
+from tools.research.paper_chart_analysis import PaperChartAnalysisTool
+from tools.research.visual_anchor import VisualAnchorTool
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget, PaperFigureTools
 
@@ -44,8 +44,8 @@ class ChartAnalysisAgent:
         storage_root: str | Path | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.visual_anchor_skill = VisualAnchor(llm_adapter=llm_adapter)
-        self.paper_chart_analysis_skill = PaperChartAnalyzer(llm_adapter=llm_adapter)
+        self.visual_anchor_tool = VisualAnchorTool(llm_adapter=llm_adapter)
+        self.paper_chart_analysis_tool = PaperChartAnalysisTool(llm_adapter=llm_adapter)
         self.paper_figure_tools = (
             PaperFigureTools(storage_root=storage_root) if storage_root is not None else None
         )
@@ -488,7 +488,7 @@ class ChartAnalysisAgent:
         load_cached_figure_payload,
         exclude_figure_ids: set[str] | None = None,
     ) -> dict[str, Any] | None:
-        return await self.visual_anchor_skill.infer_cached_visual_anchor(
+        return await self.visual_anchor_tool.infer_cached_visual_anchor(
             papers=papers,
             document_ids=document_ids,
             question=question,
@@ -503,7 +503,7 @@ class ChartAnalysisAgent:
         qa_metadata: dict[str, Any],
         load_cached_figure_payload,
     ) -> ResearchPaperFigurePreview | None:
-        return self.visual_anchor_skill.resolve_visual_anchor_figure(
+        return self.visual_anchor_tool.resolve_visual_anchor_figure(
             papers=papers,
             qa_metadata=qa_metadata,
             load_cached_figure_payload=load_cached_figure_payload,
@@ -659,7 +659,7 @@ class ChartAnalysisAgent:
             "bbox": analyze_target.bbox.model_dump(mode="json") if analyze_target.bbox else None,
             "selection_rationale": analyze_target.metadata.get("anchor_rationale"),
         }
-        answer, key_points = await self.paper_chart_analysis_skill.analyze_async(
+        answer, key_points = await self.paper_chart_analysis_tool.analyze_async(
             chart=chart_result.chart,
             question=request.question,
             figure_context=figure_context,

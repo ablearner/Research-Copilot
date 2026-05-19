@@ -56,7 +56,7 @@ class EmbeddingIndexService:
                 self._text_block_record(block=block, vector=vector)
                 for block, vector in zip(blocks, vectors, strict=True)
             ]
-            await self.vector_store.upsert_embeddings(records)
+            await self._upsert_records(records)
             logger.info(
                 "Indexed text block embeddings",
                 extra={"document_id": document_id, "record_count": len(records)},
@@ -168,7 +168,7 @@ class EmbeddingIndexService:
                 metadata={"source_type": source_type},
             )
         try:
-            await self.vector_store.upsert_embeddings(records)
+            await self._upsert_records(records)
             status: Literal["indexed", "partial"] = (
                 "indexed" if skipped_count == 0 and failed_count == 0 else "partial"
             )
@@ -195,6 +195,16 @@ class EmbeddingIndexService:
                 extra={"document_id": document_id, "source_type": source_type},
             )
             raise EmbeddingIndexServiceError("Failed to write embedding records") from exc
+
+    async def delete_by_doc_id(self, doc_id: str) -> None:
+        try:
+            await self.vector_store.delete_by_doc_id(doc_id)
+        except VectorStoreError as exc:
+            logger.exception("Failed to delete indexed records", extra={"document_id": doc_id})
+            raise EmbeddingIndexServiceError("Failed to delete indexed records") from exc
+
+    async def _upsert_records(self, records: list[MultimodalEmbeddingRecord]) -> None:
+        await self.vector_store.upsert_embeddings(records)
 
     def _text_block_record(
         self,

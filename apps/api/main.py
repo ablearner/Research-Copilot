@@ -77,6 +77,7 @@ def create_app() -> FastAPI:
         RateLimitMiddleware,
         max_requests=settings.rate_limit_max_requests,
         window_seconds=settings.rate_limit_window_seconds,
+        enabled=str(settings.app_env).strip().lower() != "local",
     )
     app.add_middleware(AuditMiddleware)
     if str(settings.app_env).strip().lower() == "local":

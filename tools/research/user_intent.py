@@ -185,10 +185,10 @@ _CHINESE_ORDINAL_MAP = {
 }
 
 
-class ResearchIntentResolver:
+class IntentResolutionTool:
     """Lightweight intent parsing helper used as context, not as a new orchestration node."""
 
-    name = "ResearchIntentResolver"
+    name = "IntentResolutionTool"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         pass

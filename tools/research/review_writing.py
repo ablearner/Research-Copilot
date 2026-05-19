@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 from domain.schemas.research import PaperCandidate, ResearchReport
-from tools.research.survey_writing import SurveyWriter
-from tools.research.writing_polish import WritingPolisher
+from tools.research.survey_writing import SurveyWritingTool
+from tools.research.writing_polish import WritingPolishTool
 
 
-class ReviewWriter:
+class ReviewWritingTool:
     """Wrapper around survey writing with an optional polishing stage.
     
     Supports both sync and async generation. When LLM adapters are configured
-    on the underlying skills, async methods will use LLM-powered generation.
+    on the underlying tools, async methods will use LLM-powered generation.
     """
 
     def __init__(
         self,
         *,
-        survey_writer: SurveyWriter | None = None,
-        polish_skill: WritingPolisher | None = None,
+        survey_writer: SurveyWritingTool | None = None,
+        polish_tool: WritingPolishTool | None = None,
     ) -> None:
-        self.survey_writer = survey_writer or SurveyWriter()
-        self.polish_skill = polish_skill or WritingPolisher()
+        self.survey_writer = survey_writer or SurveyWritingTool()
+        self.polish_tool = polish_tool or WritingPolishTool()
 
     def generate(
         self,
@@ -45,7 +45,7 @@ class ReviewWriter:
             include_citations=include_citations,
             language=language,
         )
-        polished_markdown = self.polish_skill.polish(
+        polished_markdown = self.polish_tool.polish(
             text=report.markdown,
             tone=style,
             target_journal=target_journal,
@@ -55,7 +55,7 @@ class ReviewWriter:
                 "markdown": polished_markdown,
                 "metadata": {
                     **report.metadata,
-                    "writer": "ReviewWriter",
+                    "writer": "ReviewWritingTool",
                     "target_journal": target_journal,
                 },
             }
@@ -87,7 +87,7 @@ class ReviewWriter:
             language=language,
             supervisor_instruction=supervisor_instruction,
         )
-        polished_markdown = await self.polish_skill.polish_async(
+        polished_markdown = await self.polish_tool.polish_async(
             text=report.markdown,
             tone=style,
             target_journal=target_journal,
@@ -97,7 +97,7 @@ class ReviewWriter:
                 "markdown": polished_markdown,
                 "metadata": {
                     **report.metadata,
-                    "writer": "ReviewWriter+LLM",
+                    "writer": "ReviewWritingTool+LLM",
                     "target_journal": target_journal,
                 },
             }

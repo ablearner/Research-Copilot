@@ -3,6 +3,8 @@ import asyncio
 import pytest
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
+from agents.research_supervisor_agent import ResearchSupervisorDecision
+from domain.schemas.agent_message import AgentMessage
 from domain.schemas.api import QAResponse
 from domain.schemas.chart import ChartSchema
 from domain.schemas.document import ParsedDocument
@@ -525,7 +527,7 @@ def test_research_supervisor_graph_hydration_prefers_latest_conversation_task(tm
 
 
 @pytest.mark.asyncio
-async def test_research_supervisor_context_builder_resolves_skill_context(tmp_path) -> None:
+async def test_research_supervisor_context_builder_resolves_skill_candidates(tmp_path) -> None:
     runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
 
     context = await runtime._build_tool_context(
@@ -536,11 +538,98 @@ async def test_research_supervisor_context_builder_resolves_skill_context(tmp_pa
         graph_runtime=GraphRuntimeStub(),
     )
 
-    assert context.skill_context is not None
-    assert "Paper Comparison Skill" in context.skill_context
+    assert context.skill_context is None
     assert context.skill_selection is not None
-    assert "paper-comparison" in context.skill_selection.active_skill_names
+    candidate_names = [candidate.name for candidate in context.skill_selection.candidate_skills]
+    assert "paper-comparison" in candidate_names
+    assert context.skill_selection.active_skill_names == []
     assert context.knowledge_access is not None
+
+
+@pytest.mark.asyncio
+async def test_research_supervisor_injects_only_selected_skill_context(tmp_path) -> None:
+    runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
+
+    context = await runtime._build_tool_context(
+        request=ResearchAgentRunRequest(
+            message="请对比这些论文的方法差异",
+            mode="qa",
+        ),
+        graph_runtime=GraphRuntimeStub(),
+    )
+    active_message = AgentMessage(
+        task_id="skill-task-1",
+        agent_from="ResearchSupervisorAgent",
+        agent_to="PaperAnalysisAgent",
+        task_type="analyze_papers",
+        instruction="Compare the selected papers.",
+        payload={},
+        metadata={"selected_skill_names": ["paper-comparison"]},
+    )
+    decision = ResearchSupervisorDecision(
+        action_name="analyze_papers",
+        thought="Compare papers.",
+        rationale="The user asked for a comparison.",
+        metadata={
+            "selected_skill_names": ["paper-comparison"],
+            "active_message": active_message,
+            "state_update": {
+                "pending_agent_messages": [active_message],
+                "agent_messages": [active_message],
+            },
+        },
+    )
+
+    enriched = runtime._inject_skill_metadata_into_decision(decision, context=context)
+
+    injected = enriched.metadata["active_message"]
+    assert isinstance(injected, AgentMessage)
+    assert injected.metadata["active_skill_names"] == ["paper-comparison"]
+    assert "Paper Comparison Skill" in injected.metadata["skill_context"]
+    assert context.skill_selection is not None
+    assert context.skill_selection.active_skill_names == ["paper-comparison"]
+
+
+@pytest.mark.asyncio
+async def test_research_supervisor_injects_action_skill_fallback_when_llm_omits_selection(tmp_path) -> None:
+    runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
+
+    context = await runtime._build_tool_context(
+        request=ResearchAgentRunRequest(
+            message="请基于已导入论文证据，对比这些论文的方法差异",
+            mode="qa",
+        ),
+        graph_runtime=GraphRuntimeStub(),
+    )
+    active_message = AgentMessage(
+        task_id="skill-task-2",
+        agent_from="ResearchSupervisorAgent",
+        agent_to="ResearchQAAgent",
+        task_type="answer_question",
+        instruction="Answer the comparison question.",
+        payload={},
+        metadata={},
+    )
+    decision = ResearchSupervisorDecision(
+        action_name="answer_question",
+        thought="Answer with evidence.",
+        rationale="The user asked a grounded comparison question.",
+        metadata={
+            "active_message": active_message,
+            "state_update": {
+                "pending_agent_messages": [active_message],
+                "agent_messages": [active_message],
+            },
+        },
+    )
+
+    enriched = runtime._inject_skill_metadata_into_decision(decision, context=context)
+
+    injected = enriched.metadata["active_message"]
+    assert isinstance(injected, AgentMessage)
+    assert injected.metadata["selected_skill_names"] == ["paper-comparison"]
+    assert injected.metadata["active_skill_names"] == ["paper-comparison"]
+    assert "Paper Comparison Skill" in injected.metadata["skill_context"]
 
 
 def build_advanced_service(tmp_path) -> LiteratureResearchService:
@@ -627,6 +716,7 @@ async def test_research_supervisor_graph_creates_task_and_imports_relevant_paper
             days_back=365,
             max_papers=3,
             sources=["arxiv", "openalex"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=GraphRuntimeStub(),
@@ -691,6 +781,7 @@ async def test_research_supervisor_graph_answers_existing_research_task(tmp_path
             days_back=365,
             max_papers=3,
             sources=["arxiv"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=GraphRuntimeStub(),
@@ -756,6 +847,7 @@ async def test_research_supervisor_graph_preserves_document_scope_for_main_chain
             days_back=365,
             max_papers=3,
             sources=["arxiv"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=graph_runtime,
@@ -801,6 +893,7 @@ async def test_research_supervisor_graph_preserves_visual_anchor_for_main_chain_
             days_back=365,
             max_papers=3,
             sources=["arxiv"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=graph_runtime,
@@ -860,6 +953,7 @@ async def test_research_supervisor_graph_import_mode_answers_original_question_a
             task_id=initial.task.task_id,
             sources=["arxiv"],
             selected_paper_ids=["arxiv:2601.00001"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=GraphRuntimeStub(),
@@ -914,6 +1008,7 @@ async def test_research_supervisor_graph_replans_after_import_failure(tmp_path) 
             days_back=365,
             max_papers=3,
             sources=["arxiv"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=GraphRuntimeStub(),
@@ -1311,6 +1406,7 @@ async def test_research_supervisor_graph_routes_paper_qa_directly_without_genera
             days_back=365,
             max_papers=3,
             sources=["arxiv"],
+            auto_import=True,
             import_top_k=1,
         ),
         graph_runtime=graph_runtime,

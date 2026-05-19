@@ -8,10 +8,10 @@ if TYPE_CHECKING:
     from tools.research.paper_search import PaperSearchService
 
 
-class PaperCurator:
+class PaperCurationTool:
     """Turn raw paper hits into a ranked, ingest-ready candidate set."""
 
-    name = "PaperCurator"
+    name = "PaperCurationTool"
 
     def __init__(self, paper_search_service: PaperSearchService) -> None:
         self.paper_search_service = paper_search_service
@@ -46,7 +46,7 @@ class PaperCurator:
                         "metadata": {
                             **paper.metadata,
                             "curation_rank": index,
-                            "curation_skill": self.name,
+                            "curation_tool": self.name,
                             "must_read": paper.paper_id in must_read_ids,
                             "selected_for_ingest": paper.paper_id in ingest_candidate_ids,
                         },
@@ -54,7 +54,3 @@ class PaperCurator:
                 )
             )
         return curated, must_read_ids, ingest_candidate_ids
-
-
-# Compatibility alias for older imports/tests that still use the previous name.
-PaperCuratorAgent = PaperCurator

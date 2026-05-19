@@ -1,6 +1,6 @@
 import pytest
 
-from tools.research import TopicPlanner
+from tools.research import TopicPlanningTool
 
 
 class _BilingualRewriteLLMStub:
@@ -28,7 +28,7 @@ class _BilingualRewriteLLMStub:
 
 
 def test_topic_planner_agent_simplifies_natural_language_research_request() -> None:
-    planner = TopicPlanner()
+    planner = TopicPlanningTool()
 
     plan = planner.plan(
         topic="最近 6 个月无人机路径规划方向有哪些值得关注的论文？",
@@ -43,7 +43,7 @@ def test_topic_planner_agent_simplifies_natural_language_research_request() -> N
 
 
 def test_topic_planner_agent_expands_chinese_llm_topic_to_english_queries() -> None:
-    planner = TopicPlanner()
+    planner = TopicPlanningTool()
 
     plan = planner.plan(
         topic="最近 6 个月大模型方向有哪些值得关注的论文？",
@@ -59,7 +59,7 @@ def test_topic_planner_agent_expands_chinese_llm_topic_to_english_queries() -> N
 
 
 def test_topic_planner_agent_uses_english_queries_for_english_literature_sources() -> None:
-    planner = TopicPlanner()
+    planner = TopicPlanningTool()
     plan = planner.plan(
         topic="最近 6 个月大模型方向有哪些值得关注的论文？",
         days_back=180,
@@ -78,7 +78,7 @@ def test_topic_planner_agent_uses_english_queries_for_english_literature_sources
 
 
 def test_topic_planner_zotero_prefers_short_phrases_before_split_long_queries() -> None:
-    planner = TopicPlanner()
+    planner = TopicPlanningTool()
 
     queries = planner.queries_for_source(
         source="zotero",
@@ -96,7 +96,7 @@ def test_topic_planner_zotero_prefers_short_phrases_before_split_long_queries() 
 
 @pytest.mark.asyncio
 async def test_topic_planner_keeps_english_zotero_terms_when_llm_returns_many_local_queries() -> None:
-    planner = TopicPlanner(llm_adapter=_BilingualRewriteLLMStub())
+    planner = TopicPlanningTool(llm_adapter=_BilingualRewriteLLMStub())
 
     plan = await planner.plan_async(
         topic="在zotero中调研知识图谱",

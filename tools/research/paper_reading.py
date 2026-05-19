@@ -93,7 +93,7 @@ def _split_sentences(text: str) -> list[str]:
     ]
 
 
-class PaperReader:
+class PaperReadingTool:
     """Extract structured paper knowledge cards using LLM with heuristic fallback.
     
     When llm_adapter is provided, uses LLM for intelligent extraction.
@@ -164,7 +164,7 @@ class PaperReader:
             figures=figures,
             summary=result.summary,
             metadata={
-                "reader": "PaperReader+LLM",
+                "reader": "PaperReadingTool+LLM",
                 "source": paper.source,
                 "year": paper.year,
                 "open_access": paper.is_open_access,
@@ -232,7 +232,7 @@ class PaperReader:
             figures=figures,
             summary=paper.summary or (sentences[0] if sentences else paper.title),
             metadata={
-                "reader": "PaperReader",
+                "reader": "PaperReadingTool",
                 "source": paper.source,
                 "year": paper.year,
                 "open_access": paper.is_open_access,

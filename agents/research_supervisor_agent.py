@@ -12,7 +12,7 @@ from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
 from domain.schemas.research_context import ResearchContextSlice
 from domain.schemas.sub_manager import TaskEvaluation
-from tools.research import ResearchEvaluator
+from tools.research import ResearchEvaluationTool
 
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,8 @@ class ResearchSupervisorState:
     importable_paper_count: int = 0
     selected_paper_count: int = 0
     active_paper_ids: list[str] = field(default_factory=list)
-    auto_import: bool = True
-    import_top_k: int = 3
+    auto_import: bool = False
+    import_top_k: int = 0
     import_attempted: bool = False
     answer_attempted: bool = False
     open_todo_count: int = 0
@@ -100,6 +100,7 @@ class ResearchSupervisorState:
     candidate_papers: list[dict[str, Any]] = field(default_factory=list)
     user_intent: dict[str, Any] = field(default_factory=dict)
     skill_context: str | None = None
+    skill_candidates: list[dict[str, Any]] = field(default_factory=list)
     execution_plan: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -132,6 +133,7 @@ class ResearchSupervisorLLMDecision(BaseModel):
     expected_output_schema: dict[str, Any] = Field(default_factory=dict)
     stop_reason: str | None = None
     plan: list[PlanStep] = Field(default_factory=list)
+    selected_skill_names: list[str] = Field(default_factory=list)
 
 
 class ResearchSupervisorAgent:
@@ -145,10 +147,10 @@ class ResearchSupervisorAgent:
     def __init__(
         self,
         *,
-        evaluation_skill: ResearchEvaluator | None = None,
+        evaluation_tool: ResearchEvaluationTool | None = None,
         llm_adapter: BaseLLMAdapter | None = None,
     ) -> None:
-        self.evaluation_skill = evaluation_skill or ResearchEvaluator()
+        self.evaluation_tool = evaluation_tool or ResearchEvaluationTool()
         self.llm_adapter = llm_adapter
 
     async def decide_next_action_async(
@@ -317,9 +319,8 @@ class ResearchSupervisorAgent:
                 "replan_count": replan_count,
                 "context_slice": self._serialize_context_slice(context_slice),
                 "guardrail_hints": guardrail_hints,
+                "skill_candidates": list(state.skill_candidates),
         }
-        if state.skill_context:
-            input_data["active_skill_instructions"] = state.skill_context
         try:
             llm_output = await self.llm_adapter.generate_structured(
                 prompt=self._llm_prompt(),
@@ -580,6 +581,11 @@ class ResearchSupervisorAgent:
             )
         metadata: dict[str, Any] = {
             "decision_source": "llm",
+            "selected_skill_names": self._select_skill_names_for_action(
+                llm_output.selected_skill_names,
+                state=state,
+                action_name=action_name,
+            ),
             "state_update": {
                 "pending_agent_messages": [],
                 "agent_messages": all_messages,
@@ -645,6 +651,11 @@ class ResearchSupervisorAgent:
         payload = self._normalize_payload_paper_scope(action_name=action_name, payload=payload, state=state)
         payload = self._normalize_supervisor_route_payload(action_name=action_name, payload=payload, state=state)
         instruction = llm_output.instruction.strip() or self._default_instruction_for_action(action_name, state, payload)
+        selected_skill_names = self._select_skill_names_for_action(
+            llm_output.selected_skill_names,
+            state=state,
+            action_name=action_name,
+        )
         active_message = AgentMessage(
             task_id=f"llm_task_{uuid4().hex[:12]}",
             agent_from="ResearchSupervisorAgent",
@@ -659,6 +670,7 @@ class ResearchSupervisorAgent:
                 "plan_id": plan_id,
                 "decision_source": "llm",
                 "manager_action": action_name,
+                "selected_skill_names": selected_skill_names,
             },
         )
         agent_messages = [*all_messages, active_message]
@@ -689,6 +701,81 @@ class ResearchSupervisorAgent:
             },
             metadata=metadata,
         )
+
+    def _select_skill_names_for_action(
+        self,
+        selected_skill_names: list[str],
+        *,
+        state: ResearchSupervisorState,
+        action_name: str,
+    ) -> list[str]:
+        normalized = self._normalize_selected_skill_names(
+            selected_skill_names,
+            state=state,
+        )
+        if normalized:
+            return normalized
+        return self._fallback_skill_names_for_action(action_name=action_name, state=state)
+
+    def _normalize_selected_skill_names(
+        self,
+        selected_skill_names: list[str],
+        *,
+        state: ResearchSupervisorState,
+    ) -> list[str]:
+        candidate_names = {
+            str(candidate.get("name") or "").strip()
+            for candidate in state.skill_candidates
+            if isinstance(candidate, dict)
+        }
+        if not candidate_names:
+            return []
+        normalized: list[str] = []
+        for raw_name in selected_skill_names:
+            name = str(raw_name).strip()
+            if not name or name in normalized:
+                continue
+            if name not in candidate_names:
+                continue
+            normalized.append(name)
+        return normalized
+
+    def _fallback_skill_names_for_action(
+        self,
+        *,
+        action_name: str,
+        state: ResearchSupervisorState,
+    ) -> list[str]:
+        action_skill_names: dict[str, set[str]] = {
+            "analyze_papers": {"paper-comparison", "paper-recommendation", "paper-reading"},
+            "answer_question": {"research-qa", "paper-comparison", "paper-reading"},
+            "search_literature": {"paper-discovery", "literature-survey"},
+            "write_review": {"literature-survey"},
+            "evaluate_result": {"research-evaluation"},
+            "import_papers": {"knowledge-management"},
+            "sync_to_zotero": {"knowledge-management"},
+            "analyze_paper_figures": {"chart-analysis"},
+            "understand_chart": {"chart-analysis"},
+            "ask_document": {"paper-reading", "research-qa"},
+        }
+        allowed_names = action_skill_names.get(action_name, set())
+        if not allowed_names:
+            return []
+        selected: list[str] = []
+        for candidate in state.skill_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            name = str(candidate.get("name") or "").strip()
+            if not name or name not in allowed_names or name in selected:
+                continue
+            try:
+                score = float(candidate.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            match_reason = str(candidate.get("match_reason") or "")
+            if score >= 0.95 or (score >= 0.8 and match_reason.startswith("trigger:")):
+                selected.append(name)
+        return selected[:2]
 
     def _normalize_payload_paper_scope(
         self,
@@ -1547,6 +1634,10 @@ class ResearchSupervisorAgent:
             "leave it empty only when the user clearly asks about the whole collection or a new search.\n"
             "For answer_question, you must also decide payload.qa_route as one of collection_qa, document_drilldown, or chart_drilldown. "
             "Downstream services should execute your route instead of deciding it again.\n"
+            "You will receive skill_candidates as lightweight Markdown skill metadata. "
+            "Select zero or more selected_skill_names from those candidates for the specialist task you choose. "
+            "Do not invent skill names and do not rely on any full skill instructions at manager level; "
+            "the runtime will load the selected SKILL.md body and inject it into the specialist only.\n"
             "Keep payload fields compact and directly actionable.\n"
             "Before choosing an action, first resolve the user's true intent from their message. "
             "The heuristic intent in state.user_intent is a hint but may be inaccurate — "
@@ -1572,6 +1663,8 @@ class ResearchSupervisorAgent:
             "latest_result_status": state.latest_result_status,
             "user_intent": dict(state.user_intent),
         }
+        if state.skill_candidates:
+            snapshot["skill_candidates"] = list(state.skill_candidates)
         _conditional = {
             "active_thread_topic": state.active_thread_topic,
             "topic_continuity_score": state.topic_continuity_score,
@@ -2843,7 +2936,7 @@ class ResearchSupervisorAgent:
         task_instruction: str,
         expected_schema: dict[str, Any],
     ) -> TaskEvaluation:
-        return self.evaluation_skill.evaluate_result(
+        return self.evaluation_tool.evaluate_result(
             task_type=result.task_type,
             result_status=result.status,
             payload={

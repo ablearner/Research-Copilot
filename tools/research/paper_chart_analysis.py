@@ -29,8 +29,8 @@ class _PaperChartAnalysisLLMResponse(BaseModel):
     key_points: list[str] = Field(default_factory=list)
 
 
-class PaperChartAnalyzer:
-    name = "PaperChartAnalyzer"
+class PaperChartAnalysisTool:
+    name = "PaperChartAnalysisTool"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter

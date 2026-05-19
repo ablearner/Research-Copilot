@@ -279,7 +279,7 @@ class UnifiedPaperImportInput(BaseModel):
     task_id: str
     paper_ids: list[str] = Field(default_factory=list)
     selected_paper_ids: list[str] = Field(default_factory=list)
-    import_top_k: int = Field(default=3, ge=0, le=20)
+    import_top_k: int = Field(default=0, ge=0, le=20)
     include_graph: bool = True
     include_embeddings: bool = True
     skill_name: str | None = None

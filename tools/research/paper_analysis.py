@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from domain.schemas.research import PaperCandidate
 from domain.schemas.retrieval import RetrievalHit
 from domain.schemas.research_functions import AnalyzePapersFunctionOutput, PaperAnalysisNote
-from tools.research.paper_reading import PaperReader, resolve_answer_language
+from tools.research.paper_reading import PaperReadingTool, resolve_answer_language
 
 logger = logging.getLogger(__name__)
 
@@ -69,19 +69,19 @@ class _PaperAnalysisLLMResponse(BaseModel):
     paper_notes: list[_PaperAnalysisNoteLLM] = Field(default_factory=list)
 
 
-class PaperAnalyzer:
+class PaperAnalysisTool:
     """Unified selected-paper analysis capability for comparison, recommendation, and explanation."""
 
-    name = "PaperAnalyzer"
+    name = "PaperAnalysisTool"
 
     def __init__(
         self,
         *,
-        paper_reading_skill: PaperReader | None = None,
+        paper_reading_tool: PaperReadingTool | None = None,
         llm_adapter: Any | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.paper_reading_skill = paper_reading_skill or PaperReader(llm_adapter=llm_adapter)
+        self.paper_reading_tool = paper_reading_tool or PaperReadingTool(llm_adapter=llm_adapter)
 
     async def analyze_async(
         self,
@@ -199,7 +199,7 @@ class PaperAnalyzer:
         notes: list[PaperAnalysisNote] = []
         evidence_by_paper = self._evidence_summary_by_paper(evidence_hits=evidence_hits, papers=papers)
         for paper in papers[:6]:
-            card = self.paper_reading_skill.extract(paper=paper)
+            card = self.paper_reading_tool.extract(paper=paper)
             evidence_summary = evidence_by_paper.get(paper.paper_id, [])
             summary = card.summary or paper.summary or paper.abstract or paper.title
             if evidence_summary:

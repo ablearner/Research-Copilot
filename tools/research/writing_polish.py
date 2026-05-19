@@ -26,7 +26,7 @@ class _LLMPolishResponse(BaseModel):
     polished_text: str = Field(description="润色后的文本")
 
 
-class WritingPolisher:
+class WritingPolishTool:
     """Apply academic-style cleanup using LLM with regex-based fallback.
     
     When llm_adapter is provided, uses LLM for intelligent polishing.

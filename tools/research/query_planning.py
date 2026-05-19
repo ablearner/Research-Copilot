@@ -136,14 +136,14 @@ class ResearchQueryRewriteResult:
         return _dedupe_queries([*self.local_queries, *self.english_queries, *self.expanded_queries])
 
 
-class ResearchQueryRewriter:
+class QueryRewriteTool:
     """Skill used by LiteratureScoutAgent to build provider-ready search queries.
     
     When llm_adapter is provided, uses LLM for intelligent query rewriting.
     Falls back to heuristic rewriting when LLM is unavailable.
     """
 
-    name = "ResearchQueryRewriter"
+    name = "QueryRewriteTool"
 
     def __init__(
         self,
@@ -266,8 +266,8 @@ class ResearchQueryRewriter:
         return selected[:limit]
 
 
-class TopicPlanner:
-    """Skill for creating query plans; used by LiteratureScoutAgent/PaperSearchService.
+class TopicPlanningTool:
+    """Tool for creating query plans; used by LiteratureScoutAgent/PaperSearchService.
     
     When llm_adapter is provided, uses LLM for intelligent query planning.
     Falls back to heuristic planning when LLM is unavailable.
@@ -276,11 +276,11 @@ class TopicPlanner:
     def __init__(
         self,
         *,
-        query_rewrite_skill: ResearchQueryRewriter | None = None,
+        query_rewrite_tool: QueryRewriteTool | None = None,
         llm_adapter: Any | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
-        self.query_rewrite_skill = query_rewrite_skill or ResearchQueryRewriter(llm_adapter=llm_adapter)
+        self.query_rewrite_tool = query_rewrite_tool or QueryRewriteTool(llm_adapter=llm_adapter)
 
     def plan(
         self,
@@ -304,8 +304,8 @@ class TopicPlanner:
     ) -> ResearchTopicPlan:
         """Async plan — uses LLM rewrite if available."""
         normalized = " ".join(topic.strip().split())
-        rewrite = await self.query_rewrite_skill.rewrite_async(normalized, supervisor_instruction=supervisor_instruction)
-        heuristic_rewrite = self.query_rewrite_skill.rewrite(normalized)
+        rewrite = await self.query_rewrite_tool.rewrite_async(normalized, supervisor_instruction=supervisor_instruction)
+        heuristic_rewrite = self.query_rewrite_tool.rewrite(normalized)
         # Preserve high-yield heuristic seeds alongside LLM rewrites so acronym-heavy
         # topics like "VLN" do not lose their most effective provider queries.
         queries = _merge_rewrite_queries(
@@ -329,7 +329,7 @@ class TopicPlanner:
             sources=sources,
             metadata={
                 "planner": "LLM" if "LLM" in rewrite.metadata.get("rewriter", "") else "heuristic",
-                "query_rewrite_skill": rewrite.metadata["rewriter"],
+                "query_rewrite_tool": rewrite.metadata["rewriter"],
                 "query_language_policy": rewrite.metadata["query_language_policy"],
                 "simplified_topic": rewrite.simplified_topic,
                 "detected_language": rewrite.detected_language,
@@ -348,7 +348,7 @@ class TopicPlanner:
         sources: list[PaperSource],
     ) -> ResearchTopicPlan:
         normalized = " ".join(topic.strip().split())
-        rewrite = self.query_rewrite_skill.rewrite(normalized)
+        rewrite = self.query_rewrite_tool.rewrite(normalized)
         queries = list(rewrite.all_queries)
         core_terms = extract_core_terms(rewrite.simplified_topic)
         if core_terms:
@@ -364,7 +364,7 @@ class TopicPlanner:
             sources=sources,
             metadata={
                 "planner": "heuristic",
-                "query_rewrite_skill": rewrite.metadata["rewriter"],
+                "query_rewrite_tool": rewrite.metadata["rewriter"],
                 "query_language_policy": rewrite.metadata["query_language_policy"],
                 "simplified_topic": rewrite.simplified_topic,
                 "detected_language": rewrite.detected_language,
@@ -374,7 +374,7 @@ class TopicPlanner:
         )
 
     def queries_for_source(self, *, source: str, queries: list[str]) -> list[str]:
-        return self.query_rewrite_skill.queries_for_source(source=source, queries=queries)
+        return self.query_rewrite_tool.queries_for_source(source=source, queries=queries)
 
 
 def _compact_spaces(value: str) -> str:
@@ -538,8 +538,3 @@ def extract_core_terms(topic: str) -> list[str]:
         if normalized and normalized not in terms:
             terms.append(normalized)
     return terms
-
-
-# Compatibility aliases for older imports or tests that still use the old names.
-ResearchQueryRewriteAgent = ResearchQueryRewriter
-TopicPlannerAgent = TopicPlanner

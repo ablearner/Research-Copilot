@@ -72,6 +72,73 @@ class JsonSessionMemoryStore:
             path.unlink()
 
 
+class SQLiteSessionMemoryStore:
+    """SQLite store for research-layer session memory.
+
+    The RAG runtime already owns a lightweight ``session_memory`` table in
+    ``rag_runtime.memory``.  This store intentionally uses a separate table
+    because it persists the richer ``SessionMemoryRecord`` schema.
+    """
+
+    def __init__(self, db_path: str | Path) -> None:
+        import sqlite3
+
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS research_session_memory (
+                session_id TEXT PRIMARY KEY,
+                research_topic TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_research_session_memory_updated_at
+            ON research_session_memory(updated_at);
+            """
+        )
+
+    def get(self, session_id: str) -> SessionMemoryRecord | None:
+        row = self._conn.execute(
+            "SELECT payload_json FROM research_session_memory WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return SessionMemoryRecord.model_validate_json(row[0])
+
+    def put(self, record: SessionMemoryRecord) -> SessionMemoryRecord:
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO research_session_memory "
+                "(session_id, research_topic, payload_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    record.session_id,
+                    record.context.research_topic,
+                    record.model_dump_json(),
+                    record.created_at.isoformat(),
+                    record.updated_at.isoformat(),
+                ),
+            )
+        return record
+
+    def delete(self, session_id: str) -> None:
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM research_session_memory WHERE session_id = ?",
+                (session_id,),
+            )
+
+
 class SessionMemory:
     def __init__(self, store: SessionMemoryStore | None = None) -> None:
         self.store = store or InMemorySessionMemoryStore()

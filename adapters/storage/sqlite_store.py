@@ -24,6 +24,7 @@ class SQLiteStore:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
+        self.storage_root = self.db_path.parent
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         # Run migrations on the main connection

@@ -2,16 +2,16 @@ import pytest
 
 from domain.schemas.research import PaperCandidate
 from tools.research import (
-    PaperAnalyzer,
-    PaperReader,
-    ResearchEvaluator,
-    ReviewWriter,
-    WritingPolisher,
+    PaperAnalysisTool,
+    PaperReadingTool,
+    ResearchEvaluationTool,
+    ReviewWritingTool,
+    WritingPolishTool,
 )
 
 
-def test_paper_reading_skill_extracts_structured_card() -> None:
-    skill = PaperReader()
+def test_paper_reading_tool_extracts_structured_card() -> None:
+    tool = PaperReadingTool()
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -23,7 +23,7 @@ def test_paper_reading_skill_extracts_structured_card() -> None:
         source="arxiv",
     )
 
-    card = skill.extract(
+    card = tool.extract(
         paper=paper,
         metadata={
             "formulas": [{"name": "score", "formula": "s = r + c", "explanation": "ranking score"}],
@@ -40,7 +40,7 @@ def test_paper_reading_skill_extracts_structured_card() -> None:
 
 
 @pytest.mark.asyncio
-async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata() -> None:
+async def test_paper_reading_tool_llm_prompt_follows_answer_language_metadata() -> None:
     class LLMStub:
         def __init__(self) -> None:
             self.prompt = ""
@@ -58,7 +58,7 @@ async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata()
             )
 
     llm = LLMStub()
-    skill = PaperReader(llm_adapter=llm)
+    tool = PaperReadingTool(llm_adapter=llm)
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -66,7 +66,7 @@ async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata()
         source="arxiv",
     )
 
-    card = await skill.extract_async(
+    card = await tool.extract_async(
         paper=paper,
         metadata={"answer_language": "en-US"},
     )
@@ -76,8 +76,8 @@ async def test_paper_reading_skill_llm_prompt_follows_answer_language_metadata()
 
 
 @pytest.mark.asyncio
-async def test_paper_analysis_skill_heuristic_follows_question_language() -> None:
-    skill = PaperAnalyzer()
+async def test_paper_analysis_tool_heuristic_follows_question_language() -> None:
+    tool = PaperAnalysisTool()
     paper = PaperCandidate(
         paper_id="paper-1",
         title="Planner-Guided Scientific Review",
@@ -89,7 +89,7 @@ async def test_paper_analysis_skill_heuristic_follows_question_language() -> Non
         source="arxiv",
     )
 
-    result = await skill.analyze_async(
+    result = await tool.analyze_async(
         question="What method does this paper use?",
         papers=[paper],
         task_topic="scientific review",
@@ -99,10 +99,10 @@ async def test_paper_analysis_skill_heuristic_follows_question_language() -> Non
     assert "The papers can be understood through their contributions" in result.answer
 
 
-def test_research_evaluation_skill_flags_low_quality_review() -> None:
-    skill = ResearchEvaluator()
+def test_research_evaluation_tool_flags_low_quality_review() -> None:
+    tool = ResearchEvaluationTool()
 
-    evaluation = skill.evaluate_result(
+    evaluation = tool.evaluate_result(
         task_type="write_review",
         result_status="succeeded",
         payload={
@@ -126,8 +126,8 @@ def test_research_evaluation_skill_flags_low_quality_review() -> None:
     assert evaluation.replan_suggestion == "retry_review_quality"
 
 
-def test_review_writing_skill_polishes_for_target_journal() -> None:
-    skill = ReviewWriter(polish_skill=WritingPolisher())
+def test_review_writing_tool_polishes_for_target_journal() -> None:
+    tool = ReviewWritingTool(polish_tool=WritingPolishTool())
     papers = [
         PaperCandidate(
             paper_id="paper-1",
@@ -138,7 +138,7 @@ def test_review_writing_skill_polishes_for_target_journal() -> None:
         )
     ]
 
-    report = skill.generate(
+    report = tool.generate(
         topic="scientific QA",
         task_id="task-1",
         papers=papers,
@@ -149,4 +149,4 @@ def test_review_writing_skill_polishes_for_target_journal() -> None:
     )
 
     assert "ACL" in report.markdown
-    assert report.metadata["writer"] == "ReviewWriter"
+    assert report.metadata["writer"] == "ReviewWritingTool"

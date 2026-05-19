@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -158,7 +159,7 @@ class GeneralAnswerAgent:
                     ),
                     timeout=max(1.0, float(self.llm_timeout_seconds)),
                 )
-                return GeneralAnswerResult(answer=full_text, confidence=self._STREAMING_DEFAULT_CONFIDENCE, answer_type="streaming")
+                return self._coerce_streaming_result(full_text)
             except TimeoutError:
                 logger.warning("GeneralAnswerAgent streaming LLM call timed out")
                 return GeneralAnswerResult(
@@ -196,3 +197,42 @@ class GeneralAnswerAgent:
             )
         except Exception as exc:
             raise LLMAdapterError(f"GeneralAnswerAgent failed: {exc}") from exc
+
+    def _coerce_streaming_result(self, full_text: str) -> GeneralAnswerResult:
+        text = str(full_text or "").strip()
+        if not text:
+            return GeneralAnswerResult(
+                answer="",
+                confidence=self._STREAMING_DEFAULT_CONFIDENCE,
+                answer_type="streaming",
+            )
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return GeneralAnswerResult(
+                answer=text,
+                confidence=self._STREAMING_DEFAULT_CONFIDENCE,
+                answer_type="streaming",
+            )
+        if not isinstance(parsed, dict) or "answer" not in parsed:
+            return GeneralAnswerResult(
+                answer=text,
+                confidence=self._STREAMING_DEFAULT_CONFIDENCE,
+                answer_type="streaming",
+            )
+        try:
+            result = GeneralAnswerResult.model_validate(parsed)
+        except Exception:
+            return GeneralAnswerResult(
+                answer=str(parsed.get("answer") or text),
+                confidence=self._STREAMING_DEFAULT_CONFIDENCE,
+                answer_type=str(parsed.get("answer_type") or "streaming"),
+                warnings=[
+                    str(item)
+                    for item in parsed.get("warnings", [])
+                    if str(item).strip()
+                ] if isinstance(parsed.get("warnings"), list) else [],
+            )
+        if not result.answer_type or result.answer_type == "general":
+            result.answer_type = "streaming"
+        return result

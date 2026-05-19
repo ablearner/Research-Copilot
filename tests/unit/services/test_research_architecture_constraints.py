@@ -156,10 +156,10 @@ def test_workspace_persistence_uses_standalone_functions() -> None:
 def test_capabilities_live_in_tools_not_services() -> None:
     tools_init = _read("tools/research/__init__.py")
 
-    assert "PaperRanker" in tools_init
-    assert "SurveyWriter" in tools_init
-    assert "ResearchIntentResolver" in tools_init
-    assert "PaperAnalyzer" in tools_init
+    assert "PaperRankingTool" in tools_init
+    assert "SurveyWritingTool" in tools_init
+    assert "IntentResolutionTool" in tools_init
+    assert "PaperAnalysisTool" in tools_init
 
     assert not (PROJECT_ROOT / "services" / "research" / "capabilities").is_dir(), \
         "Old capabilities/ directory should be deleted"

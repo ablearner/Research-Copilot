@@ -103,7 +103,7 @@ class ResearchAgentContextBuilder:
         graph_runtime: Any,
     ) -> None:
         try:
-            selection = await self.skill_resolver.resolve(
+            selection = await self.skill_resolver.resolve_candidates(
                 message=context.request.message,
                 explicit_skill_name=context.request.skill_name,
                 available_tool_names=self._available_tool_names(graph_runtime),
@@ -113,12 +113,11 @@ class ResearchAgentContextBuilder:
             return
 
         context.skill_selection = selection
-        if selection.skill_context:
-            context.skill_context = selection.skill_context
+        if selection.candidate_skills:
             logger.info(
-                "Matched %d skill(s) for request: %s",
-                len(selection.active_skill_names),
-                ", ".join(selection.active_skill_names),
+                "Resolved %d skill candidate(s) for request: %s",
+                len(selection.candidate_skills),
+                ", ".join(candidate.name for candidate in selection.candidate_skills),
             )
 
     def _available_tool_names(self, graph_runtime: Any) -> list[str]:

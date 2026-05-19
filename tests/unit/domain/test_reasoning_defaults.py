@@ -14,3 +14,10 @@ def test_research_requests_default_to_cot_schema_value() -> None:
     assert ResearchAgentRunRequest(message="调研无人机路径规划").reasoning_style == "cot"
     assert ResearchTaskAskRequest(question="效果怎么样").reasoning_style == "cot"
     assert ImportPapersRequest(task_id="task_1").reasoning_style == "cot"
+
+
+def test_research_agent_request_does_not_auto_import_by_default() -> None:
+    request = ResearchAgentRunRequest(message="调研无人机路径规划")
+
+    assert request.auto_import is False
+    assert request.import_top_k == 0

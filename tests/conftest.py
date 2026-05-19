@@ -13,6 +13,7 @@ from domain.schemas.embedding import EmbeddingVector, MultimodalEmbeddingRecord
 from domain.schemas.evidence import Evidence, EvidenceBundle
 from domain.schemas.graph import GraphEdge, GraphNode, GraphQueryRequest, GraphQueryResult, GraphTriple
 from domain.schemas.retrieval import RetrievalHit
+from retrieval.lexical import bm25_score_texts
 
 
 @pytest.fixture
@@ -178,6 +179,36 @@ class MockVectorStore(BaseVectorStore):
 
     async def search_similar_text(self, text: str, top_k: int) -> list[RetrievalHit]:
         return await self.search_by_vector(EmbeddingVector(model="mock", dimensions=2, values=[1, 0]), top_k)
+
+    async def search_sparse_text(
+        self,
+        text: str,
+        top_k: int,
+        filters: dict[str, Any] | None = None,
+    ) -> list[RetrievalHit]:
+        filters = filters or {}
+        document_ids = set(filters.get("document_ids") or [])
+        source_types = set(filters.get("source_types") or [])
+        candidates = [
+            record
+            for record in self.records
+            if not document_ids or record.item.document_id in document_ids
+            if not source_types or record.item.source_type in source_types
+        ]
+        scores = bm25_score_texts(query=text, texts=[record.item.content or "" for record in candidates])
+        hits = [
+            RetrievalHit(
+                id=record.id,
+                source_type=record.item.source_type,
+                source_id=record.item.source_id,
+                document_id=record.item.document_id,
+                content=record.item.content,
+                sparse_score=score,
+            )
+            for record, score in zip(candidates, scores, strict=True)
+            if score > 0
+        ]
+        return sorted(hits, key=lambda item: item.sparse_score or 0.0, reverse=True)[:top_k]
 
     async def delete_by_doc_id(self, doc_id: str) -> None:
         self.records = [record for record in self.records if record.item.document_id != doc_id]

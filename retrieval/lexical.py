@@ -5,11 +5,23 @@ import re
 from collections import Counter
 
 
-_TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
+_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_@.+#-]+|[\u4e00-\u9fff]+", re.UNICODE)
+_CJK_PATTERN = re.compile(r"^[\u4e00-\u9fff]+$", re.UNICODE)
 
 
 def tokenize_lexical(text: str) -> list[str]:
-    return [token.lower() for token in _TOKEN_PATTERN.findall(text or "") if token.strip()]
+    tokens: list[str] = []
+    for raw_token in _TOKEN_PATTERN.findall(text or ""):
+        token = raw_token.strip().lower()
+        if not token:
+            continue
+        if _CJK_PATTERN.match(token):
+            tokens.append(token)
+            tokens.extend(token[index : index + 1] for index in range(len(token)))
+            tokens.extend(token[index : index + 2] for index in range(max(len(token) - 1, 0)))
+            continue
+        tokens.append(token)
+    return tokens
 
 
 def bm25_score_texts(

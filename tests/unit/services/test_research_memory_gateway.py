@@ -95,7 +95,7 @@ def test_research_memory_gateway_persists_context_and_session_memory_updates() -
     gateway = ResearchMemoryGateway(
         memory_manager=memory_manager,
         research_context_manager=context_manager,
-        paper_reading_skill=object(),
+        paper_reading_tool=object(),
         compact_text=lambda value: str(value or "")[:280],
     )
 

@@ -407,15 +407,6 @@ def should_force_finalize(
         and not latest_next_actions.intersection({"import_papers", "answer_question"})
     ):
         return True
-    if (
-        workflow_constraint != "discovery_only"
-        and not new_topic_detected
-        and has_task_response
-        and has_report
-        and not auto_import
-        and mode != "qa"
-    ):
-        return True
     if import_attempted and has_import_result and not has_message:
         return True
     # Fast-finalize: terminal single-shot actions

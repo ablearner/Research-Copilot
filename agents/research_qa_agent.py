@@ -16,7 +16,7 @@ from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.research import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style  # noqa: F401
 from domain.schemas.retrieval import HybridRetrievalResult
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
-from tools.research.visual_intent import VisualIntentDecision, VisualIntentRouter
+from tools.research.visual_intent import VisualIntentDecision, VisualIntentRoutingTool
 from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from tooling.schemas import ToolCallTrace, ToolExecutionResult
@@ -281,14 +281,14 @@ class ResearchQAAgent:
         )
 
     @staticmethod
-    def _visual_intent_router(research_service: Any) -> VisualIntentRouter:
+    def _visual_intent_router(research_service: Any) -> VisualIntentRoutingTool:
         router = getattr(research_service, "visual_intent_router", None)
         if router is not None:
             return router
         llm_adapter = getattr(getattr(research_service, "chart_analysis_agent", None), "llm_adapter", None)
         if llm_adapter is None:
             llm_adapter = getattr(research_service, "llm_adapter", None)
-        return VisualIntentRouter(llm_adapter=llm_adapter)
+        return VisualIntentRoutingTool(llm_adapter=llm_adapter)
 
     @staticmethod
     def _explicit_anchor_from_values(

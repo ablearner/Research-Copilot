@@ -13,7 +13,7 @@ from retrieval.evidence_builder import build_evidence_bundle
 from tools.research.paper_search import SearchResultBundle
 from tools.research.research_functions import ResearchFunctionService
 from adapters.storage.research_report_service import ResearchReportService
-from tools.research import PaperReader, ResearchEvaluator, ReviewWriter
+from tools.research import PaperReadingTool, ResearchEvaluationTool, ReviewWritingTool
 from tools.retrieval_toolkit import RetrievalAgentResult
 
 
@@ -183,9 +183,9 @@ def _build_service(tmp_path, *, code_execution_enabled: bool = False):
                 JsonPaperKnowledgeStore(tmp_path / "paper_knowledge")
             )
         ),
-        paper_reading_skill=PaperReader(),
-        review_writing_skill=ReviewWriter(),
-        evaluation_skill=ResearchEvaluator(),
+        paper_reading_tool=PaperReadingTool(),
+        review_writing_tool=ReviewWritingTool(),
+        evaluation_tool=ResearchEvaluationTool(),
     )
     return ResearchFunctionService(
         research_service=research_service,

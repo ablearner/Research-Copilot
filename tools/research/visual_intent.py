@@ -82,7 +82,7 @@ class VisualIntentDecision(BaseModel):
     marker_signals: dict[str, list[str]] = Field(default_factory=dict)
 
 
-class VisualIntentRouter:
+class VisualIntentRoutingTool:
     """Classify whether a visual question should reuse the current image or find a new one."""
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:

@@ -97,8 +97,8 @@ def _compact_metadata(metadata: Any) -> dict[str, Any]:
     return compact
 
 
-class VisualAnchor:
-    name = "VisualAnchor"
+class VisualAnchorTool:
+    name = "VisualAnchorTool"
 
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter
