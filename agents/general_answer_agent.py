@@ -52,10 +52,11 @@ class GeneralAnswerAgent:
         decision: Any,
     ) -> ResearchToolResult:
         from runtime.research.agent_protocol.base import ResearchToolResult
-        from runtime.research.unified_action_adapters import resolve_active_message
+        from runtime.research.unified_action_adapters import build_expert_context, resolve_active_message
 
         active_message = resolve_active_message(decision)
         payload = dict(active_message.payload or {}) if active_message is not None else {}
+        expert_context = build_expert_context(context=context, decision=decision, active_message=active_message)
         question = str(payload.get("goal") or context.request.message or "").strip()
         on_token = None
         if context.progress_callback is not None:
@@ -68,8 +69,10 @@ class GeneralAnswerAgent:
             "selected_paper_ids": [] if payload.get("ignore_research_context") else list(context.request.selected_paper_ids),
             "ignore_research_context": bool(payload.get("ignore_research_context")),
         }
-        if context.supervisor_instruction:
-            conversation_ctx["supervisor_instruction"] = context.supervisor_instruction
+        if expert_context:
+            conversation_ctx["expert_context"] = expert_context
+        if expert_context.get("supervisor_instruction"):
+            conversation_ctx["supervisor_instruction"] = expert_context["supervisor_instruction"]
         result = await self.answer(
             question=question,
             conversation_context=conversation_ctx,
@@ -143,6 +146,7 @@ class GeneralAnswerAgent:
             "请直接回答用户问题，语言尽量跟随用户输入。\n"
             "如果问题明显更适合科研检索、论文问答、文档理解或图表理解，请在 warnings 中加入 route_mismatch，"
             "并把 answer_type 设为 reroute_hint，同时给出一个简短帮助性回答。\n"
+            "如果 conversation_context.expert_context 中包含 skill_context，请遵守其中与回答边界、证据要求和格式相关的要求。\n"
             "不要伪造论文证据、网页检索结果或本地已导入内容。"
         )
         input_data = {

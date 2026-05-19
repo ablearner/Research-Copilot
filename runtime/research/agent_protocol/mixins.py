@@ -58,6 +58,7 @@ def persist_workspace_results(
     *,
     paper_analysis: AnalyzePapersFunctionOutput | None = None,
     analyzed_papers: list[PaperCandidate] | None = None,
+    paper_figure_analysis: dict[str, Any] | None = None,
     compression_summary: dict[str, Any] | None = None,
     persist: bool = True,
 ) -> WorkspaceUpdateResult | None:
@@ -84,6 +85,72 @@ def persist_workspace_results(
             next_actions.append("可以直接导入推荐论文全文，或围绕推荐理由继续提问。")
         else:
             next_actions.append("可以继续针对这组论文追问方法细节、实验设置或适用边界。")
+    if paper_figure_analysis is not None:
+        figure_analysis = dict(paper_figure_analysis)
+        figure_payload = (
+            dict(figure_analysis.get("figure"))
+            if isinstance(figure_analysis.get("figure"), dict)
+            else {}
+        )
+        visual_anchor = (
+            dict(figure_analysis.get("visual_anchor"))
+            if isinstance(figure_analysis.get("visual_anchor"), dict)
+            else {}
+        )
+        if not visual_anchor:
+            visual_anchor = {
+                key: figure_analysis.get(key)
+                for key in (
+                    "paper_id",
+                    "paper_title",
+                    "figure_id",
+                    "page_id",
+                    "page_number",
+                    "chart_id",
+                    "image_path",
+                    "source",
+                    "anchor_source",
+                    "anchor_selection",
+                )
+                if figure_analysis.get(key) not in (None, "")
+            }
+        visual_anchor = {key: value for key, value in visual_anchor.items() if value not in (None, "")}
+        if "anchor_source" not in visual_anchor:
+            visual_anchor["anchor_source"] = "paper_figure_analysis"
+
+        workspace_metadata["latest_paper_figure_analysis"] = figure_analysis
+        workspace_metadata["last_visual_anchor"] = visual_anchor
+        if figure_payload:
+            workspace_metadata["last_visual_anchor_figure"] = figure_payload
+        figure_id = str(
+            visual_anchor.get("figure_id")
+            or figure_payload.get("figure_id")
+            or figure_analysis.get("figure_id")
+            or ""
+        ).strip()
+        if figure_id:
+            workspace_metadata["last_visual_anchor_figure_id"] = figure_id
+
+        rejected_ids = [
+            str(item).strip()
+            for item in figure_analysis.get("rejected_figure_ids", [])
+            if str(item).strip()
+        ]
+        workspace_metadata["paper_figure_feedback"] = {"rejected_figure_ids": list(dict.fromkeys(rejected_ids))}
+        workspace_metadata["rejected_paper_figure_ids"] = list(dict.fromkeys(rejected_ids))
+
+        paper_id = str(
+            visual_anchor.get("paper_id")
+            or figure_payload.get("paper_id")
+            or figure_analysis.get("paper_id")
+            or ""
+        ).strip()
+        if paper_id:
+            selected_paper_ids.append(paper_id)
+        answer = str(figure_analysis.get("answer") or "").strip()
+        if answer:
+            key_findings.append(answer)
+        next_actions.append("可以继续围绕这张图追问具体指标、趋势、图注或与正文结论的关系。")
     if compression_summary is not None:
         workspace_metadata["context_compression"] = dict(compression_summary)
     updated_at = _now_iso()
@@ -105,6 +172,8 @@ def persist_workspace_results(
         "tool_name": "workspace_persist",
         "context_compression": compression_summary,
         "has_paper_analysis": paper_analysis is not None,
+        "has_paper_figure_analysis": paper_figure_analysis is not None,
+        "paper_figure_analysis": paper_figure_analysis,
     }
     updated_task_response = task_response.model_copy(update={"task": updated_task, "report": updated_report})
 
@@ -118,6 +187,16 @@ def persist_workspace_results(
                 **(
                     {"latest_paper_analysis": paper_analysis.model_dump(mode="json")}
                     if paper_analysis is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "latest_paper_figure_analysis": paper_figure_analysis,
+                        "last_visual_anchor": workspace_metadata.get("last_visual_anchor"),
+                        "last_visual_anchor_figure": workspace_metadata.get("last_visual_anchor_figure"),
+                        "last_visual_anchor_figure_id": workspace_metadata.get("last_visual_anchor_figure_id"),
+                    }
+                    if paper_figure_analysis is not None
                     else {}
                 ),
                 **({"context_compression": compression_summary} if compression_summary is not None else {}),

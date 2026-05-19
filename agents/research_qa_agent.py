@@ -342,6 +342,35 @@ class ResearchQAAgent:
                     return figure
         return None
 
+    @staticmethod
+    def _has_visual_route_signal(
+        *,
+        request: Any,
+        visual_intent: VisualIntentDecision,
+        visual_anchor: dict[str, Any] | None,
+    ) -> bool:
+        del visual_anchor
+        if bool(getattr(request, "image_path", None)):
+            return True
+        if visual_intent.reuse_current_anchor or visual_intent.search_new_figure:
+            return True
+        signals = visual_intent.marker_signals if isinstance(visual_intent.marker_signals, dict) else {}
+        return any(
+            bool(signals.get(key))
+            for key in ("current_visual", "new_visual_search", "negative_feedback", "visual_target")
+        )
+
+    @staticmethod
+    def _fallback_route_for_non_visual_question(
+        *,
+        scope_mode: str,
+        document_ids: list[str],
+        paper_ids: list[str],
+    ) -> str:
+        if document_ids or len(paper_ids) == 1 or scope_mode in {"selected_documents", "selected_papers"}:
+            return "document_drilldown"
+        return "collection_qa"
+
     # ------------------------------------------------------------------
     # Core QA execution (inlined from ResearchQAExecutor)
     # ------------------------------------------------------------------
@@ -397,9 +426,18 @@ class ResearchQAAgent:
         reusable_visual_anchor = explicit_visual_anchor or (
             restored_visual_anchor if visual_intent.reuse_current_anchor else None
         )
+        visual_route_allowed = self._has_visual_route_signal(
+            request=request,
+            visual_intent=visual_intent,
+            visual_anchor=reusable_visual_anchor,
+        )
+        ignored_preferred_qa_route: str | None = None
 
         routing_authority = str(request.metadata.get("routing_authority") or "").strip()
         preferred_qa_route = str(request.metadata.get("preferred_qa_route") or "").strip()
+        if preferred_qa_route == "chart_drilldown" and not visual_route_allowed:
+            ignored_preferred_qa_route = preferred_qa_route
+            preferred_qa_route = ""
         user_intent = None
         if routing_authority != "supervisor_llm":
             user_intent = await svc.user_intent_resolver.resolve_async(
@@ -447,7 +485,11 @@ class ResearchQAAgent:
                 raise ValueError(user_intent.clarification_question or "当前问题指向不明确，请补充具体论文或图表。")
 
         allowed_supervisor_routes = {"collection_qa", "document_drilldown", "chart_drilldown"}
-        if routing_authority == "supervisor_llm" and preferred_qa_route not in allowed_supervisor_routes:
+        if (
+            routing_authority == "supervisor_llm"
+            and preferred_qa_route not in allowed_supervisor_routes
+            and ignored_preferred_qa_route is None
+        ):
             raise ValueError(
                 "Supervisor-authorized research QA must include preferred_qa_route="
                 "collection_qa, document_drilldown, or chart_drilldown."
@@ -489,13 +531,39 @@ class ResearchQAAgent:
                 recovery_count=qa_route_decision.recovery_count,
             )
 
+        if (
+            qa_route_decision.route == "chart_drilldown"
+            and qa_route_decision.visual_anchor is None
+            and not visual_route_allowed
+            and ignored_preferred_qa_route is not None
+        ):
+            fallback_route = self._fallback_route_for_non_visual_question(
+                scope_mode=scope.scope_mode,
+                document_ids=document_ids,
+                paper_ids=scope.paper_ids,
+            )
+            qa_route_decision = ResearchQARouteDecision(
+                route=fallback_route,  # type: ignore[arg-type]
+                confidence=min(qa_route_decision.confidence, 0.74),
+                rationale=(
+                    f"{qa_route_decision.rationale} Chart drilldown was ignored because the question "
+                    "does not contain a visual reference and no visual anchor or image is available."
+                ),
+                visual_anchor=None,
+                recovery_count=qa_route_decision.recovery_count,
+            )
+
         logger.info(
             "ResearchQAAgent route selected: route=%s confidence=%.2f has_visual_anchor=%s",
             qa_route_decision.route,
             qa_route_decision.confidence,
             qa_route_decision.visual_anchor is not None,
         )
-        if qa_route_decision.route == "chart_drilldown" and qa_route_decision.visual_anchor is None:
+        if (
+            qa_route_decision.route == "chart_drilldown"
+            and qa_route_decision.visual_anchor is None
+            and visual_route_allowed
+        ):
             inferred_visual_anchor = await svc._infer_or_discover_visual_anchor(
                 task_id=task.task_id,
                 papers=scoped_papers,
@@ -549,6 +617,7 @@ class ResearchQAAgent:
                     "visual_intent": visual_intent.model_dump(mode="json"),
                     "routing_authority": routing_authority or None,
                     "preferred_qa_route": preferred_qa_route or None,
+                    "ignored_preferred_qa_route": ignored_preferred_qa_route,
                 }
             }
         )
@@ -623,6 +692,7 @@ class ResearchQAAgent:
                     "qa_route_rationale": qa_route_decision.rationale,
                     "visual_anchor": qa_route_decision.visual_anchor,
                     "visual_intent": visual_intent.model_dump(mode="json"),
+                    "ignored_preferred_qa_route": ignored_preferred_qa_route,
                     "research_task_id": task_id,
                     "research_topic": task.topic,
                     "qa_scope_mode": scope.scope_mode,

@@ -21,6 +21,7 @@ from domain.schemas.unified_runtime import (
 from runtime.research.unified_action_adapters import (
     build_context_compression_input,
     build_context_compression_output,
+    build_expert_context,
     build_literature_search_input,
     build_literature_search_output,
     resolve_active_message,
@@ -298,6 +299,8 @@ def test_unified_action_adapter_builders_roundtrip_metadata():
     context = SimpleNamespace(
         request=request,
         task=SimpleNamespace(task_id="task_1"),
+        supervisor_instruction="write an abstract-level survey",
+        skill_context="Skill says do not import papers unless requested.",
     )
     active_message = AgentMessage(
         task_id="task_msg_1",
@@ -332,6 +335,9 @@ def test_unified_action_adapter_builders_roundtrip_metadata():
 
     assert search_input.topic == "agentic literature review"
     assert search_input.to_create_research_task_request().sources == ["arxiv", "openalex"]
+    assert build_expert_context(context=context, decision=decision)["skill_context"].startswith("Skill says")
+    assert search_input.metadata["expert_context"]["supervisor_instruction"] == "write an abstract-level survey"
+    assert compression_input.metadata["expert_context"]["skill_context"].startswith("Skill says")
     assert search_output.to_metadata()["unified_input_adapter"] == "literature_search_input"
     assert compression_input.resolved_selected_paper_ids() == ["paper_1"]
     assert compression_output.to_metadata()["summary_count"] == 2

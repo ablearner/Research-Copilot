@@ -1,7 +1,11 @@
 import pytest
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
-from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
+from agents.research_supervisor_agent import (
+    ResearchSupervisorAgent,
+    ResearchSupervisorLLMDecision,
+    ResearchSupervisorState,
+)
 from domain.schemas.agent_message import AgentResultMessage
 
 
@@ -9,8 +13,12 @@ class ManagerDecisionLLMStub(BaseLLMAdapter):
     def __init__(self, response_payload: dict) -> None:
         super().__init__()
         self.response_payload = response_payload
+        self.last_prompt: str | None = None
+        self.last_input_data: dict | None = None
 
     async def _generate_structured(self, prompt: str, input_data: dict, response_model: type):
+        self.last_prompt = prompt
+        self.last_input_data = input_data
         return response_model.model_validate(self.response_payload)
 
     async def _analyze_image_structured(self, prompt: str, image_path: str, response_model: type):
@@ -37,10 +45,10 @@ def _literature_survey_no_default_import_candidate() -> dict:
         "score": 1.0,
         "match_reason": "trigger:文献.*调研",
         "planning_policy": {
-            "action_policies": {
+            "actions": {
                 "import_papers": {
                     "default_enabled": False,
-                    "enable_when": ["auto_import", "mode_import", "paper_import_intent"],
+                    "enable_when": ["auto_import_requested", "mode_import", "explicit_import_intent"],
                     "blocked_reason": "Literature survey defaults to metadata/abstract review.",
                 }
             },
@@ -52,6 +60,25 @@ def _literature_survey_no_default_import_candidate() -> dict:
             },
         },
     }
+
+
+def test_research_supervisor_llm_decision_coerces_null_collection_fields() -> None:
+    decision = ResearchSupervisorLLMDecision.model_validate(
+        {
+            "action_name": "finalize",
+            "payload": None,
+            "expected_output_schema": None,
+            "plan": None,
+            "selected_skill_names": None,
+            "resolved_paper_ids": None,
+        }
+    )
+
+    assert decision.payload == {}
+    assert decision.expected_output_schema == {}
+    assert decision.plan == []
+    assert decision.selected_skill_names == []
+    assert decision.resolved_paper_ids == []
 
 
 @pytest.mark.asyncio
@@ -81,6 +108,36 @@ async def test_research_supervisor_agent_uses_llm_to_route_search_task() -> None
     assert decision.action_name == "search_literature"
     assert decision.metadata["worker_agent"] == "LiteratureScoutAgent"
     assert decision.metadata["active_message"].task_type == "search_literature"
+
+
+@pytest.mark.asyncio
+async def test_research_supervisor_agent_loads_soul_prompt(tmp_path) -> None:
+    soul_path = tmp_path / "Soul.md"
+    soul_path.write_text(
+        "Custom Supervisor Soul. Choose exactly one action and use skill manifests.",
+        encoding="utf-8",
+    )
+    llm_stub = ManagerDecisionLLMStub(
+        {
+            "action_name": "general_answer",
+            "worker_agent": "GeneralAnswerAgent",
+            "instruction": "Answer briefly.",
+            "thought": "General answer is enough.",
+            "rationale": "No research action needed.",
+            "phase": "act",
+            "payload": {},
+        }
+    )
+    manager = ResearchSupervisorAgent(
+        llm_adapter=llm_stub,
+        soul_prompt_path=soul_path,
+    )
+
+    await manager.decide_next_action_async(
+        ResearchSupervisorState(goal="hello", mode="auto", route_mode="research_follow_up")
+    )
+
+    assert llm_stub.last_prompt == "Custom Supervisor Soul. Choose exactly one action and use skill manifests."
 
 
 @pytest.mark.asyncio

@@ -109,6 +109,8 @@ _REWRITE_PROMPT = (
     "- Prefer canonical academic terms over literal translation.\n"
     "- Produce concise queries (2-6 words each). Do not include explanations.\n"
     "- Generate 3-5 diverse queries covering different aspects of the topic.\n\n"
+    "If input_data contains supervisor_instruction or skill_context, apply only constraints relevant to search scope, "
+    "topic boundaries, and evidence policy.\n\n"
     "User topic: {topic}"
 )
 
@@ -158,19 +160,37 @@ class QueryRewriteTool:
         """Synchronous rewrite — uses heuristic logic."""
         return self._heuristic_rewrite(topic)
 
-    async def rewrite_async(self, topic: str, *, supervisor_instruction: str | None = None) -> ResearchQueryRewriteResult:
+    async def rewrite_async(
+        self,
+        topic: str,
+        *,
+        supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+    ) -> ResearchQueryRewriteResult:
         """Async rewrite — uses LLM if available, falls back to heuristic."""
         if self.llm_adapter is not None:
             try:
-                return await self._llm_rewrite(topic, supervisor_instruction=supervisor_instruction)
+                return await self._llm_rewrite(
+                    topic,
+                    supervisor_instruction=supervisor_instruction,
+                    skill_context=skill_context,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("LLM query rewrite failed, falling back to heuristic: %s", exc)
         return self._heuristic_rewrite(topic)
 
-    async def _llm_rewrite(self, topic: str, *, supervisor_instruction: str | None = None) -> ResearchQueryRewriteResult:
+    async def _llm_rewrite(
+        self,
+        topic: str,
+        *,
+        supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+    ) -> ResearchQueryRewriteResult:
         input_data: dict[str, Any] = {"topic": topic}
         if supervisor_instruction:
             input_data["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            input_data["skill_context"] = skill_context
         result = await self.llm_adapter.generate_structured(
             prompt=_REWRITE_PROMPT,
             input_data=input_data,
@@ -301,10 +321,15 @@ class TopicPlanningTool:
         max_papers: int,
         sources: list[PaperSource],
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> ResearchTopicPlan:
         """Async plan — uses LLM rewrite if available."""
         normalized = " ".join(topic.strip().split())
-        rewrite = await self.query_rewrite_tool.rewrite_async(normalized, supervisor_instruction=supervisor_instruction)
+        rewrite = await self.query_rewrite_tool.rewrite_async(
+            normalized,
+            supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
+        )
         heuristic_rewrite = self.query_rewrite_tool.rewrite(normalized)
         # Preserve high-yield heuristic seeds alongside LLM rewrites so acronym-heavy
         # topics like "VLN" do not lose their most effective provider queries.

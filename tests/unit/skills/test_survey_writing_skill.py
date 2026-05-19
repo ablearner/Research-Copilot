@@ -7,7 +7,13 @@ from tools.research.survey_writing import SurveyWritingTool
 class _MiniLLMStub:
     model = "gpt-5.4-mini"
 
+    def __init__(self) -> None:
+        self.last_input_data: dict | None = None
+        self.last_prompt: str | None = None
+
     async def generate_structured(self, prompt: str, input_data: dict, response_model: type):
+        self.last_prompt = prompt
+        self.last_input_data = input_data
         return response_model.model_validate({"markdown": f"min_length={input_data['min_length']}"})
 
 
@@ -105,3 +111,32 @@ async def test_survey_writing_skill_reduces_min_length_for_mini_models() -> None
     )
 
     assert "min_length=600" in report.markdown
+
+
+@pytest.mark.asyncio
+async def test_survey_writing_skill_passes_active_skill_context_to_llm() -> None:
+    llm_stub = _MiniLLMStub()
+    skill = SurveyWritingTool(llm_adapter=llm_stub)
+    papers = [
+        PaperCandidate(
+            paper_id="p1",
+            title="Agentic Review Planning for Scientific Discovery",
+            authors=["Alice"],
+            abstract="This paper studies planner-guided literature review systems.",
+            year=2026,
+            source="arxiv",
+        )
+    ]
+
+    await skill.generate_async(
+        topic="agentic scientific assistants",
+        task_id="task-review-skill-1",
+        papers=papers,
+        skill_context="## Active Skills\nUse an evidence boundary section.",
+        supervisor_instruction="Write a concise survey.",
+    )
+
+    assert llm_stub.last_input_data is not None
+    assert llm_stub.last_input_data["skill_context"].startswith("## Active Skills")
+    assert llm_stub.last_input_data["supervisor_instruction"] == "Write a concise survey."
+    assert "skill_context" in (llm_stub.last_prompt or "")

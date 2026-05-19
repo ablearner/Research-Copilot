@@ -166,12 +166,14 @@ class LiteratureScoutAgent:
             _update_runtime_progress,
         )
         from runtime.research.unified_action_adapters import (
+            build_expert_context,
             build_literature_search_input,
             build_literature_search_output,
         )
 
         request = context.request
         search_input = build_literature_search_input(context=context, decision=decision)
+        expert_context = build_expert_context(context=context, decision=decision)
         search_request = search_input.to_create_research_task_request().model_copy(
             update={"run_immediately": False}
         )
@@ -213,7 +215,9 @@ class LiteratureScoutAgent:
             sources=list(search_request.sources),
             task_id=active_task.task_id,
             execution_context=exec_ctx,
-            supervisor_instruction=context.supervisor_instruction,
+            supervisor_instruction=expert_context.get("supervisor_instruction"),
+            skill_context=expert_context.get("skill_context"),
+            expert_context=expert_context,
             max_rounds=2,
             round_index=0,
             queried_pairs=set(),
@@ -581,13 +585,20 @@ class LiteratureScoutAgent:
         paper_search_service = self._require_search_service()
         planner = paper_search_service.topic_planner
         if hasattr(planner, "plan_async"):
-            base_plan = await planner.plan_async(
-                topic=state.topic,
-                days_back=state.days_back,
-                max_papers=state.max_papers,
-                sources=state.sources,
-                supervisor_instruction=getattr(state, "supervisor_instruction", None),
-            )
+            plan_kwargs = {
+                "topic": state.topic,
+                "days_back": state.days_back,
+                "max_papers": state.max_papers,
+                "sources": state.sources,
+                "supervisor_instruction": getattr(state, "supervisor_instruction", None),
+            }
+            if getattr(state, "skill_context", None):
+                plan_kwargs["skill_context"] = getattr(state, "skill_context", None)
+            try:
+                base_plan = await planner.plan_async(**plan_kwargs)
+            except TypeError:
+                plan_kwargs.pop("skill_context", None)
+                base_plan = await planner.plan_async(**plan_kwargs)
         else:
             base_plan = planner.plan(
                 topic=state.topic,
@@ -611,6 +622,7 @@ class LiteratureScoutAgent:
                     "max_papers": state.max_papers,
                     "sources": list(state.sources),
                     "memory_hints": self._memory_hints(state),
+                    "expert_context": getattr(state, "expert_context", {}),
                 },
                 max_queries=4,
             )
@@ -747,6 +759,7 @@ class LiteratureScoutAgent:
                 "must_read_ids": list(state.must_read_ids[:4]),
                 "warnings": list(state.warnings[-3:]),
                 "memory_hints": self._memory_hints(state),
+                "expert_context": getattr(state, "expert_context", {}),
             },
             max_queries=3,
         )
@@ -817,6 +830,7 @@ class LiteratureScoutAgent:
                     "You are a Plan-and-Execute query planner. "
                     "First plan the subproblems privately, then return only structured output. "
                     "Produce a short list of plan_steps, a deduplicated query set, and a concise reasoning_summary. "
+                    "If context.expert_context contains skill_context, apply relevant search-scope and evidence-boundary guidance. "
                     "IMPORTANT: All queries MUST be in English (translate non-English topics into English academic keywords), "
                     "because the target sources (arXiv, OpenAlex, Semantic Scholar) only index English-language papers."
                 ),

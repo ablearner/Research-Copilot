@@ -66,3 +66,61 @@ async def test_chart_analysis_selection_skips_excluded_anchor() -> None:
     )
 
     assert selected.figure_id == "paper-x:chart-2"
+
+
+def test_chart_analysis_restores_explicit_visual_anchor_figure() -> None:
+    agent = ChartAnalysisAgent()
+    figures = [
+        ResearchPaperFigurePreview(
+            figure_id="paper-x:chart-1",
+            paper_id="paper-x",
+            document_id="doc-x",
+            page_id="page-1",
+            page_number=1,
+            chart_id="chart-1",
+            image_path="/tmp/missing-1.png",
+        ),
+        ResearchPaperFigurePreview(
+            figure_id="paper-x:chart-2",
+            paper_id="paper-x",
+            document_id="doc-x",
+            page_id="page-2",
+            page_number=2,
+            chart_id="chart-2",
+            image_path="/tmp/missing-2.png",
+        ),
+    ]
+
+    selected = agent._figure_by_id(figures, "paper-x:chart-2")
+
+    assert selected is not None
+    assert selected.figure_id == "paper-x:chart-2"
+
+
+def test_chart_analysis_negative_feedback_excludes_request_visual_anchor() -> None:
+    agent = ChartAnalysisAgent()
+    context = SimpleNamespace(
+        request=SimpleNamespace(
+            metadata={
+                "context": {
+                    "visual_anchor": {
+                        "paper_id": "paper-x",
+                        "figure_id": "paper-x:chart-1",
+                        "image_path": "/tmp/chart-1.png",
+                    }
+                }
+            }
+        ),
+        workspace=SimpleNamespace(metadata={}),
+        report=SimpleNamespace(metadata={}),
+        chart_result=None,
+    )
+
+    excluded = agent._excluded_figure_ids_from_feedback(
+        payload={},
+        context=context,
+        question="不是这张图，换一张",
+        paper_id="paper-x",
+    )
+
+    assert "paper-x:chart-1" in excluded

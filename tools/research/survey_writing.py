@@ -36,6 +36,7 @@ _SURVEY_PROMPT = (
     "- 方法对比部分使用 markdown 表格\n"
     "- 对每篇论文的方法侧重点给出中文概括（不要直接复制英文摘要）\n"
     "- 保持学术严谨性，指出证据边界\n"
+    "- 如果用户消息 JSON 中包含 supervisor_instruction 或 skill_context，请遵守其中与写作结构、证据边界和引用格式相关的要求\n"
     "- 总字数不少于 {min_length} 字"
 )
 
@@ -54,6 +55,7 @@ _SURVEY_PROMPT_EN = (
     "- Use a markdown table for method comparison\n"
     "- Summarize each paper's method focus instead of copying raw abstract text\n"
     "- Preserve academic caution and uncertainty where needed\n"
+    "- If the user JSON includes supervisor_instruction or skill_context, follow the relevant writing structure, evidence-boundary, and citation-format requirements\n"
     "- Total length should be at least {min_length} words"
 )
 
@@ -123,6 +125,7 @@ class SurveyWritingTool:
         include_citations: bool = True,
         language: str = "zh-CN",
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> ResearchReport:
         """Async generate — uses LLM if available, falls back to heuristic."""
         min_length = _effective_min_length(self.llm_adapter, min_length)
@@ -132,6 +135,7 @@ class SurveyWritingTool:
                     topic=topic, task_id=task_id, papers=papers, warnings=warnings,
                     style=style, min_length=min_length, include_citations=include_citations, language=language,
                     supervisor_instruction=supervisor_instruction,
+                    skill_context=skill_context,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("LLM survey generation failed, falling back to heuristic: %s", exc)
@@ -152,6 +156,7 @@ class SurveyWritingTool:
         include_citations: bool = True,
         language: str = "zh-CN",
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> ResearchReport:
         warnings = warnings or []
         papers_with_summary = [
@@ -180,6 +185,8 @@ class SurveyWritingTool:
         }
         if supervisor_instruction:
             input_data["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            input_data["skill_context"] = skill_context
         result = await self.llm_adapter.generate_structured(
             prompt=_SURVEY_PROMPT if _is_chinese_language(language) else _SURVEY_PROMPT_EN,
             input_data=input_data,

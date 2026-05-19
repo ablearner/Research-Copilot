@@ -136,6 +136,20 @@ class ResearchAgentToolContext:
             return self.report.workspace
         return None
 
+    def expert_context(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        supervisor_instruction = str(self.supervisor_instruction or "").strip()
+        if supervisor_instruction:
+            payload["supervisor_instruction"] = supervisor_instruction
+        skill_context = str(self.skill_context or "").strip()
+        if skill_context:
+            payload["skill_context"] = skill_context
+        selection = self.skill_selection
+        active_skill_names = list(getattr(selection, "active_skill_names", []) or []) if selection is not None else []
+        if active_skill_names:
+            payload["active_skill_names"] = active_skill_names
+        return payload
+
 
 STATE_DELTA_METADATA_KEY = "__state_delta__"
 

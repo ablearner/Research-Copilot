@@ -112,7 +112,12 @@ class PaperAnalysisAgent:
             task_topic=analysis_input.task_topic,
             report_highlights=analysis_input.report_highlights,
             evidence_hits=evidence_hits,
-            supervisor_instruction=context.supervisor_instruction,
+            supervisor_instruction=analysis_input.metadata.get("supervisor_instruction"),
+            skill_context=(
+                analysis_input.metadata.get("expert_context", {}).get("skill_context")
+                if isinstance(analysis_input.metadata.get("expert_context"), dict)
+                else None
+            ),
         )
         ws_result = persist_workspace_results(
             context,
@@ -256,6 +261,7 @@ class PaperAnalysisAgent:
         report_highlights: list[str] | None = None,
         evidence_hits: list[RetrievalHit] | None = None,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
         return await self.paper_analysis_tool.analyze_async(
             question=question,
@@ -264,4 +270,5 @@ class PaperAnalysisAgent:
             report_highlights=report_highlights or [],
             evidence_hits=evidence_hits or [],
             supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
         )

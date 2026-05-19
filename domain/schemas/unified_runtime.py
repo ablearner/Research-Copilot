@@ -214,6 +214,9 @@ class UnifiedReviewDraftInput(BaseModel):
     refinement_used: bool = False
     max_papers: int = Field(default=1, ge=1)
     report: ResearchReport | None = None
+    supervisor_instruction: str | None = None
+    skill_context: str | None = None
+    expert_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class UnifiedLiteratureSearchInput(BaseModel):
@@ -360,6 +363,7 @@ class UnifiedPaperAnalysisInput(BaseModel):
     papers: list[PaperCandidate] = Field(default_factory=list)
     task_topic: str = ""
     report_highlights: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def resolved_question(self) -> str:
         focus = (self.analysis_focus or "").strip().lower()

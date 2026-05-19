@@ -2111,6 +2111,145 @@ async def test_ask_task_collection_routes_chart_like_question_to_chart_drilldown
 
 
 @pytest.mark.asyncio
+async def test_ask_task_collection_ignores_supervisor_chart_route_for_plain_paper_content(tmp_path) -> None:
+    report_service = ResearchReportService(tmp_path / "research")
+    task = ResearchTask(
+        task_id="task_plain_content_route_1",
+        topic="agentic scientific QA",
+        status="completed",
+        created_at="2026-04-17T00:00:00+00:00",
+        updated_at="2026-04-17T00:00:00+00:00",
+        sources=["arxiv"],
+        paper_count=1,
+        imported_document_ids=["doc_2"],
+        report_id="report_plain_content_route_1",
+    )
+    report_service.save_task(task)
+    report_service.save_report(
+        ResearchReport(
+            report_id="report_plain_content_route_1",
+            task_id=task.task_id,
+            topic=task.topic,
+            generated_at="2026-04-17T00:00:00+00:00",
+            markdown="# 文献调研报告：agentic scientific QA",
+            paper_count=1,
+        )
+    )
+    report_service.save_papers(
+        task.task_id,
+        [
+            PaperCandidate(
+                paper_id="paper-b",
+                title="Paper B",
+                abstract="B",
+                source="arxiv",
+                ingest_status="ingested",
+                metadata={"document_id": "doc_2"},
+            )
+        ],
+    )
+    service = LiteratureResearchService(
+        paper_search_service=PaperSearchServiceStub(),
+        report_service=report_service,
+        paper_import_service=object(),
+    )
+    graph_runtime = GraphRuntimeDocumentDrilldownStub()
+
+    response = await service.ask_task_collection(
+        task.task_id,
+        ResearchTaskAskRequest(
+            question="请介绍这篇论文的核心思路、方法和实验结果。",
+            top_k=8,
+            paper_ids=["paper-b"],
+            metadata={
+                "routing_authority": "supervisor_llm",
+                "preferred_qa_route": "chart_drilldown",
+            },
+        ),
+        graph_runtime=graph_runtime,
+    )
+
+    assert response.qa.metadata["qa_route"] == "document_drilldown"
+    assert response.qa.metadata["ignored_preferred_qa_route"] == "chart_drilldown"
+    assert graph_runtime.last_handle_ask_document_kwargs is not None
+    assert graph_runtime.last_handle_ask_fused_kwargs is None
+    assert graph_runtime.last_handle_ask_document_kwargs["filters"]["qa_route"] == "document_drilldown"
+
+
+@pytest.mark.asyncio
+async def test_ask_task_collection_ignores_stale_visual_anchor_for_plain_paper_content(tmp_path) -> None:
+    report_service = ResearchReportService(tmp_path / "research")
+    task = ResearchTask(
+        task_id="task_plain_content_with_anchor_route_1",
+        topic="agentic scientific QA",
+        status="completed",
+        created_at="2026-04-17T00:00:00+00:00",
+        updated_at="2026-04-17T00:00:00+00:00",
+        sources=["arxiv"],
+        paper_count=1,
+        imported_document_ids=["doc_2"],
+        report_id="report_plain_content_with_anchor_route_1",
+    )
+    report_service.save_task(task)
+    report_service.save_report(
+        ResearchReport(
+            report_id="report_plain_content_with_anchor_route_1",
+            task_id=task.task_id,
+            topic=task.topic,
+            generated_at="2026-04-17T00:00:00+00:00",
+            markdown="# 文献调研报告：agentic scientific QA",
+            paper_count=1,
+        )
+    )
+    report_service.save_papers(
+        task.task_id,
+        [
+            PaperCandidate(
+                paper_id="paper-b",
+                title="Paper B",
+                abstract="B",
+                source="arxiv",
+                ingest_status="ingested",
+                metadata={"document_id": "doc_2"},
+            )
+        ],
+    )
+    service = LiteratureResearchService(
+        paper_search_service=PaperSearchServiceStub(),
+        report_service=report_service,
+        paper_import_service=object(),
+    )
+    graph_runtime = GraphRuntimeDocumentDrilldownStub()
+
+    response = await service.ask_task_collection(
+        task.task_id,
+        ResearchTaskAskRequest(
+            question="请介绍这篇论文的核心思路、方法和实验结果。",
+            top_k=8,
+            paper_ids=["paper-b"],
+            metadata={
+                "routing_authority": "supervisor_llm",
+                "preferred_qa_route": "chart_drilldown",
+                "visual_anchor": {
+                    "paper_id": "paper-b",
+                    "figure_id": "paper-b:fig-1",
+                    "chart_id": "chart-1",
+                    "image_path": "/tmp/previous-chart.png",
+                },
+            },
+        ),
+        graph_runtime=graph_runtime,
+    )
+
+    assert response.qa.metadata["qa_route"] == "document_drilldown"
+    assert response.qa.metadata["ignored_preferred_qa_route"] == "chart_drilldown"
+    assert response.qa.metadata["visual_anchor"] is None
+    assert graph_runtime.last_handle_ask_document_kwargs is not None
+    assert graph_runtime.last_handle_ask_fused_kwargs is None
+    assert graph_runtime.last_handle_ask_document_kwargs["filters"]["qa_route"] == "document_drilldown"
+
+
+@pytest.mark.asyncio
 async def test_ask_task_collection_can_conservatively_recover_from_collection_qa_to_document_drilldown(tmp_path) -> None:
     report_service = ResearchReportService(tmp_path / "research")
     task = ResearchTask(

@@ -2,18 +2,23 @@
 name: literature-survey
 description: "根据研究主题生成文献综述大纲和初稿，覆盖背景、方法分类、趋势分析。默认先用候选论文元数据和摘要完成搜索后综述；只有用户明确要求全文、导入、PDF 入库、精读或证据问答时，才把 import_papers 作为后续步骤。"
 planner_guidance: >
-  For broad literature survey or research-overview requests, plan discovery and
-  metadata/abstract-based review first: search_literature -> write_review ->
-  finalize. Do not schedule import_papers only because importable candidates
-  exist or because a first draft can be improved. Treat import_papers as an
-  optional follow-up for explicit full-text, PDF ingestion, local workspace,
-  close-reading, or grounded QA requests.
+  For broad literature survey or research-overview requests, metadata and
+  abstracts are sufficient for the first-pass review. Do not schedule
+  import_papers only because importable candidates exist or because a draft can
+  be improved. Treat import_papers as a side-effect action reserved for explicit
+  full-text, PDF ingestion, local workspace, close-reading, or grounded QA
+  requests.
 planning_policy:
-  default_workflow: [search_literature, write_review, finalize]
-  action_policies:
+  intended_use: [broad_literature_survey, topic_overview, abstract_level_review]
+  works_with: [candidate_papers, metadata, abstracts]
+  actions:
+    write_review:
+      preferred_when: [candidate_papers_available]
+      does_not_require: [imported_full_text]
     import_papers:
+      side_effect: true
       default_enabled: false
-      enable_when: [auto_import, mode_import, mode_qa, paper_import_intent, collection_qa_intent, single_paper_qa_intent]
+      enable_when: [auto_import_requested, mode_import, mode_qa, explicit_import_intent, full_text_qa_intent, close_reading_intent]
       blocked_recovery: finalize
       blocked_reason: "Literature survey defaults to metadata/abstract review; import_papers is only enabled by explicit import/full-text intent."
   failure_recovery:

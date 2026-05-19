@@ -88,6 +88,8 @@ class PaperOperationsMixin:
         *,
         graph_runtime: Any,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> AnalyzeResearchPaperFigureResponse:
         _, paper = self._resolve_imported_paper(task_id=task_id, paper_id=paper_id)
         return await self.chart_analysis_agent.analyze_paper_figure(
@@ -98,6 +100,8 @@ class PaperOperationsMixin:
             load_cached_figure_target=self._load_cached_figure_target,
             parse_imported_paper_document=self._parse_imported_paper_document,
             supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
+            expert_context=expert_context,
         )
 
     def _load_cached_figure_payload(self, *, paper: PaperCandidate) -> dict[str, Any] | None:

@@ -232,7 +232,7 @@ class TestParsing:
             description: "A great skill"
             planner_guidance: "Plan with metadata first."
             planning_policy:
-              action_policies:
+              actions:
                 import_papers:
                   default_enabled: false
             version: 2.0.0
@@ -250,7 +250,7 @@ class TestParsing:
         assert skill.meta.name == "my-skill"
         assert skill.meta.description == "A great skill"
         assert skill.meta.planner_guidance == "Plan with metadata first."
-        assert skill.meta.planning_policy["action_policies"]["import_papers"]["default_enabled"] is False
+        assert skill.meta.planning_policy["actions"]["import_papers"]["default_enabled"] is False
         assert skill.meta.version == "2.0.0"
         assert skill.meta.category == "research"
         assert "paper" in skill.meta.tags

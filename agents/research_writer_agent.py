@@ -63,14 +63,14 @@ class ResearchWriterAgent:
                 metadata={"reason": "missing_task"},
             )
 
-        review_input = build_review_draft_input(context=context)
+        review_input = build_review_draft_input(context=context, decision=decision)
         existing_report = review_input.report
-        candidate_report = existing_report or self.synthesize(review_input)
+        candidate_report = existing_report or await self.synthesize_async(review_input)
         retry_count = 0
         quality = self._quality_metrics(candidate_report)
         if not quality["passed"]:
             retry_count += 1
-            candidate_report = self.synthesize(review_input)
+            candidate_report = await self.synthesize_async(review_input)
             quality = self._quality_metrics(candidate_report)
 
         generated_at = _now_iso()
@@ -198,6 +198,7 @@ class ResearchWriterAgent:
             warnings=state.warnings,
             language=language,
             supervisor_instruction=getattr(state, "supervisor_instruction", None),
+            skill_context=getattr(state, "skill_context", None),
         )
         return self._finalize_report(base_report, state)
 
@@ -460,9 +461,18 @@ class ResearchWriterAgent:
             **preference_context,
         }
         _request_meta = getattr(state.request, "metadata", {}) or {}
-        _sup_instr = str(_request_meta.get("supervisor_instruction") or "").strip() or None
+        _expert_context = _request_meta.get("expert_context") if isinstance(_request_meta.get("expert_context"), dict) else {}
+        _sup_instr = (
+            str(_expert_context.get("supervisor_instruction") or "").strip()
+            or str(_request_meta.get("supervisor_instruction") or "").strip()
+            or None
+        )
+        _skill_context = str(_expert_context.get("skill_context") or _request_meta.get("skill_context") or "").strip() or None
         if _sup_instr:
             preference_context["supervisor_instruction"] = _sup_instr
+        if _skill_context:
+            preference_context["skill_context"] = _skill_context
+            preference_context["expert_context"] = _expert_context
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
         selected_paper_analysis = await self._analyze_selected_papers(state)
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import logging
+from pathlib import Path
 import re
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
@@ -16,6 +17,68 @@ from tools.research import ResearchEvaluationTool
 
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_SUPERVISOR_SOUL_PROMPT = (
+    "You are the autonomous research manager for a multi-agent literature research system.\n"
+    "Choose exactly one next action. Prefer worker autonomy over fixed pipelines.\n"
+    "Use the available actions, current workspace state, recent task outcomes, and evidence gaps.\n"
+    "You will receive guardrail_hints from the rule-based pre-screening layer. "
+    "These are keyword-based suggestions that may be semantically incorrect. "
+    "Always interpret the user's message holistically and override any guardrail hint "
+    "when the true semantic intent of the user's request disagrees with the suggested action.\n"
+    "Use state.user_intent as a hint, not as a hard rule. "
+    "If it says needs_clarification, evaluate whether clarification is truly needed "
+    "based on the full context — for example, if there is exactly 1 imported document and the user says '这篇论文', "
+    "it almost certainly refers to that document rather than requiring clarification; "
+    "if the user says '讲解导入论文的方法', the word '导入' is part of the noun phrase meaning 'the imported paper', "
+    "not an import command.\n"
+    "Use state.route_mode, state.active_thread_topic, state.topic_continuity_score, and state.new_topic_detected to decide whether to continue the current research thread or start a fresh discovery path.\n"
+    "Use state.latest_result_task_type, state.latest_progress_made, state.latest_result_confidence, state.latest_missing_inputs, and state.latest_suggested_next_actions as strong feedback from the most recent worker execution.\n"
+    "When state.route_mode is general_chat or state.should_ignore_research_context is true, avoid inheriting the previous paper scope unless the user explicitly re-enters it.\n"
+    "When the user asks about a figure, diagram, chart, architecture, or system block diagram in an imported paper, choose analyze_paper_figures to extract and analyze the visual element directly from the PDF.\n"
+    "When state.has_visual_anchor is true and the user uses anaphora such as '这张图', '这个图片', 'the figure', or asks a follow-up about a just-analyzed visual, reuse state.latest_visual_anchor and choose analyze_paper_figures rather than asking which figure again, unless the user explicitly rejects the anchor or asks for a different figure.\n"
+    "Use answer_question when the user asks a specific question about paper content (e.g. methods, results, contributions of a single paper). "
+    "Use analyze_papers only for multi-paper comparison, recommendation among candidates, or structured cross-paper analysis. "
+    "A single-paper detail question like '这篇论文的方法是什么' must use answer_question, not analyze_papers.\n"
+    "When the user asks a general question that does not require literature search, paper import, local evidence retrieval, document parsing, or chart analysis, choose general_answer.\n"
+    "When the user asks for broad, unscoped papers worth reading and the request should use the user's long-term interests instead of the current paper scope, choose recommend_from_preferences.\n"
+    "For simple, single-intent requests, decide the single best next worker action now.\n"
+    "For complex, multi-intent requests (e.g. 'search papers, compare them, then import the best'), "
+    "produce a multi-step plan in the 'plan' field. Each step should have step_id, action, instruction, "
+    "params, and depends_on (list of step_ids this step depends on). Set action_name to the first step's action. "
+    "The runtime will execute steps in order, advancing automatically after each succeeds. "
+    "If a step fails, the plan is cleared and you will be called again to replan. "
+    "Only use plan for genuinely multi-step requests; do not plan for single actions.\n"
+    "Use finalize when the workspace is already useful, a requested action is complete, a clarification is required, or no action has enough marginal value.\n"
+    "Do not repeat a search, answer, paper analysis, import, or writing action that already succeeded in the recent results unless the state clearly changed.\n"
+    "When selecting a worker action, provide a concrete instruction that helps the worker act independently.\n"
+    "Interpret user intent semantically rather than mechanically: if the user asks to import/save/add a paper into Zotero or a citation manager, choose sync_to_zotero; "
+    "if the user asks to ingest/import papers for grounded QA, local evidence retrieval, or workspace use, choose import_papers.\n"
+    "When the user refers to candidate papers by ordinal, title, topic, or phrases like 'this paper'/'these papers', "
+    "resolve the intended candidate papers from state.candidate_papers and include their exact paper_ids in payload.paper_ids. "
+    "If the user asks a follow-up that omits the paper subject and state.active_paper_ids is non-empty, "
+    "treat state.active_paper_ids as the default paper scope unless the user names a different paper. "
+    "Use payload.paper_ids for answer_question, analyze_papers, import_papers, sync_to_zotero, and compress_context when the user targets a subset; "
+    "leave it empty only when the user clearly asks about the whole collection or a new search.\n"
+    "For answer_question, you must also decide payload.qa_route as one of collection_qa, document_drilldown, or chart_drilldown. "
+    "Downstream services should execute your route instead of deciding it again.\n"
+    "You will receive skill_candidates as lightweight skill manifests. "
+    "When a candidate includes planner_guidance or planning_policy, treat it as domain-specific planning guidance for that skill. "
+    "Use planning_policy to respect action boundaries and side-effect gates, not as a fixed workflow script. "
+    "Select zero or more selected_skill_names from those candidates for the specialist task you choose. "
+    "Do not invent skill names and do not rely on any full skill instructions at manager level; "
+    "the runtime will load the selected SKILL.md body and inject it into the specialist only.\n"
+    "Keep payload fields compact and directly actionable.\n"
+    "Before choosing an action, first resolve the user's true intent from their message. "
+    "The heuristic intent in state.user_intent is a hint but may be inaccurate — "
+    "override it with resolved_intent if you disagree. "
+    "If the user refers to papers by ordinal, title, or phrases like '这篇'/'第一篇'/'p1', "
+    "resolve the actual paper_ids from state.candidate_papers into resolved_paper_ids."
+)
+
+_DEFAULT_SUPERVISOR_SOUL_PATH = (
+    Path(__file__).resolve().parents[1] / "prompts" / "supervisor" / "Soul.md"
+)
 
 
 ResearchSupervisorActionName = Literal[
@@ -64,6 +127,8 @@ class ResearchSupervisorState:
     imported_document_count: int = 0
     has_document_input: bool = False
     has_chart_input: bool = False
+    has_visual_anchor: bool = False
+    latest_visual_anchor: dict[str, Any] = field(default_factory=dict)
     document_understood: bool = False
     chart_understood: bool = False
     has_import_candidates: bool = False
@@ -135,6 +200,16 @@ class ResearchSupervisorLLMDecision(BaseModel):
     plan: list[PlanStep] = Field(default_factory=list)
     selected_skill_names: list[str] = Field(default_factory=list)
 
+    @field_validator("payload", "expected_output_schema", mode="before")
+    @classmethod
+    def _coerce_dict_fields(cls, value: Any) -> dict[str, Any]:
+        return {} if value is None else value
+
+    @field_validator("plan", "selected_skill_names", "resolved_paper_ids", mode="before")
+    @classmethod
+    def _coerce_list_fields(cls, value: Any) -> list[Any]:
+        return [] if value is None else value
+
 
 class ResearchSupervisorAgent:
     """Goal-directed manager for the literature research assistant.
@@ -149,9 +224,16 @@ class ResearchSupervisorAgent:
         *,
         evaluation_tool: ResearchEvaluationTool | None = None,
         llm_adapter: BaseLLMAdapter | None = None,
+        soul_prompt_path: str | Path | None = None,
     ) -> None:
         self.evaluation_tool = evaluation_tool or ResearchEvaluationTool()
         self.llm_adapter = llm_adapter
+        self.soul_prompt_path = (
+            Path(soul_prompt_path)
+            if soul_prompt_path is not None
+            else _DEFAULT_SUPERVISOR_SOUL_PATH
+        )
+        self._soul_prompt_cache: str | None = None
 
     async def decide_next_action_async(
         self,
@@ -983,28 +1065,31 @@ class ResearchSupervisorAgent:
 
     def _skill_action_policy(self, state: ResearchSupervisorState, action_name: str) -> dict[str, Any] | None:
         for policy in self._skill_planning_policies(state):
-            action_policies = policy.get("action_policies")
-            if not isinstance(action_policies, dict):
-                continue
-            action_policy = action_policies.get(action_name)
-            if isinstance(action_policy, dict):
-                return action_policy
+            for key in ("actions", "action_policies"):
+                action_policies = policy.get(key)
+                if not isinstance(action_policies, dict):
+                    continue
+                action_policy = action_policies.get(action_name)
+                if isinstance(action_policy, dict):
+                    return action_policy
         return None
 
     def _skill_policy_condition_met(self, condition: str, state: ResearchSupervisorState) -> bool:
         key = str(condition or "").strip().lower()
         intent_name = str(state.user_intent.get("intent") or "").strip()
-        if key in {"auto_import", "request.auto_import"}:
+        if key in {"auto_import", "auto_import_requested", "request.auto_import"}:
             return state.auto_import and state.import_top_k > 0
         if key in {"mode_import", "request.mode_import"}:
             return state.mode == "import"
         if key in {"mode_qa", "request.mode_qa"}:
             return state.mode == "qa"
-        if key == "paper_import_intent":
+        if key in {"paper_import_intent", "explicit_import_intent"}:
             return intent_name == "paper_import"
         if key == "collection_qa_intent":
             return intent_name == "collection_qa"
-        if key == "single_paper_qa_intent":
+        if key == "full_text_qa_intent":
+            return intent_name in {"collection_qa", "single_paper_qa"}
+        if key in {"single_paper_qa_intent", "close_reading_intent"}:
             return intent_name == "single_paper_qa"
         if key == "selected_papers":
             return state.selected_paper_count > 0 or bool(state.user_intent.get("resolved_paper_ids"))
@@ -1748,61 +1833,18 @@ class ResearchSupervisorAgent:
         return "Visible under the current workspace state and available for supervisor selection."
 
     def _llm_prompt(self) -> str:
-        return (
-            "You are the autonomous research manager for a multi-agent literature research system.\n"
-            "Choose exactly one next action. Prefer worker autonomy over fixed pipelines.\n"
-            "Use the available actions, current workspace state, recent task outcomes, and evidence gaps.\n"
-            "You will receive guardrail_hints from the rule-based pre-screening layer. "
-            "These are keyword-based suggestions that may be semantically incorrect. "
-            "Always interpret the user's message holistically and override any guardrail hint "
-            "when the true semantic intent of the user's request disagrees with the suggested action.\n"
-            "Use state.user_intent as a hint, not as a hard rule. "
-            "If it says needs_clarification, evaluate whether clarification is truly needed "
-            "based on the full context — for example, if there is exactly 1 imported document and the user says '这篇论文', "
-            "it almost certainly refers to that document rather than requiring clarification; "
-            "if the user says '讲解导入论文的方法', the word '导入' is part of the noun phrase meaning 'the imported paper', "
-            "not an import command.\n"
-            "Use state.route_mode, state.active_thread_topic, state.topic_continuity_score, and state.new_topic_detected to decide whether to continue the current research thread or start a fresh discovery path.\n"
-            "Use state.latest_result_task_type, state.latest_progress_made, state.latest_result_confidence, state.latest_missing_inputs, and state.latest_suggested_next_actions as strong feedback from the most recent worker execution.\n"
-            "When state.route_mode is general_chat or state.should_ignore_research_context is true, avoid inheriting the previous paper scope unless the user explicitly re-enters it.\n"
-            "When the user asks about a figure, diagram, chart, architecture, or system block diagram in an imported paper, choose analyze_paper_figures to extract and analyze the visual element directly from the PDF.\n"
-            "Use answer_question when the user asks a specific question about paper content (e.g. methods, results, contributions of a single paper). "
-            "Use analyze_papers only for multi-paper comparison, recommendation among candidates, or structured cross-paper analysis. "
-            "A single-paper detail question like '这篇论文的方法是什么' must use answer_question, not analyze_papers.\n"
-            "When the user asks a general question that does not require literature search, paper import, local evidence retrieval, document parsing, or chart analysis, choose general_answer.\n"
-            "When the user asks for broad, unscoped papers worth reading and the request should use the user's long-term interests instead of the current paper scope, choose recommend_from_preferences.\n"
-            "For simple, single-intent requests, decide the single best next worker action now.\n"
-            "For complex, multi-intent requests (e.g. 'search papers, compare them, then import the best'), "
-            "produce a multi-step plan in the 'plan' field. Each step should have step_id, action, instruction, "
-            "params, and depends_on (list of step_ids this step depends on). Set action_name to the first step's action. "
-            "The runtime will execute steps in order, advancing automatically after each succeeds. "
-            "If a step fails, the plan is cleared and you will be called again to replan. "
-            "Only use plan for genuinely multi-step requests; do not plan for single actions.\n"
-            "Use finalize when the workspace is already useful, a requested action is complete, a clarification is required, or no action has enough marginal value.\n"
-            "Do not repeat a search, answer, paper analysis, import, or writing action that already succeeded in the recent results unless the state clearly changed.\n"
-            "When selecting a worker action, provide a concrete instruction that helps the worker act independently.\n"
-            "Interpret user intent semantically rather than mechanically: if the user asks to import/save/add a paper into Zotero or a citation manager, choose sync_to_zotero; "
-            "if the user asks to ingest/import papers for grounded QA, local evidence retrieval, or workspace use, choose import_papers.\n"
-            "When the user refers to candidate papers by ordinal, title, topic, or phrases like 'this paper'/'these papers', "
-            "resolve the intended candidate papers from state.candidate_papers and include their exact paper_ids in payload.paper_ids. "
-            "If the user asks a follow-up that omits the paper subject and state.active_paper_ids is non-empty, "
-            "treat state.active_paper_ids as the default paper scope unless the user names a different paper. "
-            "Use payload.paper_ids for answer_question, analyze_papers, import_papers, sync_to_zotero, and compress_context when the user targets a subset; "
-            "leave it empty only when the user clearly asks about the whole collection or a new search.\n"
-            "For answer_question, you must also decide payload.qa_route as one of collection_qa, document_drilldown, or chart_drilldown. "
-            "Downstream services should execute your route instead of deciding it again.\n"
-            "You will receive skill_candidates as lightweight Markdown skill metadata. "
-            "When a candidate includes planner_guidance, treat it as domain-specific planning guidance for that skill. "
-            "Select zero or more selected_skill_names from those candidates for the specialist task you choose. "
-            "Do not invent skill names and do not rely on any full skill instructions at manager level; "
-            "the runtime will load the selected SKILL.md body and inject it into the specialist only.\n"
-            "Keep payload fields compact and directly actionable.\n"
-            "Before choosing an action, first resolve the user's true intent from their message. "
-            "The heuristic intent in state.user_intent is a hint but may be inaccurate — "
-            "override it with resolved_intent if you disagree. "
-            "If the user refers to papers by ordinal, title, or phrases like '这篇'/'第一篇'/'p1', "
-            "resolve the actual paper_ids from state.candidate_papers into resolved_paper_ids."
-        )
+        return self._load_soul_prompt()
+
+    def _load_soul_prompt(self) -> str:
+        if self._soul_prompt_cache is not None:
+            return self._soul_prompt_cache
+        try:
+            content = self.soul_prompt_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            content = ""
+            logger.warning("Supervisor Soul prompt not found; using built-in fallback")
+        self._soul_prompt_cache = content or _DEFAULT_SUPERVISOR_SOUL_PROMPT
+        return self._soul_prompt_cache
 
     def _state_snapshot(self, state: ResearchSupervisorState) -> dict[str, Any]:
         snapshot: dict[str, Any] = {
@@ -1815,6 +1857,7 @@ class ResearchSupervisorAgent:
             "imported_document_count": state.imported_document_count,
             "has_document_input": state.has_document_input,
             "has_chart_input": state.has_chart_input,
+            "has_visual_anchor": state.has_visual_anchor,
             "workspace_stage": state.workspace_stage,
             "last_action_name": state.last_action_name,
             "latest_result_task_type": state.latest_result_task_type,
@@ -1835,6 +1878,7 @@ class ResearchSupervisorAgent:
             "context_compressed": state.context_compressed,
             "paper_analysis_completed": state.paper_analysis_completed,
             "paper_analysis_hint": state.paper_analysis_requested,
+            "latest_visual_anchor": dict(state.latest_visual_anchor),
             "active_paper_count": len(state.active_paper_ids),
             "preference_recommendation_requested": state.preference_recommendation_requested,
             "analysis_focus": state.analysis_focus,
@@ -1856,6 +1900,7 @@ class ResearchSupervisorAgent:
             "context_compressed": False,
             "paper_analysis_completed": False,
             "paper_analysis_hint": False,
+            "latest_visual_anchor": {},
             "active_paper_count": 0,
             "preference_recommendation_requested": False,
             "analysis_focus": None,
@@ -2048,6 +2093,16 @@ class ResearchSupervisorAgent:
             )
         if action_name == "sync_to_zotero":
             payload.update({"collection_name": None})
+        if action_name == "analyze_paper_figures":
+            anchor = dict(state.latest_visual_anchor or {})
+            if anchor:
+                payload["visual_anchor"] = anchor
+                if anchor.get("paper_id"):
+                    payload["paper_ids"] = [str(anchor["paper_id"])]
+                if anchor.get("figure_id"):
+                    payload["figure_id"] = str(anchor["figure_id"])
+                if anchor.get("chart_id"):
+                    payload["chart_id"] = str(anchor["chart_id"])
         return payload
 
     def _default_instruction_for_action(
@@ -2095,6 +2150,8 @@ class ResearchSupervisorAgent:
         if action_name == "supervisor_understand_chart":
             return "Understand the uploaded chart and convert it into structured evidence for later reasoning."
         if action_name == "analyze_paper_figures":
+            if state.latest_visual_anchor:
+                return f"Reuse the latest analyzed paper figure anchor to answer the user's follow-up about '{state.goal}'."
             return f"Extract and analyze figures from an imported paper's PDF to answer the user's figure question about '{state.goal}'."
         return "Stop and return control to the user."
 

@@ -477,7 +477,13 @@ class ResearchCollectionAnswerCapability:
             "question_scope_document_count": len(state.document_ids),
         }
         _request_meta = getattr(state.request, "metadata", {}) or {}
-        supervisor_instruction = str(_request_meta.get("supervisor_instruction") or "").strip() or None
+        expert_context = _request_meta.get("expert_context") if isinstance(_request_meta.get("expert_context"), dict) else {}
+        supervisor_instruction = (
+            str(expert_context.get("supervisor_instruction") or "").strip()
+            or str(_request_meta.get("supervisor_instruction") or "").strip()
+            or None
+        )
+        skill_context = str(expert_context.get("skill_context") or _request_meta.get("skill_context") or "").strip() or None
         preference_context = {
             **(getattr(execution_context, "preference_context", None) or {}),
             "reasoning_style": state.request.reasoning_style or "cot",
@@ -490,6 +496,9 @@ class ResearchCollectionAnswerCapability:
         }
         if supervisor_instruction:
             preference_context["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            preference_context["skill_context"] = skill_context
+            preference_context["expert_context"] = expert_context
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
         selected_paper_analysis = await self._analyze_selected_papers(state)
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal
+from uuid import uuid4
 
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.general_answer_agent import GeneralAnswerAgent
@@ -160,6 +161,99 @@ class ResearchRuntimeBase:
     def _manager_trace_agent_name(self) -> str:
         return self._manager_display_name()
 
+    @staticmethod
+    def _metadata_dict(value: Any) -> dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    def _visual_anchor_from_metadata(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        data = self._metadata_dict(metadata)
+        candidates = [
+            data.get("visual_anchor"),
+            data.get("last_visual_anchor"),
+            data.get("latest_paper_figure_analysis"),
+        ]
+        for candidate in candidates:
+            anchor = self._metadata_dict(candidate)
+            if self._is_visual_anchor(anchor):
+                return self._normalize_visual_anchor(anchor)
+        figure = self._metadata_dict(data.get("last_visual_anchor_figure"))
+        if self._is_visual_anchor(figure):
+            return self._normalize_visual_anchor(figure)
+        return {}
+
+    @staticmethod
+    def _is_visual_anchor(anchor: dict[str, Any]) -> bool:
+        return any(str(anchor.get(key) or "").strip() for key in ("image_path", "figure_id", "chart_id", "page_id"))
+
+    @staticmethod
+    def _normalize_visual_anchor(anchor: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "paper_id",
+            "paper_title",
+            "figure_id",
+            "page_id",
+            "page_number",
+            "chart_id",
+            "image_path",
+            "source",
+            "anchor_source",
+            "anchor_selection",
+            "anchor_rationale",
+        )
+        normalized = {key: anchor.get(key) for key in keys if anchor.get(key) not in (None, "")}
+        if "anchor_source" not in normalized:
+            normalized["anchor_source"] = "workspace_visual_anchor"
+        return normalized
+
+    def _visual_anchor_from_request_metadata(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        data = self._metadata_dict(metadata)
+        anchor = self._visual_anchor_from_metadata(data)
+        if anchor:
+            return anchor
+        context = self._metadata_dict(data.get("context"))
+        return self._visual_anchor_from_metadata(context)
+
+    def _visual_anchor_from_task_response(
+        self,
+        task_response: ResearchTaskResponse | None,
+    ) -> dict[str, Any]:
+        if task_response is None:
+            return {}
+        for workspace in (
+            getattr(getattr(task_response, "task", None), "workspace", None),
+            getattr(getattr(task_response, "report", None), "workspace", None),
+        ):
+            metadata = self._metadata_dict(getattr(workspace, "metadata", None))
+            anchor = self._visual_anchor_from_metadata(metadata)
+            if anchor:
+                return anchor
+        return {}
+
+    def _visual_anchor_from_hydration_sources(
+        self,
+        *,
+        request_metadata: dict[str, Any],
+        snapshot: Any,
+        restored_task_response: ResearchTaskResponse | None,
+    ) -> dict[str, Any]:
+        for anchor in (
+            self._visual_anchor_from_request_metadata(request_metadata),
+            self._visual_anchor_from_metadata(
+                getattr(getattr(snapshot, "workspace", None), "metadata", None)
+            ),
+            self._visual_anchor_from_task_response(restored_task_response),
+        ):
+            if anchor:
+                return anchor
+        return {}
+
+    def _request_has_visual_anchor(self, request: ResearchAgentRunRequest) -> bool:
+        return bool(
+            request.chart_image_path
+            or request.chart_id
+            or self._visual_anchor_from_request_metadata(request.metadata)
+        )
+
     def _hydrate_request_from_conversation(
         self,
         *,
@@ -189,8 +283,23 @@ class ResearchRuntimeBase:
         elif snapshot.task_result is not None:
             restored_task_response = snapshot.task_result
 
+        metadata = dict(request.metadata or {})
+        metadata_context = (
+            dict(metadata.get("context") or {})
+            if isinstance(metadata.get("context"), dict)
+            else {}
+        )
+        visual_anchor = self._visual_anchor_from_hydration_sources(
+            request_metadata=metadata,
+            snapshot=snapshot,
+            restored_task_response=restored_task_response,
+        )
+        anchor_paper_id = str(visual_anchor.get("paper_id") or "").strip()
+
         inherit_scope = _should_inherit_snapshot_scope(request=request, snapshot=snapshot)
         selected_paper_ids = list(request.selected_paper_ids)
+        if not selected_paper_ids and anchor_paper_id:
+            selected_paper_ids = [anchor_paper_id]
         if not selected_paper_ids and inherit_scope:
             selected_paper_ids = list(
                 snapshot.selected_paper_ids
@@ -227,17 +336,16 @@ class ResearchRuntimeBase:
                 if str(item).strip()
             ]
 
-        metadata = dict(request.metadata or {})
-        metadata_context = (
-            dict(metadata.get("context") or {})
-            if isinstance(metadata.get("context"), dict)
-            else {}
-        )
+        if visual_anchor:
+            metadata.setdefault("visual_anchor", visual_anchor)
+            metadata_context.setdefault("visual_anchor", visual_anchor)
         active_paper_ids = [
             str(item).strip()
             for item in metadata_context.get("active_paper_ids", [])
             if str(item).strip()
         ]
+        if not active_paper_ids and anchor_paper_id:
+            active_paper_ids = [anchor_paper_id]
         if not active_paper_ids and inherit_scope:
             active_paper_ids = list(snapshot.active_paper_ids or snapshot.selected_paper_ids or [])
         if active_paper_ids:
@@ -473,7 +581,7 @@ class ResearchRuntimeBase:
             candidate_papers=self._candidate_paper_scope_for_manager(context.papers),
             active_paper_ids=self._active_paper_ids_for_manager(context),
             selected_paper_ids=list(context.request.selected_paper_ids),
-            has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
+            has_visual_anchor=self._request_has_visual_anchor(context.request),
             has_document_input=bool(context.request.document_file_path),
             session_topic=session_ctx["previous_topic"] or None,
         )
@@ -547,6 +655,66 @@ class ResearchRuntimeBase:
                     "fast_route": True,
                     "route_mode": route_mode,
                     "intent": intent_name,
+                },
+            )
+        visual_anchor = self._visual_anchor_from_request_metadata(context.request.metadata)
+        if (
+            intent_name == "figure_qa"
+            and visual_anchor
+            and has_task
+            and is_first_step
+            and context.task is not None
+            and context.task.imported_document_ids
+        ):
+            paper_id = str(visual_anchor.get("paper_id") or "").strip()
+            payload: dict[str, Any] = {
+                "goal": context.request.message,
+                "mode": context.request.mode,
+                "question": context.request.message,
+                "visual_anchor": visual_anchor,
+            }
+            if paper_id:
+                payload["paper_ids"] = [paper_id]
+            if visual_anchor.get("figure_id"):
+                payload["figure_id"] = str(visual_anchor["figure_id"])
+            if visual_anchor.get("chart_id"):
+                payload["chart_id"] = str(visual_anchor["chart_id"])
+            active_message = AgentMessage(
+                task_id=f"fast_route_task_{uuid4().hex[:12]}",
+                agent_from="ResearchSupervisorAgent",
+                agent_to="ChartAnalysisAgent",
+                task_type="analyze_paper_figures",
+                instruction=(
+                    "Reuse the latest visual anchor from the previous paper figure analysis "
+                    "to answer the user's follow-up. Do not ask which figure again unless the anchor is rejected."
+                ),
+                payload=payload,
+                context_slice={},
+                priority="high",
+                expected_output_schema={"paper_id": "str", "figure_id": "str", "answer": "str"},
+                metadata={
+                    "decision_source": "fast_route",
+                    "manager_action": "analyze_paper_figures",
+                    "visual_anchor": visual_anchor,
+                },
+            )
+            logger.info("Fast-route: figure_qa + visual_anchor → analyze_paper_figures")
+            return ResearchSupervisorDecision(
+                action_name="analyze_paper_figures",
+                thought="The user is following up on the latest analyzed paper figure, so the persisted visual anchor can resolve the reference.",
+                rationale="fast_route:visual_anchor_followup",
+                phase="act",
+                estimated_gain=0.78,
+                estimated_cost=0.2,
+                action_input={**payload, "instruction": active_message.instruction},
+                metadata={
+                    "worker_agent": "ChartAnalysisAgent",
+                    "worker_task_type": "analyze_paper_figures",
+                    "active_message": active_message,
+                    "fast_route": True,
+                    "route_mode": route_mode,
+                    "intent": intent_name,
+                    "visual_anchor": visual_anchor,
                 },
             )
         return None
@@ -992,6 +1160,11 @@ class ResearchRuntimeBase:
         context.supervisor_instruction = (
             active_message.instruction.strip() if active_message is not None else None
         ) or None
+        if active_message is not None:
+            active_metadata = dict(active_message.metadata or {})
+            skill_context = str(active_metadata.get("skill_context") or "").strip()
+            if skill_context:
+                context.skill_context = skill_context
         result = await self._execute_agent_run_action(
             action_name=action_name,
             context=context,
@@ -1511,6 +1684,15 @@ class ResearchRuntimeBase:
             else None
         )
         request_metadata = context.request.metadata if isinstance(context.request.metadata, dict) else {}
+        latest_visual_anchor = (
+            self._visual_anchor_from_request_metadata(request_metadata)
+            or self._visual_anchor_from_metadata(workspace_metadata)
+        )
+        has_visual_anchor = bool(
+            context.request.chart_image_path
+            or context.request.chart_id
+            or latest_visual_anchor
+        )
         research_goal_lower = context.request.message.lower()
         session_ctx = session_context or self._resolve_session_context(context)
         metadata_comparison_dimension_values = request_metadata.get("comparison_dimensions")
@@ -1593,7 +1775,7 @@ class ResearchRuntimeBase:
                 candidate_papers=self._candidate_paper_scope_for_manager(papers),
                 active_paper_ids=active_paper_ids,
                 selected_paper_ids=list(context.request.selected_paper_ids),
-                has_visual_anchor=bool(context.request.chart_image_path or context.request.chart_id),
+                has_visual_anchor=self._request_has_visual_anchor(context.request),
                 has_document_input=bool(context.request.document_file_path),
                 session_topic=previous_topic or None,
             )
@@ -1623,6 +1805,8 @@ class ResearchRuntimeBase:
             imported_document_count=len(task.imported_document_ids) if task else 0,
             has_document_input=bool(context.request.document_file_path),
             has_chart_input=bool(context.request.chart_image_path),
+            has_visual_anchor=has_visual_anchor,
+            latest_visual_anchor=latest_visual_anchor,
             document_understood=context.document_attempted or context.parsed_document is not None,
             chart_understood=context.chart_attempted or context.chart_result is not None,
             has_import_candidates=has_import_candidates,
@@ -1995,6 +2179,9 @@ class ResearchRuntimeBase:
             return None
         result_metadata = getattr(chart_result, "metadata", None)
         result_metadata = dict(result_metadata) if isinstance(result_metadata, dict) else {}
+        chart = getattr(chart_result, "chart", None)
+        chart_metadata = getattr(chart, "metadata", None)
+        chart_metadata = dict(chart_metadata) if isinstance(chart_metadata, dict) else {}
         rejected_ids = [
             str(item).strip()
             for item in result_metadata.get("paper_figure_rejected_ids", [])
@@ -2006,7 +2193,13 @@ class ResearchRuntimeBase:
             "page_id": str(getattr(figure, "page_id", "") or ""),
             "page_number": getattr(figure, "page_number", None),
             "chart_id": str(getattr(figure, "chart_id", "") or ""),
-            "image_path": str(getattr(figure, "image_path", "") or ""),
+            "image_path": str(chart_metadata.get("image_path") or getattr(figure, "image_path", "") or ""),
+            "paper_title": str(getattr(chart_result, "paper_title", "") or ""),
+            "answer": str(getattr(chart_result, "answer", "") or ""),
+            "key_points": list(getattr(chart_result, "key_points", []) or []),
+            "chart_type": getattr(chart, "chart_type", None),
+            "anchor_source": "paper_figure_analysis",
+            "anchor_selection": "latest_analyzed_figure",
             "rejected_figure_ids": list(dict.fromkeys(rejected_ids)),
         }
 
@@ -2029,6 +2222,8 @@ class ResearchRuntimeBase:
         if latest_paper_figure is not None:
             rejected_ids = list(latest_paper_figure.get("rejected_figure_ids") or [])
             metadata["latest_paper_figure_analysis"] = latest_paper_figure
+            metadata["last_visual_anchor"] = latest_paper_figure
+            metadata["last_visual_anchor_figure_id"] = latest_paper_figure.get("figure_id")
             metadata["paper_figure_feedback"] = {"rejected_figure_ids": rejected_ids}
             metadata["rejected_paper_figure_ids"] = rejected_ids
         if context.preference_recommendation_result is not None:

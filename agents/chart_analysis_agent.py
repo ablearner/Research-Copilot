@@ -89,8 +89,9 @@ class ChartAnalysisAgent:
                 metadata={"reason": "missing_chart_image_path"},
             )
         chart_context = dict(chart_input.context or {})
-        if context.supervisor_instruction:
-            chart_context["supervisor_instruction"] = context.supervisor_instruction
+        expert_context = chart_context.get("expert_context") if isinstance(chart_context.get("expert_context"), dict) else {}
+        if expert_context.get("supervisor_instruction"):
+            chart_context["supervisor_instruction"] = expert_context["supervisor_instruction"]
         chart_result = await self.understand_chart(
             graph_runtime=context.graph_runtime,
             image_path=chart_input.image_path,
@@ -118,7 +119,8 @@ class ChartAnalysisAgent:
         )
 
     async def _run_analyze_paper_figures(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import MemoryOp, ResearchStateDelta, ResearchToolResult
+        from runtime.research.agent_protocol.mixins import persist_workspace_results
         from runtime.research.unified_action_adapters import resolve_active_message
 
         task_response = context.task_response
@@ -131,10 +133,15 @@ class ChartAnalysisAgent:
         active_message = resolve_active_message(decision)
         payload = dict(active_message.payload or {}) if active_message is not None else {}
         question = str(payload.get("question") or payload.get("target_description") or context.request.message or "").strip()
+        visual_anchor = self._visual_anchor_from_payload_or_request(payload=payload, context=context)
 
         paper_ids = [
             str(item).strip()
-            for item in (payload.get("paper_ids") or context.request.selected_paper_ids)
+            for item in (
+                payload.get("paper_ids")
+                or ([visual_anchor["paper_id"]] if str(visual_anchor.get("paper_id") or "").strip() else [])
+                or context.request.selected_paper_ids
+            )
             if str(item).strip()
         ]
         imported_papers = [
@@ -208,13 +215,18 @@ class ChartAnalysisAgent:
                 },
             )
 
-        best_figure = await self._select_figure_via_anchor(
-            question=question or "",
-            target_paper=target_paper,
-            figures=figure_list.figures,
-            context=context,
-            excluded_figure_ids=excluded_figure_ids,
-        )
+        explicit_figure_id = str(payload.get("figure_id") or visual_anchor.get("figure_id") or "").strip()
+        best_figure = self._figure_by_id(available_figures, explicit_figure_id) if explicit_figure_id else None
+        if best_figure is not None:
+            logger.info("analyze_paper_figures: restored visual anchor selected figure_id=%s", explicit_figure_id)
+        if best_figure is None:
+            best_figure = await self._select_figure_via_anchor(
+                question=question or "",
+                target_paper=target_paper,
+                figures=figure_list.figures,
+                context=context,
+                excluded_figure_ids=excluded_figure_ids,
+            )
 
         figure_request = AnalyzeResearchPaperFigureRequest(
             figure_id=best_figure.figure_id,
@@ -230,6 +242,8 @@ class ChartAnalysisAgent:
                 figure_request,
                 graph_runtime=context.graph_runtime,
                 supervisor_instruction=context.supervisor_instruction,
+                skill_context=context.skill_context,
+                expert_context=context.expert_context(),
             )
         except Exception as exc:
             logger.warning("Failed to analyze paper figure", exc_info=True)
@@ -251,6 +265,38 @@ class ChartAnalysisAgent:
             analysis_response.metadata["paper_figure_candidate_count"] = len(figure_list.figures)
             analysis_response.metadata["paper_figure_untried_count"] = len(available_figures)
         context.chart_result = analysis_response
+        paper_figure_analysis = self._paper_figure_workspace_payload(
+            analysis_response=analysis_response,
+            target_paper=target_paper,
+            exported_image_path=exported_image_path,
+            rejected_figure_ids=excluded_figure_ids,
+            candidate_figure_count=len(figure_list.figures),
+            untried_figure_count=len(available_figures),
+        )
+        workspace_update = persist_workspace_results(
+            context,
+            paper_figure_analysis=paper_figure_analysis,
+            persist=False,
+        )
+        state_delta = None
+        if workspace_update is not None:
+            memory_ops = []
+            if workspace_update.memory_save_context_params is not None:
+                memory_ops.append(
+                    MemoryOp(
+                        op_type="save_context",
+                        params=workspace_update.memory_save_context_params,
+                    )
+                )
+            state_delta = ResearchStateDelta(
+                task=workspace_update.updated_task,
+                report=workspace_update.updated_report,
+                task_response=workspace_update.updated_task_response,
+                save_task_conversation_id=context.request.conversation_id,
+                save_task_event_type=workspace_update.save_event_type,
+                save_task_event_payload=workspace_update.save_event_payload,
+                memory_ops=memory_ops,
+            )
         return ResearchToolResult(
             status="succeeded",
             observation=(
@@ -267,7 +313,9 @@ class ChartAnalysisAgent:
                 "excluded_figure_ids": sorted(excluded_figure_ids),
                 "candidate_figure_count": len(figure_list.figures),
                 "untried_figure_count": len(available_figures),
+                "visual_anchor": paper_figure_analysis.get("visual_anchor"),
             },
+            state_delta=state_delta,
         )
 
     async def _select_figure_via_anchor(
@@ -335,6 +383,105 @@ class ChartAnalysisAgent:
     def _metadata_dict(value: Any) -> dict[str, Any]:
         return dict(value) if isinstance(value, dict) else {}
 
+    def _visual_anchor_from_payload_or_request(self, *, payload: dict[str, Any], context: Any) -> dict[str, Any]:
+        payload_anchor = self._metadata_dict(payload.get("visual_anchor"))
+        if payload_anchor:
+            return payload_anchor
+        request_metadata = self._metadata_dict(getattr(getattr(context, "request", None), "metadata", None))
+        request_anchor = self._metadata_dict(request_metadata.get("visual_anchor"))
+        if request_anchor:
+            return request_anchor
+        request_context = self._metadata_dict(request_metadata.get("context"))
+        return self._metadata_dict(request_context.get("visual_anchor"))
+
+    @staticmethod
+    def _figure_by_id(figures: list[Any], figure_id: str) -> Any | None:
+        target = str(figure_id or "").strip()
+        if not target:
+            return None
+        return next(
+            (
+                figure
+                for figure in figures
+                if str(getattr(figure, "figure_id", "") or "").strip() == target
+            ),
+            None,
+        )
+
+    def _paper_figure_workspace_payload(
+        self,
+        *,
+        analysis_response: Any,
+        target_paper: Any,
+        exported_image_path: str | None,
+        rejected_figure_ids: set[str],
+        candidate_figure_count: int,
+        untried_figure_count: int,
+    ) -> dict[str, Any]:
+        figure = getattr(analysis_response, "figure", None)
+        chart = getattr(analysis_response, "chart", None)
+        chart_metadata = self._metadata_dict(getattr(chart, "metadata", None))
+        image_path = str(
+            exported_image_path
+            or chart_metadata.get("image_path")
+            or getattr(figure, "image_path", "")
+            or ""
+        ).strip()
+        paper_id = str(getattr(target_paper, "paper_id", "") or "").strip()
+        paper_title = str(getattr(target_paper, "title", "") or "").strip()
+        figure_id = str(getattr(figure, "figure_id", "") or "").strip()
+        figure_payload = {}
+        if figure is not None and hasattr(figure, "model_dump"):
+            figure_payload = figure.model_dump(mode="json")
+        elif figure is not None:
+            figure_payload = {
+                "figure_id": figure_id,
+                "paper_id": paper_id,
+                "page_id": str(getattr(figure, "page_id", "") or ""),
+                "page_number": getattr(figure, "page_number", None),
+                "chart_id": str(getattr(figure, "chart_id", "") or ""),
+                "image_path": image_path,
+                "title": getattr(figure, "title", None),
+                "caption": getattr(figure, "caption", None),
+                "source": getattr(figure, "source", None),
+            }
+        if figure_payload:
+            figure_payload["paper_id"] = figure_payload.get("paper_id") or paper_id
+            figure_payload["paper_title"] = figure_payload.get("paper_title") or paper_title
+            if image_path:
+                figure_payload["image_path"] = image_path
+
+        visual_anchor = {
+            "paper_id": paper_id,
+            "paper_title": paper_title,
+            "figure_id": figure_id,
+            "page_id": str(getattr(figure, "page_id", "") or ""),
+            "page_number": getattr(figure, "page_number", None),
+            "chart_id": str(getattr(figure, "chart_id", "") or ""),
+            "image_path": image_path,
+            "source": str(getattr(figure, "source", "") or ""),
+            "anchor_source": "paper_figure_analysis",
+            "anchor_selection": "latest_analyzed_figure",
+        }
+        visual_anchor = {key: value for key, value in visual_anchor.items() if value not in (None, "")}
+        return {
+            "paper_id": paper_id,
+            "paper_title": paper_title,
+            "figure_id": figure_id,
+            "page_id": str(getattr(figure, "page_id", "") or ""),
+            "page_number": getattr(figure, "page_number", None),
+            "chart_id": str(getattr(figure, "chart_id", "") or ""),
+            "image_path": image_path,
+            "answer": getattr(analysis_response, "answer", ""),
+            "key_points": list(getattr(analysis_response, "key_points", []) or []),
+            "chart_type": getattr(chart, "chart_type", None),
+            "rejected_figure_ids": sorted(rejected_figure_ids),
+            "candidate_figure_count": candidate_figure_count,
+            "untried_figure_count": untried_figure_count,
+            "visual_anchor": visual_anchor,
+            "figure": figure_payload,
+        }
+
     def _excluded_figure_ids_from_feedback(
         self,
         *,
@@ -350,9 +497,16 @@ class ChartAnalysisAgent:
         request_metadata = self._metadata_dict(getattr(getattr(context, "request", None), "metadata", None))
         for key in ("exclude_figure_ids", "excluded_figure_ids", "rejected_figure_ids", "attempted_figure_ids"):
             excluded.update(self._coerce_figure_id_set(request_metadata.get(key)))
+        request_context = self._metadata_dict(request_metadata.get("context"))
 
         if not self._has_negative_figure_feedback(question):
             return self._filter_figure_ids_for_paper(excluded, paper_id)
+
+        payload_anchor = self._metadata_dict(payload.get("visual_anchor"))
+        request_anchor = self._metadata_dict(request_metadata.get("visual_anchor"))
+        context_anchor = self._metadata_dict(request_context.get("visual_anchor"))
+        for anchor in (payload_anchor, request_anchor, context_anchor):
+            excluded.update(self._coerce_figure_id_set(anchor.get("figure_id")))
 
         workspace_metadata = self._metadata_dict(getattr(getattr(context, "workspace", None), "metadata", None))
         feedback = self._metadata_dict(workspace_metadata.get("paper_figure_feedback"))
@@ -612,6 +766,8 @@ class ChartAnalysisAgent:
         load_cached_figure_target,
         parse_imported_paper_document,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> AnalyzeResearchPaperFigureResponse:
         analyze_target = load_cached_figure_target(paper=paper, figure_id=request.figure_id)
         if analyze_target is None:
@@ -632,8 +788,12 @@ class ChartAnalysisAgent:
             "bbox": analyze_target.bbox.model_dump(mode="json") if analyze_target.bbox else None,
             "selection_rationale": analyze_target.metadata.get("anchor_rationale"),
         }
+        if expert_context:
+            chart_ctx["expert_context"] = expert_context
         if supervisor_instruction:
             chart_ctx["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            chart_ctx["skill_context"] = skill_context
         chart_result = await self.understand_chart(
             graph_runtime=graph_runtime,
             image_path=analyze_target.image_path,
@@ -659,6 +819,10 @@ class ChartAnalysisAgent:
             "bbox": analyze_target.bbox.model_dump(mode="json") if analyze_target.bbox else None,
             "selection_rationale": analyze_target.metadata.get("anchor_rationale"),
         }
+        if expert_context:
+            figure_context["expert_context"] = expert_context
+        if skill_context:
+            figure_context["skill_context"] = skill_context
         answer, key_points = await self.paper_chart_analysis_tool.analyze_async(
             chart=chart_result.chart,
             question=request.question,

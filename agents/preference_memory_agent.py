@@ -190,10 +190,11 @@ class PreferenceMemoryAgent:
         decision: Any,
     ) -> ResearchToolResult:
         from runtime.research.agent_protocol.base import MemoryOp, ResearchStateDelta, ResearchToolResult
-        from runtime.research.unified_action_adapters import resolve_active_message
+        from runtime.research.unified_action_adapters import build_expert_context, resolve_active_message
 
         active_message = resolve_active_message(decision)
         payload = dict(active_message.payload or {}) if active_message is not None else {}
+        expert_context = build_expert_context(context=context, decision=decision, active_message=active_message)
         question = str(payload.get("goal") or context.request.message or "").strip()
         top_k = max(
             1,
@@ -227,7 +228,9 @@ class PreferenceMemoryAgent:
             sources=sources,
             include_notification=True,
             persist=False,
-            supervisor_instruction=context.supervisor_instruction,
+            supervisor_instruction=expert_context.get("supervisor_instruction"),
+            skill_context=expert_context.get("skill_context"),
+            expert_context=expert_context,
         )
         recommendations = list(recommendation_output.recommendations)
         memory_ops = [
@@ -338,6 +341,8 @@ class PreferenceMemoryAgent:
         include_notification: bool = True,
         persist: bool = True,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> RecommendPapersFunctionOutput:
         profile = self._load_user_profile(user_id=user_id)
 
@@ -346,6 +351,8 @@ class PreferenceMemoryAgent:
             question=question,
             profile=profile,
             supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
+            expert_context=expert_context,
         )
         intent_mode = "llm" if intent is not None else "heuristic"
 
@@ -446,6 +453,8 @@ class PreferenceMemoryAgent:
             top_k=top_k,
             intent_rationale=intent_rationale,
             supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
+            expert_context=expert_context,
         )
 
         if llm_rank is not None and llm_rank.ranked_papers:
@@ -1112,6 +1121,7 @@ class PreferenceMemoryAgent:
         "- If the user references past interests implicitly (e.g. '跟上次类似'), infer from the profile.\n"
         "- If the request is generic ('推荐最近的论文'), set is_generic=true and pick top topics from the profile.\n"
         "- If a supervisor_instruction is given, incorporate its constraints (e.g. venue preferences, time range).\n"
+        "- If skill_context is given, apply relevant recommendation-scope and evidence-boundary guidance.\n"
         "- Output recency_days if the user specifies a time range, otherwise null.\n"
         "- Output constraints.must_include_keywords for important filter terms.\n"
         "- Output constraints.preferred_venues if venues/conferences are mentioned or implied.\n"
@@ -1124,6 +1134,8 @@ class PreferenceMemoryAgent:
         question: str,
         profile: UserResearchProfile,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> RecommendationIntentResult | None:
         if self.llm_adapter is None:
             return None
@@ -1147,6 +1159,10 @@ class PreferenceMemoryAgent:
         }
         if supervisor_instruction:
             input_data["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            input_data["skill_context"] = skill_context
+        if expert_context:
+            input_data["expert_context"] = expert_context
         try:
             result = await self.llm_adapter.generate_structured(
                 prompt=self._INTENT_PROMPT,
@@ -1177,6 +1193,7 @@ class PreferenceMemoryAgent:
         "- The reason should be personalized: explain WHY this paper matters to THIS user, not a generic summary.\n"
         "- Reference the user's known interests when explaining relevance.\n"
         "- If a supervisor_instruction is given, factor it into scoring (e.g. prefer certain venues or recency).\n"
+        "- If skill_context is given, apply relevant ranking-scope and evidence-boundary guidance.\n"
         "- Return only paper_ids that exist in the candidate list.\n"
         "- Follow the user's language in the reason field.\n"
         "- Rank at most top_k papers."
@@ -1191,6 +1208,8 @@ class PreferenceMemoryAgent:
         top_k: int,
         intent_rationale: str = "",
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> PersonalizedRankResult | None:
         if self.llm_adapter is None or not candidates:
             return None
@@ -1230,6 +1249,10 @@ class PreferenceMemoryAgent:
         }
         if supervisor_instruction:
             input_data["supervisor_instruction"] = supervisor_instruction
+        if skill_context:
+            input_data["skill_context"] = skill_context
+        if expert_context:
+            input_data["expert_context"] = expert_context
         try:
             return await self.llm_adapter.generate_structured(
                 prompt=self._RANK_PROMPT,

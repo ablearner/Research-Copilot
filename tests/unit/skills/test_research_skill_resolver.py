@@ -25,7 +25,7 @@ def test_research_skill_candidate_exposes_planner_guidance() -> None:
             name="literature-survey",
             description="Write surveys.",
             planner_guidance="Search and write before optional import.",
-            planning_policy={"action_policies": {"import_papers": {"default_enabled": False}}},
+            planning_policy={"actions": {"import_papers": {"default_enabled": False}}},
         ),
         available_tools=set(),
         score=1.0,
@@ -33,7 +33,7 @@ def test_research_skill_candidate_exposes_planner_guidance() -> None:
     )
 
     assert candidate.metadata()["planner_guidance"] == "Search and write before optional import."
-    assert candidate.metadata()["planning_policy"] == {"action_policies": {"import_papers": {"default_enabled": False}}}
+    assert candidate.metadata()["planning_policy"] == {"actions": {"import_papers": {"default_enabled": False}}}
 
 
 @pytest.mark.asyncio
@@ -47,6 +47,6 @@ async def test_literature_survey_candidate_carries_planner_guidance() -> None:
         if candidate.name == "literature-survey"
     )
 
-    assert "metadata/abstract-based review" in candidate.planner_guidance
-    assert candidate.planning_policy["action_policies"]["import_papers"]["default_enabled"] is False
+    assert "metadata and abstracts" in candidate.planner_guidance
+    assert candidate.planning_policy["actions"]["import_papers"]["default_enabled"] is False
     assert candidate.metadata()["planner_guidance"] == candidate.planner_guidance

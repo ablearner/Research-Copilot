@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from domain.schemas.research import (
     ResearchAgentRunRequest,
     ResearchTask,
     ResearchTaskResponse,
+    ResearchWorkspaceState,
 )
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit, RetrievalQuery
 from rag_runtime.memory import GraphSessionMemory
@@ -22,6 +24,7 @@ from retrieval.evidence_builder import build_evidence_bundle
 from services.research.literature_research_service import LiteratureResearchService
 from tools.research.paper_search import PaperSearchService
 from runtime.research.supervisor_graph_runtime import ResearchSupervisorGraphRuntime
+from runtime.research.agent_protocol.base import ResearchAgentToolContext
 from adapters.storage.research_report_service import ResearchReportService
 from rag_runtime.schemas import ChartUnderstandingResult
 from tooling.schemas import GraphSummaryToolOutput
@@ -524,6 +527,117 @@ def test_research_supervisor_graph_hydration_prefers_latest_conversation_task(tm
     assert restored_task_response.task.task_id == "task-fresh"
     assert hydrated_request.task_id == "task-fresh"
     assert hydrated_request.selected_document_ids == ["paper_doc_agent_1"]
+
+
+def test_research_supervisor_graph_hydrates_visual_anchor_from_snapshot_workspace(tmp_path) -> None:
+    service = build_service(tmp_path)
+    runtime = ResearchSupervisorGraphRuntime(research_service=service)
+    conversation = service.create_conversation(
+        CreateResearchConversationRequest(topic="Figure follow-up")
+    ).conversation
+    task = ResearchTask(
+        task_id="task-figure",
+        topic="Figure follow-up",
+        status="completed",
+        created_at="2026-04-25T00:00:00+00:00",
+        updated_at="2026-04-25T00:00:00+00:00",
+        imported_document_ids=["doc-figure"],
+    )
+    paper = PaperCandidate(
+        paper_id="paper-figure",
+        title="Paper With Figure",
+        abstract="A paper with a reusable figure anchor.",
+        source="arxiv",
+        ingest_status="ingested",
+        metadata={"document_id": "doc-figure", "storage_uri": "/tmp/doc-figure.pdf"},
+    )
+    visual_anchor = {
+        "paper_id": "paper-figure",
+        "paper_title": "Paper With Figure",
+        "figure_id": "paper-figure:chart-2",
+        "chart_id": "chart-2",
+        "page_id": "page-2",
+        "page_number": 2,
+        "image_path": "/tmp/chart-2.png",
+        "anchor_source": "paper_figure_analysis",
+    }
+    service.report_service.save_task(task)
+    service.report_service.save_papers(task.task_id, [paper])
+    service.report_service.save_conversation(
+        conversation.model_copy(
+            update={
+                "task_id": task.task_id,
+                "snapshot": conversation.snapshot.model_copy(
+                    update={
+                        "workspace": ResearchWorkspaceState(
+                            metadata={"latest_paper_figure_analysis": visual_anchor}
+                        ),
+                    }
+                ),
+            }
+        )
+    )
+
+    hydrated_request, restored_task_response = runtime._hydrate_request_from_conversation(
+        request=ResearchAgentRunRequest(
+            message="这张图的趋势是什么？",
+            mode="qa",
+            conversation_id=conversation.conversation_id,
+        )
+    )
+
+    assert restored_task_response is not None
+    assert hydrated_request.selected_paper_ids == ["paper-figure"]
+    assert hydrated_request.selected_document_ids == ["doc-figure"]
+    assert hydrated_request.metadata["visual_anchor"]["figure_id"] == "paper-figure:chart-2"
+    assert hydrated_request.metadata["context"]["visual_anchor"]["image_path"] == "/tmp/chart-2.png"
+    assert hydrated_request.metadata["context"]["active_paper_ids"] == ["paper-figure"]
+
+
+def test_research_supervisor_fast_routes_visual_anchor_followup_to_figure_agent(tmp_path) -> None:
+    service = build_service(tmp_path)
+    runtime = ResearchSupervisorGraphRuntime(research_service=service)
+    task = ResearchTask(
+        task_id="task-figure",
+        topic="Figure follow-up",
+        status="completed",
+        created_at="2026-04-25T00:00:00+00:00",
+        updated_at="2026-04-25T00:00:00+00:00",
+        imported_document_ids=["doc-figure"],
+    )
+    request = ResearchAgentRunRequest(
+        message="这张图说明了什么？",
+        mode="qa",
+        task_id=task.task_id,
+        metadata={
+            "context": {
+                "visual_anchor": {
+                    "paper_id": "paper-figure",
+                    "figure_id": "paper-figure:chart-2",
+                    "image_path": "/tmp/chart-2.png",
+                }
+            }
+        },
+    )
+    context = ResearchAgentToolContext(
+        request=request,
+        research_service=service,
+        graph_runtime=GraphRuntimeStub(),
+        task_response=ResearchTaskResponse(task=task, papers=[], report=None, warnings=[]),
+    )
+
+    decision = runtime._try_fast_route(
+        context=context,
+        user_intent=SimpleNamespace(intent="figure_qa"),
+        session_ctx={"route_mode": "research_follow_up"},
+        state={"current_step_index": 0},
+    )
+
+    assert decision is not None
+    assert decision.action_name == "analyze_paper_figures"
+    assert decision.metadata["worker_agent"] == "ChartAnalysisAgent"
+    assert decision.metadata["active_message"].payload["figure_id"] == "paper-figure:chart-2"
+    assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-figure"]
 
 
 @pytest.mark.asyncio

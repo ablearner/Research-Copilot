@@ -35,9 +35,73 @@ def resolve_active_message(decision: Any) -> AgentMessage | None:
     return None
 
 
+def _clean_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _clean_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def build_expert_context(
+    *,
+    context: Any,
+    decision: Any | None = None,
+    active_message: AgentMessage | None = None,
+) -> dict[str, Any]:
+    if active_message is None and decision is not None:
+        active_message = resolve_active_message(decision)
+    message_metadata = dict(active_message.metadata or {}) if active_message is not None else {}
+    decision_metadata = dict(getattr(decision, "metadata", {}) or {}) if decision is not None else {}
+    base_payload: dict[str, Any] = {}
+    context_builder = getattr(context, "expert_context", None)
+    if callable(context_builder):
+        built_payload = context_builder()
+        if isinstance(built_payload, dict):
+            base_payload.update(built_payload)
+
+    supervisor_instruction = (
+        _clean_text(base_payload.get("supervisor_instruction"))
+        or _clean_text(getattr(context, "supervisor_instruction", None))
+        or (
+            _clean_text(active_message.instruction)
+            if active_message is not None
+            else None
+        )
+    )
+    skill_context = (
+        _clean_text(base_payload.get("skill_context"))
+        or _clean_text(getattr(context, "skill_context", None))
+        or _clean_text(message_metadata.get("skill_context"))
+        or _clean_text(decision_metadata.get("skill_context"))
+    )
+    active_skill_names = (
+        _clean_string_list(base_payload.get("active_skill_names"))
+        or _clean_string_list(message_metadata.get("active_skill_names"))
+        or _clean_string_list(decision_metadata.get("active_skill_names"))
+    )
+    request = getattr(context, "request", None)
+    requested_skill_name = _clean_text(getattr(request, "skill_name", None))
+
+    payload: dict[str, Any] = {}
+    if supervisor_instruction:
+        payload["supervisor_instruction"] = supervisor_instruction
+    if skill_context:
+        payload["skill_context"] = skill_context
+    if active_skill_names:
+        payload["active_skill_names"] = active_skill_names
+    if requested_skill_name:
+        payload["requested_skill_name"] = requested_skill_name
+    return payload
+
+
 def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLiteratureSearchInput:
     request = context.request
     task_payload = dict(getattr(decision, "action_input", {}) or {})
+    expert_context = build_expert_context(context=context, decision=decision)
     # Prefer extracted_topic from intent (source names already stripped)
     # over the raw user message which may contain "arxiv", "ieee" etc.
     user_intent = (request.metadata or {}).get("user_intent") or {}
@@ -75,6 +139,8 @@ def build_literature_search_input(*, context: Any, decision: Any) -> UnifiedLite
             "manager_action": "create_research_task",
             "task_payload": task_payload,
             "source_constraints": source_constraints,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
         },
     )
 
@@ -88,10 +154,11 @@ def build_literature_search_output(*, task_response: Any) -> UnifiedLiteratureSe
     )
 
 
-def build_review_draft_input(*, context: Any) -> UnifiedReviewDraftInput:
+def build_review_draft_input(*, context: Any, decision: Any | None = None) -> UnifiedReviewDraftInput:
     task_response = context.task_response
     assert task_response is not None
     task = task_response.task
+    expert_context = build_expert_context(context=context, decision=decision)
     return UnifiedReviewDraftInput(
         topic=task.topic,
         task_id=task.task_id,
@@ -104,6 +171,9 @@ def build_review_draft_input(*, context: Any) -> UnifiedReviewDraftInput:
         refinement_used=False,
         max_papers=max(len(task_response.papers), 1),
         report=task_response.report,
+        supervisor_instruction=expert_context.get("supervisor_instruction"),
+        skill_context=expert_context.get("skill_context"),
+        expert_context=expert_context,
     )
 
 
@@ -158,11 +228,7 @@ def build_collection_qa_input(
         page_number = None
     if page_number is not None and page_number < 1:
         page_number = None
-    supervisor_instruction = (
-        active_message.instruction.strip()
-        if active_message is not None and active_message.instruction
-        else None
-    )
+    expert_context = build_expert_context(context=context, active_message=active_message)
     return UnifiedCollectionQAInput(
         task_id=task_id,
         question=question,
@@ -184,7 +250,8 @@ def build_collection_qa_input(
             "routing_authority": str(payload.get("routing_authority") or "supervisor_llm"),
             "preferred_qa_route": str(payload.get("qa_route") or "").strip() or None,
             "task_payload": payload,
-            "supervisor_instruction": supervisor_instruction,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
+            "expert_context": expert_context,
         },
         conversation_id=request.conversation_id,
     )
@@ -204,6 +271,7 @@ def build_paper_import_input(*, context: Any, decision: Any) -> UnifiedPaperImpo
     request = context.request
     active_message = resolve_active_message(decision)
     payload = dict(active_message.payload or {}) if active_message is not None else {}
+    expert_context = build_expert_context(context=context, decision=decision, active_message=active_message)
     explicit_paper_ids = [
         str(item).strip()
         for item in payload.get("paper_ids") or []
@@ -223,6 +291,8 @@ def build_paper_import_input(*, context: Any, decision: Any) -> UnifiedPaperImpo
             "agent_runtime": "research_agent",
             "manager_action": "import_relevant_papers",
             "task_payload": payload,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
         },
     )
 
@@ -239,6 +309,7 @@ def build_paper_import_output(*, paper_ids: list[str], import_result: Any) -> Un
 def build_document_understanding_input(*, context: Any, decision: Any) -> UnifiedDocumentUnderstandingInput:
     request = context.request
     task_payload = dict(getattr(decision, "action_input", {}) or {})
+    expert_context = build_expert_context(context=context, decision=decision)
     return UnifiedDocumentUnderstandingInput(
         file_path=(request.document_file_path or "").strip(),
         document_id=request.document_id,
@@ -250,6 +321,8 @@ def build_document_understanding_input(*, context: Any, decision: Any) -> Unifie
             "agent_runtime": "research_agent",
             "manager_action": "understand_document",
             "task_payload": task_payload,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
         },
         skill_name=request.skill_name,
     )
@@ -275,6 +348,7 @@ def build_chart_understanding_input(*, context: Any, decision: Any) -> UnifiedCh
     request = context.request
     page_id = request.page_id or "page-1"
     task_payload = dict(getattr(decision, "action_input", {}) or {})
+    expert_context = build_expert_context(context=context, decision=decision)
     return UnifiedChartUnderstandingInput(
         image_path=(request.chart_image_path or "").strip(),
         document_id=request.document_id or (context.task.task_id if context.task else "research_document"),
@@ -288,6 +362,8 @@ def build_chart_understanding_input(*, context: Any, decision: Any) -> UnifiedCh
             "manager_action": "supervisor_understand_chart",
             "research_task_id": context.task.task_id if context.task else None,
             "task_payload": task_payload,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
         },
         skill_name=request.skill_name,
     )
@@ -321,6 +397,7 @@ def build_paper_analysis_input(
     ]
     recommendation_goal = str(payload.get("recommendation_goal") or "").strip() or None
     question = str(payload.get("goal") or context.request.message).strip() or context.request.message.strip()
+    expert_context = build_expert_context(context=context)
     return UnifiedPaperAnalysisInput(
         question=question,
         analysis_focus=analysis_focus,
@@ -329,6 +406,14 @@ def build_paper_analysis_input(
         papers=papers,
         task_topic=task_response.task.topic,
         report_highlights=list(task_response.report.highlights) if task_response.report else [],
+        metadata={
+            **context.request.metadata,
+            "agent_runtime": "research_agent",
+            "manager_action": "analyze_papers",
+            "task_payload": payload,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
+        },
     )
 
 
@@ -350,6 +435,7 @@ def build_paper_analysis_output(
 def build_context_compression_input(*, context: Any, decision: Any) -> UnifiedContextCompressionInput:
     active_message = resolve_active_message(decision)
     payload = dict(active_message.payload or {}) if active_message is not None else {}
+    expert_context = build_expert_context(context=context, decision=decision, active_message=active_message)
     explicit_paper_ids = [
         str(item).strip()
         for item in payload.get("paper_ids") or []
@@ -364,6 +450,8 @@ def build_context_compression_input(*, context: Any, decision: Any) -> UnifiedCo
             "agent_runtime": "research_agent",
             "manager_action": "compress_context",
             "task_payload": payload,
+            "expert_context": expert_context,
+            "supervisor_instruction": expert_context.get("supervisor_instruction"),
         },
     )
 

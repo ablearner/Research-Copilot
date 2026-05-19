@@ -74,6 +74,7 @@ class ReviewWritingTool:
         target_journal: str | None = None,
         language: str = "zh-CN",
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> ResearchReport:
         """Async generate — uses LLM-powered survey writing and polishing if available."""
         report = await self.survey_writer.generate_async(
@@ -86,6 +87,7 @@ class ReviewWritingTool:
             include_citations=include_citations,
             language=language,
             supervisor_instruction=supervisor_instruction,
+            skill_context=skill_context,
         )
         polished_markdown = await self.polish_tool.polish_async(
             text=report.markdown,

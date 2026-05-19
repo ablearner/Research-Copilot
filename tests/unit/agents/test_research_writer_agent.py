@@ -1,3 +1,8 @@
+from types import SimpleNamespace
+
+import pytest
+
+from domain.schemas.research import PaperCandidate
 from domain.schemas.research import ResearchReport
 from agents.research_writer_agent import ResearchWriterAgent
 
@@ -30,3 +35,53 @@ def test_research_writer_quality_counts_chinese_content_without_space_tokenizati
     assert quality["passed"] is True
     assert quality["raw_word_count"] < 250
     assert quality["cjk_char_count"] >= 500
+
+
+class _SurveyWriterStub:
+    def __init__(self) -> None:
+        self.last_kwargs: dict | None = None
+
+    async def generate_async(self, **kwargs) -> ResearchReport:
+        self.last_kwargs = kwargs
+        return ResearchReport(
+            report_id="report-skill",
+            task_id=kwargs["task_id"],
+            topic=kwargs["topic"],
+            generated_at="2026-05-19T00:00:00+00:00",
+            markdown="# 文献调研报告\n\n## 研究背景\n基于候选论文形成摘要级综述。 [P1]",
+            metadata={"writer": "stub"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_research_writer_passes_skill_context_to_survey_writer() -> None:
+    survey_writer = _SurveyWriterStub()
+    paper_search_service = SimpleNamespace(survey_writer=survey_writer)
+    writer = ResearchWriterAgent(paper_search_service=paper_search_service)
+    state = SimpleNamespace(
+        topic="On-Policy Distillation",
+        task_id="task-skill",
+        curated_papers=[
+            PaperCandidate(
+                paper_id="p1",
+                title="On-Policy Distillation",
+                abstract="A study of on-policy distillation.",
+                source="arxiv",
+            )
+        ],
+        warnings=[],
+        supervisor_instruction="Draft an abstract-level survey.",
+        skill_context="## Active Skills\nRespect literature-survey evidence boundaries.",
+        must_read_ids=[],
+        ingest_candidate_ids=[],
+        trace=[],
+        refinement_used=False,
+        max_papers=1,
+        round_index=0,
+    )
+
+    await writer.synthesize_async(state)
+
+    assert survey_writer.last_kwargs is not None
+    assert survey_writer.last_kwargs["supervisor_instruction"] == "Draft an abstract-level survey."
+    assert "literature-survey" in survey_writer.last_kwargs["skill_context"]

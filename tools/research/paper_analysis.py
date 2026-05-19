@@ -31,6 +31,7 @@ def _analysis_prompt(answer_language: str) -> str:
             "- 如果问题偏比较，请突出方法差异、实验差异、适用场景和局限\n"
             "- 如果问题偏推荐，请给出最值得优先读/精读的论文及原因\n"
             "- 请优先根据问题语义判断回答 focus，不要仅按关键词机械分类\n"
+            "- 如果输入包含 supervisor_instruction 或 skill_context，请遵守其中与证据边界、比较维度和输出结构相关的要求\n"
             "- 优先使用补充证据中的正文片段、图谱摘要和相关段落来支撑结论\n"
             "- 如果证据只覆盖部分论文或部分维度，要明确指出结论边界\n"
             "- 返回结构化字段，不要输出额外解释"
@@ -47,6 +48,7 @@ def _analysis_prompt(answer_language: str) -> str:
         "- If the question is comparative, emphasize method differences, experimental differences, use cases, and limitations\n"
         "- If the question is about recommendation, name the best papers to prioritize and explain why\n"
         "- Infer the answer focus from the question semantics instead of mechanically classifying by keywords\n"
+        "- If input_data contains supervisor_instruction or skill_context, follow relevant evidence-boundary, comparison-dimension, and output-structure requirements\n"
         "- Prefer body snippets, graph summaries, and relevant passages from the evidence when supporting conclusions\n"
         "- If the evidence only covers part of the papers or dimensions, state the boundary clearly\n"
         "- Return structured fields only, without extra explanation"
@@ -92,6 +94,7 @@ class PaperAnalysisTool:
         report_highlights: list[str] | None = None,
         evidence_hits: list[RetrievalHit] | None = None,
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
         if self.llm_adapter is not None and papers:
             try:
@@ -102,6 +105,7 @@ class PaperAnalysisTool:
                     report_highlights=report_highlights or [],
                     evidence_hits=evidence_hits or [],
                     supervisor_instruction=supervisor_instruction,
+                    skill_context=skill_context,
                 )
                 if result.answer.strip():
                     return result
@@ -123,6 +127,7 @@ class PaperAnalysisTool:
         report_highlights: list[str],
         evidence_hits: list[RetrievalHit],
         supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
     ) -> AnalyzePapersFunctionOutput:
         papers_json = json.dumps(
             [
@@ -155,6 +160,7 @@ class PaperAnalysisTool:
                 "papers_json": papers_json,
                 "evidence_json": evidence_json,
                 **(({"supervisor_instruction": supervisor_instruction}) if supervisor_instruction else {}),
+                **(({"skill_context": skill_context}) if skill_context else {}),
             },
             response_model=_PaperAnalysisLLMResponse,
         )
