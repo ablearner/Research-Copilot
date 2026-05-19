@@ -55,6 +55,8 @@ class SkillMeta(BaseModel):
 
     name: str
     description: str = ""
+    planner_guidance: str = ""
+    planning_policy: dict[str, Any] = Field(default_factory=dict)
     version: str = ""
     author: str = ""
     category: str = "general"
@@ -92,6 +94,8 @@ def _meta_from_frontmatter(fm_data: dict[str, Any], skill_path: Path) -> SkillMe
     return SkillMeta(
         name=name,
         description=fm_data.get("description", ""),
+        planner_guidance=fm_data.get("planner_guidance", ""),
+        planning_policy=fm_data.get("planning_policy", {}) if isinstance(fm_data.get("planning_policy", {}), dict) else {},
         version=fm_data.get("version", ""),
         author=fm_data.get("author", ""),
         category=fm_data.get("category", "general"),

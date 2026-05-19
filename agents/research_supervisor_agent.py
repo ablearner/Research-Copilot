@@ -477,6 +477,17 @@ class ResearchSupervisorAgent:
         # Mark step as running
         next_step["status"] = "running"
         action_name = self._normalize_action_name(next_step.get("action", "finalize"))
+        blocked_reason = self._skill_policy_block_reason(action_name, state)
+        if blocked_reason:
+            state.execution_plan = []
+            return self._guardrail_finalize(
+                state,
+                all_messages=all_messages,
+                results=results,
+                planner_runs=planner_runs,
+                replan_count=replan_count,
+                reason=blocked_reason,
+            )
         instruction = next_step.get("instruction", "")
         payload = dict(next_step.get("params") or {})
         step_index = next_step.get("step_id", 0)
@@ -523,7 +534,7 @@ class ResearchSupervisorAgent:
                     results=results,
                     planner_runs=planner_runs,
                     replan_count=replan_count,
-                    stop_reason="Discovery-only workflow completed after literature search.",
+                    reason="Discovery-only workflow completed after literature search.",
                 )
             if state.latest_result_status == "failed":
                 return self._guardrail_finalize(
@@ -532,7 +543,7 @@ class ResearchSupervisorAgent:
                     results=results,
                     planner_runs=planner_runs,
                     replan_count=replan_count,
-                    stop_reason="Discovery-only workflow stopped after literature search failed.",
+                    reason="Discovery-only workflow stopped after literature search failed.",
                 )
         return self._guardrail_worker_action(
             action_name="search_literature",
@@ -567,6 +578,16 @@ class ResearchSupervisorAgent:
         action_name = self._normalize_action_name(llm_output.action_name)
         thought = llm_output.thought.strip() or f"Manager selected {action_name} as the next best step."
         rationale = llm_output.rationale.strip() or "The manager chose the worker that can make the most progress."
+        blocked_reason = self._skill_policy_block_reason(action_name, state)
+        if blocked_reason and action_name not in {"finalize", "clarify_request"}:
+            return self._guardrail_finalize(
+                state,
+                all_messages=all_messages,
+                results=results,
+                planner_runs=planner_runs + 1,
+                replan_count=replan_count,
+                reason=blocked_reason,
+            )
         # ── Plan-and-Execute: store multi-step plan ──
         execution_plan: list[dict[str, Any]] = []
         if len(llm_output.plan) > 1:
@@ -950,6 +971,114 @@ class ResearchSupervisorAgent:
     def _normalize_text(self, value: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", value.lower())).strip()
 
+    def _skill_planning_policies(self, state: ResearchSupervisorState) -> list[dict[str, Any]]:
+        policies: list[dict[str, Any]] = []
+        for candidate in state.skill_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            policy = candidate.get("planning_policy")
+            if isinstance(policy, dict) and policy:
+                policies.append(policy)
+        return policies
+
+    def _skill_action_policy(self, state: ResearchSupervisorState, action_name: str) -> dict[str, Any] | None:
+        for policy in self._skill_planning_policies(state):
+            action_policies = policy.get("action_policies")
+            if not isinstance(action_policies, dict):
+                continue
+            action_policy = action_policies.get(action_name)
+            if isinstance(action_policy, dict):
+                return action_policy
+        return None
+
+    def _skill_policy_condition_met(self, condition: str, state: ResearchSupervisorState) -> bool:
+        key = str(condition or "").strip().lower()
+        intent_name = str(state.user_intent.get("intent") or "").strip()
+        if key in {"auto_import", "request.auto_import"}:
+            return state.auto_import and state.import_top_k > 0
+        if key in {"mode_import", "request.mode_import"}:
+            return state.mode == "import"
+        if key in {"mode_qa", "request.mode_qa"}:
+            return state.mode == "qa"
+        if key == "paper_import_intent":
+            return intent_name == "paper_import"
+        if key == "collection_qa_intent":
+            return intent_name == "collection_qa"
+        if key == "single_paper_qa_intent":
+            return intent_name == "single_paper_qa"
+        if key == "selected_papers":
+            return state.selected_paper_count > 0 or bool(state.user_intent.get("resolved_paper_ids"))
+        return False
+
+    def _skill_policy_block_reason(self, action_name: str, state: ResearchSupervisorState) -> str | None:
+        action_policy = self._skill_action_policy(state, action_name)
+        if not action_policy or action_policy.get("default_enabled", True) is not False:
+            return None
+        enable_when = [
+            str(item).strip()
+            for item in action_policy.get("enable_when", [])
+            if str(item).strip()
+        ]
+        if any(self._skill_policy_condition_met(condition, state) for condition in enable_when):
+            return None
+        return str(action_policy.get("blocked_reason") or f"{action_name} is disabled by the active skill policy.").strip()
+
+    def _skill_failure_recovery_decision(
+        self,
+        *,
+        state: ResearchSupervisorState,
+        all_messages: list[AgentMessage],
+        results: list[AgentResultMessage],
+        planner_runs: int,
+        replan_count: int,
+    ) -> ResearchSupervisorDecision | None:
+        if not results:
+            return None
+        latest = results[-1]
+        if latest.status != "failed":
+            return None
+        for policy in self._skill_planning_policies(state):
+            recovery = policy.get("failure_recovery")
+            if not isinstance(recovery, dict):
+                continue
+            task_policy = recovery.get(latest.task_type)
+            if not isinstance(task_policy, dict):
+                continue
+            next_action = str(task_policy.get("default_action") or "").strip()
+            stop_reason = str(task_policy.get("stop_reason") or "").strip()
+            if next_action == "finalize":
+                return self._guardrail_finalize(
+                    state,
+                    all_messages=all_messages,
+                    results=results,
+                    planner_runs=planner_runs,
+                    replan_count=replan_count,
+                    reason=stop_reason or f"{latest.task_type} failed; stopping per active skill recovery policy.",
+                )
+            if next_action:
+                try:
+                    normalized = self._normalize_action_name(next_action)
+                except ValueError:
+                    continue
+                if self._skill_policy_block_reason(normalized, state):
+                    continue
+                return self._guardrail_worker_action(
+                    action_name=normalized,
+                    state=state,
+                    all_messages=all_messages,
+                    results=results,
+                    planner_runs=planner_runs,
+                    replan_count=replan_count + 1,
+                    thought=f"The active skill recovery policy routes {latest.task_type} failure to {normalized}.",
+                    rationale=stop_reason or "A skill-defined failure recovery path is available.",
+                    phase="act",
+                    estimated_gain=0.62,
+                    estimated_cost=0.18,
+                    payload_overrides={"trigger": "skill_failure_recovery", "failed_action": latest.task_type},
+                    priority="medium",
+                )
+        return None
+
     def _guardrail_decision(
         self,
         *,
@@ -991,6 +1120,15 @@ class ResearchSupervisorAgent:
         )
         if general_answer_done is not None:
             return general_answer_done
+        skill_recovery_decision = self._skill_failure_recovery_decision(
+            state=state,
+            all_messages=all_messages,
+            results=results,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+        )
+        if skill_recovery_decision is not None:
+            return skill_recovery_decision
         suggested_action_decision = self._suggested_next_action_decision(
             state=state,
             all_messages=all_messages,
@@ -1088,6 +1226,8 @@ class ResearchSupervisorAgent:
         }
         for suggestion in suggestions:
             if suggestion not in supported_actions:
+                continue
+            if self._skill_policy_block_reason(suggestion, state):
                 continue
             if suggestion in recent_successful_actions:
                 continue
@@ -1270,7 +1410,7 @@ class ResearchSupervisorAgent:
         if not should_search:
             return None
         target_paper_ids = self._result_paper_ids(latest)
-        if target_paper_ids and not state.import_attempted:
+        if target_paper_ids and not state.import_attempted and not self._skill_policy_block_reason("import_papers", state):
             return self._guardrail_worker_action(
                 action_name="import_papers",
                 state=state,
@@ -1411,6 +1551,16 @@ class ResearchSupervisorAgent:
         payload_overrides: dict[str, Any] | None = None,
         priority: Literal["low", "medium", "high", "critical"] = "medium",
     ) -> ResearchSupervisorDecision:
+        blocked_reason = self._skill_policy_block_reason(action_name, state)
+        if blocked_reason:
+            return self._guardrail_finalize(
+                state,
+                all_messages=all_messages,
+                results=results,
+                planner_runs=planner_runs,
+                replan_count=replan_count,
+                reason=blocked_reason,
+            )
         worker_agent = self._worker_for_action(action_name, None)
         plan_id = f"guardrail_plan_{uuid4().hex[:12]}"
         payload = {
@@ -1510,7 +1660,12 @@ class ResearchSupervisorAgent:
                 task_actions.append(self._action_descriptor("analyze_paper_figures", "ChartAnalysisAgent", "Extract and analyze figures, charts, or diagrams from an imported paper's PDF. Use when the user asks about a figure, system diagram, architecture, experimental result plot, or any visual element in a paper.", state=state))
             actions.extend(task_actions)
         actions.append(self._action_descriptor("finalize", "ResearchSupervisorAgent", "Stop when additional tool use is low value or clarification from the user is needed.", state=state))
-        return sorted(actions, key=lambda item: item.get("priority_score", 0.0), reverse=True)
+        visible_actions = [
+            action
+            for action in actions
+            if not self._skill_policy_block_reason(str(action.get("action_name") or ""), state)
+        ]
+        return sorted(visible_actions, key=lambda item: item.get("priority_score", 0.0), reverse=True)
 
     def _action_descriptor(
         self,
@@ -1531,6 +1686,8 @@ class ResearchSupervisorAgent:
         }
 
     def _action_priority_score(self, action_name: str, state: ResearchSupervisorState) -> float:
+        if self._skill_policy_block_reason(action_name, state):
+            return -1.0
         score = 0.1
         if action_name in state.latest_suggested_next_actions:
             score += 0.42
@@ -1635,6 +1792,7 @@ class ResearchSupervisorAgent:
             "For answer_question, you must also decide payload.qa_route as one of collection_qa, document_drilldown, or chart_drilldown. "
             "Downstream services should execute your route instead of deciding it again.\n"
             "You will receive skill_candidates as lightweight Markdown skill metadata. "
+            "When a candidate includes planner_guidance, treat it as domain-specific planning guidance for that skill. "
             "Select zero or more selected_skill_names from those candidates for the specialist task you choose. "
             "Do not invent skill names and do not rely on any full skill instructions at manager level; "
             "the runtime will load the selected SKILL.md body and inject it into the specialist only.\n"
@@ -2135,6 +2293,8 @@ class ResearchSupervisorAgent:
         )
 
     def _should_import(self, state: ResearchSupervisorState) -> bool:
+        if self._skill_policy_block_reason("import_papers", state):
+            return False
         if state.import_attempted or not state.has_import_candidates:
             return False
         if state.selected_paper_count > 0:

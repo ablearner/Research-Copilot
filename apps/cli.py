@@ -174,10 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
     update_profile.add_argument("--reasoning-style")
     update_profile.add_argument("--note")
 
-    models = subparsers.add_parser("models", help="Inspect or update runtime model preferences.")
+    models = subparsers.add_parser("models", help="Inspect .env-backed runtime model configuration.")
     models_subparsers = models.add_subparsers(dest="models_command", required=True)
     models_subparsers.add_parser("show", help="Show current runtime model configuration.")
-    models_set = models_subparsers.add_parser("set", help="Set runtime model overrides.")
+    models_set = models_subparsers.add_parser(
+        "set",
+        help="Compatibility no-op; model settings are controlled by .env.",
+    )
     models_set.add_argument("--llm-provider")
     models_set.add_argument("--llm-model")
     models_set.add_argument("--embedding-provider")

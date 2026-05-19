@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class ResearchSkillCandidate:
     name: str
     description: str = ""
+    planner_guidance: str = ""
+    planning_policy: dict[str, object] = field(default_factory=dict)
     category: str = "general"
     tags: list[str] = field(default_factory=list)
     required_tools: list[str] = field(default_factory=list)
@@ -26,6 +28,8 @@ class ResearchSkillCandidate:
         return {
             "name": self.name,
             "description": self.description,
+            "planner_guidance": self.planner_guidance,
+            "planning_policy": dict(self.planning_policy),
             "category": self.category,
             "tags": list(self.tags),
             "required_tools": list(self.required_tools),
@@ -266,6 +270,8 @@ class ResearchSkillResolver:
         return ResearchSkillCandidate(
             name=meta.name,
             description=meta.description,
+            planner_guidance=meta.planner_guidance,
+            planning_policy=dict(meta.planning_policy),
             category=meta.category,
             tags=list(meta.tags),
             required_tools=list(meta.requires_tools),

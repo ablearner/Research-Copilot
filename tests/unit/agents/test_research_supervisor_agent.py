@@ -31,6 +31,29 @@ class FailingManagerDecisionLLMStub(ManagerDecisionLLMStub):
         raise LLMAdapterError("relay timeout")
 
 
+def _literature_survey_no_default_import_candidate() -> dict:
+    return {
+        "name": "literature-survey",
+        "score": 1.0,
+        "match_reason": "trigger:文献.*调研",
+        "planning_policy": {
+            "action_policies": {
+                "import_papers": {
+                    "default_enabled": False,
+                    "enable_when": ["auto_import", "mode_import", "paper_import_intent"],
+                    "blocked_reason": "Literature survey defaults to metadata/abstract review.",
+                }
+            },
+            "failure_recovery": {
+                "write_review": {
+                    "default_action": "finalize",
+                    "stop_reason": "摘要级综述失败后不自动导入全文。",
+                }
+            },
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_research_supervisor_agent_uses_llm_to_route_search_task() -> None:
     manager = ResearchSupervisorAgent(
@@ -396,6 +419,102 @@ async def test_research_supervisor_agent_guardrail_routes_workspace_import_inten
     assert decision.action_name == "import_papers"
     assert decision.metadata["decision_source"] == "llm"
     assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-1"]
+
+
+@pytest.mark.asyncio
+async def test_literature_survey_policy_blocks_llm_default_import() -> None:
+    manager = ResearchSupervisorAgent(
+        llm_adapter=ManagerDecisionLLMStub(
+            {
+                "action_name": "import_papers",
+                "worker_agent": "ResearchKnowledgeAgent",
+                "instruction": "Import papers to fix a weak review.",
+                "thought": "The review failed, so import papers.",
+                "rationale": "Full text may improve the review.",
+                "phase": "act",
+                "payload": {},
+            }
+        )
+    )
+
+    decision = await manager.decide_next_action_async(
+        ResearchSupervisorState(
+            goal="调研 On-Policy Distillation",
+            mode="research",
+            has_task=True,
+            has_import_candidates=True,
+            importable_paper_count=6,
+            skill_candidates=[_literature_survey_no_default_import_candidate()],
+        )
+    )
+
+    assert decision.action_name == "finalize"
+    assert decision.metadata["decision_source"] == "manager_guardrail"
+    assert "metadata/abstract review" in (decision.stop_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_literature_survey_policy_allows_explicit_import_intent() -> None:
+    manager = ResearchSupervisorAgent(
+        llm_adapter=ManagerDecisionLLMStub(
+            {
+                "action_name": "import_papers",
+                "worker_agent": "ResearchKnowledgeAgent",
+                "instruction": "Import the targeted paper into the workspace.",
+                "thought": "The user explicitly asked for import.",
+                "rationale": "Explicit import intent enables the import action.",
+                "phase": "act",
+                "payload": {"paper_ids": ["paper-1"]},
+            }
+        )
+    )
+
+    decision = await manager.decide_next_action_async(
+        ResearchSupervisorState(
+            goal="把第一篇导入工作区供后续问答",
+            mode="auto",
+            has_task=True,
+            has_import_candidates=True,
+            candidate_papers=[{"index": 1, "paper_id": "paper-1", "title": "Paper One"}],
+            user_intent={"intent": "paper_import", "resolved_paper_ids": ["paper-1"]},
+            skill_candidates=[_literature_survey_no_default_import_candidate()],
+        )
+    )
+
+    assert decision.action_name == "import_papers"
+    assert decision.metadata["worker_agent"] == "ResearchKnowledgeAgent"
+    assert decision.metadata["active_message"].payload["paper_ids"] == ["paper-1"]
+
+
+def test_literature_survey_policy_finalizes_after_write_review_failure() -> None:
+    manager = ResearchSupervisorAgent()
+    decision = manager._guardrail_decision(
+        state=ResearchSupervisorState(
+            goal="调研 On-Policy Distillation",
+            mode="research",
+            has_task=True,
+            has_import_candidates=True,
+            skill_candidates=[_literature_survey_no_default_import_candidate()],
+        ),
+        all_messages=[],
+        results=[
+            AgentResultMessage(
+                task_id="review-1",
+                agent_from="ResearchWriterAgent",
+                agent_to="ResearchSupervisorAgent",
+                task_type="write_review",
+                status="failed",
+                instruction="write review",
+                payload={"reason": "missing_citations"},
+            )
+        ],
+        planner_runs=1,
+        replan_count=0,
+    )
+
+    assert decision is not None
+    assert decision.action_name == "finalize"
+    assert decision.stop_reason == "摘要级综述失败后不自动导入全文。"
 
 
 @pytest.mark.asyncio

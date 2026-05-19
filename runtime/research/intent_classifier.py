@@ -404,6 +404,7 @@ def should_force_finalize(
         and has_task_response
         and has_report
         and mode != "qa"
+        and not (auto_import and not import_attempted)
         and not latest_next_actions.intersection({"import_papers", "answer_question"})
     ):
         return True

@@ -47,3 +47,17 @@ def test_failed_answer_question_is_terminal_to_avoid_retry_loop() -> None:
             latest_next_actions={"answer_question"},
         )
     )
+
+
+def test_successful_review_does_not_finalize_before_requested_auto_import() -> None:
+    assert not should_force_finalize(
+        **_base_force_finalize_kwargs(
+            latest_task_type="write_review",
+            latest_status="succeeded",
+            has_task_response=True,
+            has_report=True,
+            auto_import=True,
+            import_attempted=False,
+            latest_next_actions=set(),
+        )
+    )

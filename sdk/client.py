@@ -447,12 +447,25 @@ class ResearchCopilotSDK:
         return {"name": name, "enabled": enabled}
 
     def update_model_profile(self, **updates: str | None) -> dict[str, Any]:
-        self._write_model_settings_to_env(**updates)
-        self.settings = Settings()
+        requested = {
+            key: str(value).strip()
+            for key, value in updates.items()
+            if value is not None and str(value).strip()
+        }
         self.profile = self.profile_store.clear_models()
         self._graph_runtime = None
         self._agent_service = None
-        return self.describe_runtime()["llm"] | {"embedding": self.describe_runtime()["embedding"]}
+        runtime = self.describe_runtime()
+        payload: dict[str, Any] = {
+            "source": ".env",
+            "message": "Model settings are read from .env only; this command does not persist or override them.",
+            "llm": runtime["llm"],
+            "embedding": runtime["embedding"],
+            "chart_vision": runtime["chart_vision"],
+        }
+        if requested:
+            payload["ignored_updates"] = requested
+        return payload
 
     async def run_agent_message(
         self,
@@ -711,46 +724,6 @@ class ResearchCopilotSDK:
         if not updates:
             return self.settings
         return self.settings.model_copy(update=updates)
-
-    def _write_model_settings_to_env(self, **updates: str | None) -> None:
-        env_path = self.settings.project_root / ".env"
-        env_keys = OrderedDict(
-            [
-                ("llm_provider", "LLM_PROVIDER"),
-                ("llm_model", "LLM_MODEL"),
-                ("embedding_provider", "EMBEDDING_PROVIDER"),
-                ("embedding_model", "EMBEDDING_MODEL"),
-                ("chart_vision_provider", "CHART_VISION_PROVIDER"),
-                ("chart_vision_model", "CHART_VISION_MODEL"),
-            ]
-        )
-        desired = {
-            env_key: str(value).strip()
-            for field_name, env_key in env_keys.items()
-            for value in [updates.get(field_name)]
-            if value is not None and str(value).strip()
-        }
-        if not desired:
-            return
-
-        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-        updated_lines: list[str] = []
-        seen: set[str] = set()
-        for raw_line in lines:
-            replaced = False
-            for env_key, env_value in desired.items():
-                prefix = f"{env_key}="
-                if raw_line.startswith(prefix):
-                    updated_lines.append(f"{env_key}={env_value}")
-                    seen.add(env_key)
-                    replaced = True
-                    break
-            if not replaced:
-                updated_lines.append(raw_line)
-        for env_key, env_value in desired.items():
-            if env_key not in seen:
-                updated_lines.append(f"{env_key}={env_value}")
-        env_path.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
 
     def _register_optional_mcp_servers(self, graph_runtime: Any, settings: Settings) -> None:
         if not getattr(settings, "zotero_local_enabled", False):

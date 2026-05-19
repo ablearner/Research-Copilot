@@ -380,6 +380,13 @@ class ResearchRuntimeBase:
                 suggested = ["analyze_papers", "compress_context"]
             elif action_name == "search_literature":
                 suggested = ["write_review", "import_papers", "answer_question"]
+                request = getattr(context, "request", None)
+                if (
+                    request is not None
+                    and getattr(request, "auto_import", False)
+                    and getattr(request, "import_top_k", 0) > 0
+                ):
+                    suggested = ["import_papers", "write_review", "answer_question"]
             elif action_name == "recommend_from_preferences":
                 suggested = ["search_literature", "answer_question"]
             elif action_name == "general_answer" and metadata.get("reason") == "route_mismatch":

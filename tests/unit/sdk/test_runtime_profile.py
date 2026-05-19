@@ -21,20 +21,32 @@ def test_runtime_profile_store_round_trip(tmp_path: Path) -> None:
     assert profile.plugins["zotero_local_mcp"].enabled is True
 
 
-def test_sdk_applies_profile_to_runtime_and_catalogs(tmp_path: Path) -> None:
+def test_sdk_keeps_env_model_settings_as_source_of_truth(tmp_path: Path) -> None:
     settings = Settings(
+        llm_provider="local",
+        llm_model="env-llm",
+        embedding_provider="local",
+        embedding_model="env-embedding",
+        chart_vision_provider="local",
+        chart_vision_model="env-chart-vision",
         research_storage_root=str(tmp_path / "research"),
         research_session_memory_dir=str(tmp_path / "session_memory"),
         research_paper_knowledge_dir=str(tmp_path / "paper_knowledge"),
         upload_dir=str(tmp_path / "uploads"),
     )
     sdk = ResearchCopilotSDK.from_settings(settings)
-    sdk.update_model_profile(llm_provider="openai", llm_model="gpt-5.4-mini")
+    payload = sdk.update_model_profile(llm_provider="openai", llm_model="gpt-5.4-mini")
     sdk.set_plugin_enabled("zotero_local_mcp", True)
 
     runtime = sdk.describe_runtime()
-    assert runtime["llm"]["provider"] == "openai"
-    assert runtime["llm"]["model"] == "gpt-5.4-mini"
+    assert runtime["llm"]["provider"] == "local"
+    assert runtime["llm"]["model"] == "env-llm"
+    assert runtime["embedding"]["model"] == "env-embedding"
+    assert runtime["chart_vision"]["model"] == "env-chart-vision"
+    assert payload["source"] == ".env"
+    assert payload["ignored_updates"] == {"llm_provider": "openai", "llm_model": "gpt-5.4-mini"}
+    assert sdk.profile.models.llm_provider is None
+    assert sdk.profile.models.llm_model is None
 
     plugins = {item["name"]: item for item in sdk.list_plugins()}
     assert plugins["zotero_local_mcp"]["enabled"] is True

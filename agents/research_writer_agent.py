@@ -144,6 +144,8 @@ class ResearchWriterAgent:
     def _quality_metrics(self, report: ResearchReport) -> dict[str, Any]:
         text = report.markdown
         word_count = len([token for token in text.replace("\n", " ").split(" ") if token.strip()])
+        cjk_char_count = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+        effective_word_count = max(word_count, cjk_char_count // 2)
         has_citations = "[P" in text or "引用" in text
         has_key_sections = all(
             section in text
@@ -153,7 +155,7 @@ class ResearchWriterAgent:
             for section in ("## 研究背景", "## 方法对比", "## 关键发现")
         )
         issues: list[str] = []
-        if word_count < 250:
+        if effective_word_count < 250:
             issues.append("review_too_short")
         if not has_citations:
             issues.append("missing_citations")
@@ -161,7 +163,9 @@ class ResearchWriterAgent:
             issues.append("missing_required_sections")
         return {
             "passed": not issues,
-            "word_count": word_count,
+            "word_count": effective_word_count,
+            "raw_word_count": word_count,
+            "cjk_char_count": cjk_char_count,
             "has_citations": has_citations,
             "has_key_sections": has_key_sections,
             "issues": issues,

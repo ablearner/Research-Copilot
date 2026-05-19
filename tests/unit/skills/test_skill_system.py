@@ -48,6 +48,7 @@ def _write_skill(
     name: str,
     *,
     description: str = "test skill",
+    planner_guidance: str = "",
     triggers: list[str] | None = None,
     tags: list[str] | None = None,
     body: str = "# Test\nSome instructions.",
@@ -66,6 +67,7 @@ def _write_skill(
         f"---\n"
         f"name: {name}\n"
         f"description: \"{description}\"\n"
+        f"planner_guidance: \"{planner_guidance}\"\n"
         f"triggers: {triggers_str}\n"
         f"tags: {tags_str}\n"
         f"trust_level: {trust_level}\n"
@@ -228,6 +230,11 @@ class TestParsing:
             ---
             name: my-skill
             description: "A great skill"
+            planner_guidance: "Plan with metadata first."
+            planning_policy:
+              action_policies:
+                import_papers:
+                  default_enabled: false
             version: 2.0.0
             category: research
             tags: [paper, analysis]
@@ -242,6 +249,8 @@ class TestParsing:
         assert skill is not None
         assert skill.meta.name == "my-skill"
         assert skill.meta.description == "A great skill"
+        assert skill.meta.planner_guidance == "Plan with metadata first."
+        assert skill.meta.planning_policy["action_policies"]["import_papers"]["default_enabled"] is False
         assert skill.meta.version == "2.0.0"
         assert skill.meta.category == "research"
         assert "paper" in skill.meta.tags
