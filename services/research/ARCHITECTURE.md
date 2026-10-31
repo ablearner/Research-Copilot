@@ -13,7 +13,7 @@ apps/api/routers/research.py
   -> ResearchCapabilityRegistry (inventory metadata)
   -> ResearchSupervisorGraphRuntime
   -> ResearchSupervisorAgent
-  -> specialist agent selected from unified_agent_delegates
+  -> specialist selected from UnifiedAgentRegistry
   -> specialist.run_action(context, decision)
   -> specialist capabilities / ResearchKnowledgeAccess / ResearchMemoryGateway / ResearchExternalToolGateway
   -> RagRuntime / RetrievalTools / AnswerTools
@@ -55,7 +55,7 @@ direct-discovery helpers are gone.
 
 `ResearchAgentContextBuilder` prepares the per-request
 `ResearchAgentToolContext`. It keeps conversation hydration, execution context,
-unified runtime context, unified agent registry, blueprint, and active skills
+unified agent registry, blueprint, and active skills
 in one construction path.
 
 `ResearchSkillResolver` is the Skill layer boundary. It reuses
@@ -139,14 +139,20 @@ reaching into raw MCP registries.
 messages, warnings, workspace metadata, delegation traces, active skill
 metadata, and the `ResearchAgentRunResponse` while preserving the old response
 shape.
+The graph carries `AgentMessage` and `AgentResultMessage` internally. A shared
+projection serializes the legacy `agent_messages`, `agent_results`, and
+`delegation_plan` fields alongside the `unified_*` fields once per response;
+the decision-trace notice reuses those same values. `UnifiedAgentTask` and
+`UnifiedAgentResult` remain DTO adapters for callers of their public Python
+interfaces, not execution envelopes.
 
 ## Compatibility
 
 The old runtime methods remain available and delegate to the explicit layers:
 
 - `_build_tool_context` delegates to `ResearchAgentContextBuilder`.
-- Unified worker helpers and the action-tool registry remain for compatibility;
-  the action node uses direct specialist `run_action` calls.
+- The action-tool registry remains as a compatibility surface. The action node
+  dispatches through `UnifiedAgentRegistry` to specialist `run_action` methods.
 - `_build_response` delegates to `ResearchAgentResultAggregator`.
 
 The public API now exposes only the high-level research surface plus health and
@@ -158,4 +164,15 @@ The remaining research-domain search endpoints (`/research/papers/search`,
 supervisor runtime. They construct discovery-only `ResearchAgentRunRequest`
 objects, go through `ResearchSupervisorGraphRuntime -> ResearchSupervisorAgent
 -> LiteratureScoutAgent -> LiteratureDiscoveryCapability`, and then adapt the
-unified result back to their legacy response models.
+supervisor response back to their legacy response models.
+
+## Verification and limits
+
+Use `python -m pytest -q -p no:cacheprovider` for offline regression checks,
+`python -m ruff check .` for Python lint, and
+`npm run build` in `frontend/` for TypeScript and the web build. The installed
+wheel import smoke is described in the Task 5 report under `.superpowers/sdd/`.
+The runtime state commit boundary does not roll back downloads, indexing,
+progress events, Zotero writes, or derived figure-cache writes. The public
+response keeps historical `unified_*` names even though execution uses the
+internal message classes and direct specialist calls.

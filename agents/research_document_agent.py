@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from domain.schemas.unified_runtime import UnifiedAgentResult, UnifiedAgentTask
 from tools.research.document_capability import ResearchDocumentCapability
 
 if TYPE_CHECKING:
@@ -99,39 +98,4 @@ class ResearchDocumentAgent:
                 f"pages={len(parsed_document.pages)}; indexed={bool(delta.document_index_result)}"
             ),
             metadata=output.to_metadata(),
-        )
-
-    def _unified_result(
-        self,
-        *,
-        task: UnifiedAgentTask,
-        status: str,
-        observation: str,
-        metadata: dict[str, Any],
-    ) -> UnifiedAgentResult:
-        return UnifiedAgentResult(
-            task_id=task.task_id,
-            agent_name=self.name,
-            task_type=task.task_type,
-            status=status,  # type: ignore[arg-type]
-            instruction=task.instruction,
-            payload={
-                "observation": observation,
-                "tool_metadata": dict(metadata),
-            },
-            context_slice=task.context_slice,
-            priority=task.priority,
-            expected_output_schema=task.expected_output_schema,
-            depends_on=task.depends_on,
-            retry_count=task.retry_count,
-            action_output=(
-                dict(metadata)
-                if UnifiedAgentResult.is_action_output_payload(metadata)
-                else None
-            ),
-            metadata={
-                "execution_engine": "unified_agent_registry",
-                "execution_adapter": "research_document_agent",
-                "delegate_type": self.__class__.__name__,
-            },
         )

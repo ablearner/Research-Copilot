@@ -10,13 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.config import Settings
-from domain.schemas.paper_knowledge import PaperKnowledgeRecord
-from domain.schemas.research_memory import LongTermMemoryRecord, SessionMemoryRecord
-from memory.factory import resolve_memory_db_path
-from memory.long_term_memory import SQLiteLongTermMemoryStore
-from memory.paper_knowledge_memory import SQLitePaperKnowledgeStore
-from memory.session_memory import SQLiteSessionMemoryStore
+# Direct-script imports need the project-root bootstrap above.
+from core.config import Settings  # noqa: E402
+from domain.schemas.paper_knowledge import PaperKnowledgeRecord  # noqa: E402
+from domain.schemas.research_memory import LongTermMemoryRecord, SessionMemoryRecord  # noqa: E402
+from memory.factory import resolve_memory_db_path  # noqa: E402
+from memory.long_term_memory import SQLiteLongTermMemoryStore  # noqa: E402
+from memory.paper_knowledge_memory import SQLitePaperKnowledgeStore  # noqa: E402
+from memory.session_memory import SQLiteSessionMemoryStore  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

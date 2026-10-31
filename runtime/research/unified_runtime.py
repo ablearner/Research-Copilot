@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from domain.schemas.unified_runtime import (
@@ -11,14 +11,6 @@ from domain.schemas.unified_runtime import (
     UnifiedRuntimeBlueprint,
     UnifiedCapabilityBinding,
 )
-
-
-@dataclass(slots=True)
-class UnifiedRuntimeContext:
-    graph_runtime: Any
-    research_service: Any
-    tool_registry: Any | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 ACTION_AGENT_CATALOG: dict[str, str] = {
@@ -85,18 +77,6 @@ class SpecialistAgentExecutor:
         return await self.agent_delegate.run_action(context, decision, **kwargs)
 
 
-def build_phase1_unified_runtime_context(
-    *,
-    graph_runtime: Any,
-    research_service: Any,
-) -> UnifiedRuntimeContext:
-    return UnifiedRuntimeContext(
-        graph_runtime=graph_runtime,
-        research_service=research_service,
-        tool_registry=getattr(graph_runtime, "tool_registry", None),
-    )
-
-
 def build_phase1_unified_blueprint(
     *,
     graph_runtime: Any,
@@ -108,7 +88,7 @@ def build_phase1_unified_blueprint(
     agent_descriptors = [
         _build_descriptor(
             name="ResearchSupervisorAgent",
-            description="High-level orchestrator that should become a pure scheduler over a unified agent envelope.",
+            description="Supervisor that plans, routes, and evaluates research tasks.",
             kind="orchestrator",
             execution_mode="hybrid",
             supported_task_types=["plan", "replan", "finalize", "delegate"],
@@ -116,8 +96,7 @@ def build_phase1_unified_blueprint(
                 profile_name=_preferred_capability("research_supervisor", capability_profile_names),
                 service_names=["ResearchEvaluationTool"],
                 notes=[
-                    "Currently owns planning plus evaluation responsibilities.",
-                    "Target state is scheduler-only with evaluation moved to a normal tool or reviewer agent.",
+                    "Plans and routes tasks; evaluates specialist results.",
                 ],
             ),
             preferred_tool_names=[
@@ -130,12 +109,9 @@ def build_phase1_unified_blueprint(
                 "index_document",
             ],
             available_tool_names=tool_names,
-            legacy_boundaries=[
-                "research_supervisor_graph_runtime_core.ResearchAgentTool",
-                "manager-specific handoff logic",
-            ],
+            legacy_boundaries=[],
             notes=[
-                "This is the main boundary to collapse into the shared agent protocol.",
+                "Internal task and result state uses AgentMessage and AgentResultMessage.",
             ],
         ),
         _build_descriptor(
@@ -192,7 +168,7 @@ def build_phase1_unified_blueprint(
             preferred_tool_names=["parse_document", "index_document"],
             available_tool_names=tool_names,
             legacy_boundaries=[],
-            notes=["Supervisor should route uploaded document grounding here, not to raw document tools."],
+            notes=["Supervisor routes uploaded document grounding to this specialist."],
         ),
         _build_descriptor(
             name="ResearchQAAgent",
@@ -332,6 +308,44 @@ def serialize_unified_agent_registry(registry: UnifiedAgentRegistry | None) -> l
     return [executor.descriptor.model_dump(mode="json") for executor in registry.list()]
 
 
+def serialize_agent_exchange(
+    agent_messages: list[Any],
+    agent_results: list[Any],
+    *,
+    registry: UnifiedAgentRegistry | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Project internal task messages to the public legacy and unified fields."""
+    results_by_id = {result.task_id: result for result in agent_results}
+    legacy_plan = []
+    for message in agent_messages:
+        result = results_by_id.get(message.task_id)
+        legacy_plan.append({
+            "task_id": message.task_id,
+            "assigned_to": message.agent_to,
+            "task_type": message.task_type,
+            "instruction": message.instruction,
+            "depends_on": list(message.depends_on),
+            "priority": message.priority,
+            "retry_count": message.retry_count,
+            "status": _projected_status(result),
+            "evaluation": result.evaluation.model_dump(mode="json") if result and result.evaluation else None,
+        })
+    return {
+        "agent_messages": [message.model_dump(mode="json") for message in agent_messages],
+        "agent_results": [result.model_dump(mode="json") for result in agent_results],
+        "delegation_plan": legacy_plan,
+        "unified_agent_messages": serialize_unified_agent_messages(agent_messages, registry=registry),
+        "unified_agent_results": serialize_unified_agent_results(agent_results, registry=registry),
+        "unified_delegation_plan": serialize_unified_delegation_plan(agent_messages, agent_results, registry=registry),
+    }
+
+
+def _projected_status(result: Any | None) -> str:
+    if result is None:
+        return "planned"
+    return "failed" if result.evaluation is not None and not result.evaluation.passed else result.status
+
+
 def serialize_unified_agent_messages(
     agent_messages: list[Any],
     *,
@@ -405,15 +419,7 @@ def serialize_unified_delegation_plan(
         )
         payload = task.model_dump(mode="json")
         result = result_by_task_id.get(message.task_id)
-        payload["status"] = (
-            "planned"
-            if result is None
-            else (
-                "failed"
-                if result.evaluation is not None and not result.evaluation.passed
-                else result.status
-            )
-        )
+        payload["status"] = _projected_status(result)
         payload["evaluation"] = (
             result.evaluation.model_dump(mode="json")
             if result is not None and result.evaluation is not None

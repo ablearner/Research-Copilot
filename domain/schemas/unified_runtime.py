@@ -183,10 +183,10 @@ class UnifiedAgentResult(BaseModel):
 
 
 class UnifiedRuntimeBlueprint(BaseModel):
-    name: str = "research-copilot-unified-runtime-phase1"
+    name: str = "research-copilot-unified-runtime"
     target_state: str = (
-        "skill profiles select behavior, a single agent envelope carries tasks, "
-        "and all executable capabilities converge on ToolRegistry/ToolExecutor."
+        "Supervisor plans and routes AgentMessage tasks; registered specialists return "
+        "state deltas; application services commit state; public unified fields are projections."
     )
     agent_descriptors: list[UnifiedAgentDescriptor] = Field(default_factory=list)
     tool_names: list[str] = Field(default_factory=list)

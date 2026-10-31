@@ -12,7 +12,6 @@ from runtime.research.agent_protocol import ResearchAgentToolContext
 from runtime.research.unified_runtime import (
     build_phase1_unified_agent_registry,
     build_phase1_unified_blueprint,
-    build_phase1_unified_runtime_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,10 +78,6 @@ class ResearchAgentContextBuilder:
             skill_name=hydrated_request.skill_name,
             reasoning_style=hydrated_request.reasoning_style,
             metadata=hydrated_request.metadata,
-        )
-        context.unified_runtime_context = build_phase1_unified_runtime_context(
-            graph_runtime=graph_runtime,
-            research_service=self.runtime.research_service,
         )
         cached = self._registry_cache.get(id(graph_runtime))
         if cached is None or cached[0] is not graph_runtime:

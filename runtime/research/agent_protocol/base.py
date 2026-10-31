@@ -108,7 +108,6 @@ class ResearchAgentToolContext:
     warnings: list[str] | None = None
     unified_blueprint: dict[str, Any] | None = None
     unified_agent_registry: Any | None = None
-    unified_runtime_context: Any | None = None
     runtime_progress: dict[str, Any] | None = None
     progress_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
     skill_context: str | None = None

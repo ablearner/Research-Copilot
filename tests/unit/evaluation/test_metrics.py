@@ -11,11 +11,9 @@ from evaluation.metrics import (
     groundedness_score,
     informative_tokens,
     keyword_recall,
-    normalize_text,
     percentile,
     polarity_accuracy,
     reference_token_f1,
-    retrieval_recall_at_k,
     route_accuracy,
     tool_call_success_rate,
 )

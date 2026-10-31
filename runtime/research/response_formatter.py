@@ -18,7 +18,7 @@ from runtime.research.agent_protocol import (
     ResearchAgentToolContext,
     _message,
 )
-from runtime.research.unified_runtime import serialize_unified_delegation_plan
+from runtime.research.unified_runtime import serialize_agent_exchange
 
 
 class ResearchResponseFormatter:
@@ -38,7 +38,7 @@ class ResearchResponseFormatter:
         agent_results: list[AgentResultMessage],
         clarification_request: str | None,
         replan_count: int,
-        serialize_task_plan_fn: Any = None,
+        agent_exchange: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[ResearchMessage]:
         executed_actions = {step.action_name for step in trace if step.status in {"succeeded", "skipped"}}
         messages = [
@@ -69,7 +69,9 @@ class ResearchResponseFormatter:
                 )
                 for message in agent_messages[-8:]
             ]
-            delegation_plan = serialize_task_plan_fn(agent_messages, agent_results) if serialize_task_plan_fn else []
+            exchange = agent_exchange or serialize_agent_exchange(
+                agent_messages, agent_results, registry=context.unified_agent_registry,
+            )
             messages.append(
                 _message(
                     role="assistant",
@@ -78,14 +80,10 @@ class ResearchResponseFormatter:
                     meta=f"decisions={len(agent_messages)} · results={len(agent_results)} · recoveries={replan_count}",
                     content="\n".join(plan_lines),
                     payload={
-                        "agent_messages": [message.model_dump(mode="json") for message in agent_messages],
-                        "agent_results": [result.model_dump(mode="json") for result in agent_results],
-                        "delegation_plan": delegation_plan,
-                        "unified_delegation_plan": serialize_unified_delegation_plan(
-                            agent_messages,
-                            agent_results,
-                            registry=context.unified_agent_registry,
-                        ),
+                        "agent_messages": exchange["agent_messages"],
+                        "agent_results": exchange["agent_results"],
+                        "delegation_plan": exchange["delegation_plan"],
+                        "unified_delegation_plan": exchange["unified_delegation_plan"],
                     },
                 )
             )

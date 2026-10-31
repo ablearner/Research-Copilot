@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from evaluation.metrics import polarity_accuracy, reference_token_f1
-from evaluation.run_agent_metrics import load_cases
+from evaluation.metrics import polarity_accuracy, reference_token_f1  # noqa: E402 - direct script bootstrap above
+from evaluation.run_agent_metrics import load_cases  # noqa: E402 - direct script bootstrap above
 
 
 def parse_args() -> argparse.Namespace:

@@ -736,7 +736,7 @@ async def test_context_builder_reuses_registry_per_graph_runtime_and_isolates_bl
 
     assert first.unified_agent_registry is second.unified_agent_registry
     assert first.unified_agent_registry is not other.unified_agent_registry
-    assert first.unified_runtime_context is not second.unified_runtime_context
+    assert not hasattr(first, "unified_runtime_context")
     assert first.unified_blueprint is not second.unified_blueprint
     assert first.unified_blueprint["tool_names"] == ["parse_document"]
     assert other.unified_blueprint["tool_names"] == ["hybrid_retrieve"]
@@ -937,6 +937,9 @@ async def test_research_supervisor_graph_creates_task_and_imports_relevant_paper
     assert response.metadata["unified_delegation_plan"]
     assert response.metadata["unified_agent_messages"]
     assert response.metadata["unified_agent_results"]
+    decision_notice = next(message for message in response.messages if message.title == "Manager 决策轨迹")
+    for key in ("agent_messages", "agent_results", "delegation_plan", "unified_delegation_plan"):
+        assert decision_notice.payload[key] == response.metadata[key]
     assert response.metadata["unified_agent_messages"][0]["preferred_skill_name"] == "research_report"
     assert response.metadata["unified_delegation_plan"][0]["preferred_skill_name"] == "research_report"
     assert response.metadata["unified_delegation_plan"][0]["action_output"]["unified_input_adapter"] == "literature_search_input"

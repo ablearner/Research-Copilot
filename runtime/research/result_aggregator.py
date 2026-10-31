@@ -10,10 +10,8 @@ from domain.schemas.research import (
 )
 from runtime.research.agent_protocol import ResearchAgentToolContext
 from runtime.research.unified_runtime import (
-    serialize_unified_agent_messages,
+    serialize_agent_exchange,
     serialize_unified_agent_registry,
-    serialize_unified_agent_results,
-    serialize_unified_delegation_plan,
 )
 
 
@@ -73,6 +71,9 @@ class ResearchAgentResultAggregator:
             conversation_id=request.conversation_id,
             advanced_strategy=advanced_strategy,
         )
+        agent_exchange = serialize_agent_exchange(
+            agent_messages, agent_results, registry=context.unified_agent_registry,
+        )
         messages = self.runtime._build_messages(
             request,
             context,
@@ -82,6 +83,7 @@ class ResearchAgentResultAggregator:
             agent_results=agent_results,
             clarification_request=clarification_request,
             replan_count=replan_count,
+            agent_exchange=agent_exchange,
         )
         self.runtime._log_internal_runtime_state(
             request=request,
@@ -187,12 +189,7 @@ class ResearchAgentResultAggregator:
                 "active_decision_batch_id": active_plan_id,
                 "clarification_requested": bool(clarification_request),
                 "advanced_strategy": advanced_strategy.model_dump(mode="json"),
-                "delegation_plan": self.runtime._serialize_task_plan(agent_messages, agent_results),
-                "unified_delegation_plan": serialize_unified_delegation_plan(
-                    agent_messages,
-                    agent_results,
-                    registry=context.unified_agent_registry,
-                ),
+                **agent_exchange,
                 "agent_lane_states": (
                     {
                         name: state.model_dump(mode="json")
@@ -201,19 +198,9 @@ class ResearchAgentResultAggregator:
                     if context.execution_context and context.execution_context.research_context
                     else {}
                 ),
-                "agent_messages": [message.model_dump(mode="json") for message in agent_messages],
-                "agent_results": [result.model_dump(mode="json") for result in agent_results],
                 "general_answer": context.general_answer,
                 "general_answer_metadata": context.general_answer_metadata or {},
                 "active_skills": list(skill_metadata.get("active_skill_names") or []),
                 "skill_selection": skill_metadata,
-                "unified_agent_messages": serialize_unified_agent_messages(
-                    agent_messages,
-                    registry=context.unified_agent_registry,
-                ),
-                "unified_agent_results": serialize_unified_agent_results(
-                    agent_results,
-                    registry=context.unified_agent_registry,
-                ),
             },
         )

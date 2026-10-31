@@ -7,6 +7,12 @@
 属于本地评测产物，不应提交。运行示例中的 benchmark 路径需要先按下文
 步骤生成。
 
+离线回归用 `python -m pytest -q -p no:cacheprovider`
+和 `python -m ruff check evaluation`。本目录的 `sample` runtime 用于可重复的
+代码检查；`live` 指标依赖当前模型、检索索引和外部服务，不能从离线测试通过
+推断出线上质量。SciFact / RAGBench 数据与报告需要另行生成，本仓库不附带
+下载后的 benchmark 或宣称最新 live 评测数值。
+
 评测建议分两层看：
 
 - 底座能力评测：`ask_document`、`ask_fused`、`chart_understand`

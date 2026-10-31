@@ -34,7 +34,6 @@ from domain.schemas.unified_runtime import (
     UNIFIED_ACTION_OUTPUT_METADATA_KEY,
     UnifiedAgentDescriptor,
     UnifiedAgentResult,
-    UnifiedAgentTask,
 )
 from domain.research_workspace import build_workspace_from_task, build_workspace_state
 from tools.research import PaperAnalysisTool, PaperReadingTool, IntentResolutionTool, PaperCurationTool
@@ -1418,18 +1417,10 @@ class ResearchRuntimeBase:
         if status == "failed":
             pending = []
         descriptor = self._unified_agent_descriptor(context, agent_name=worker_agent)
-        unified_task = UnifiedAgentTask.from_agent_message(
-            active_message,
-            preferred_skill_name=self._preferred_skill_name_for_message(
-                context,
-                active_message=active_message,
-                worker_agent=worker_agent,
-            ),
-            available_tool_names=self._available_tool_names_for_agent(
-                context,
-                agent_name=worker_agent,
-            ),
+        preferred_skill_name = self._preferred_skill_name_for_message(
+            context, active_message=active_message, worker_agent=worker_agent,
         )
+        available_tool_names = self._available_tool_names_for_agent(context, agent_name=worker_agent)
         action_output = UnifiedAgentResult.extract_action_output(payload=result_payload)
         result_metadata = {"plan_id": active_message.metadata.get("plan_id"), **result_payload}
         if action_output is not None:
@@ -1437,16 +1428,17 @@ class ResearchRuntimeBase:
                 UNIFIED_ACTION_OUTPUT_METADATA_KEY,
                 dict(action_output),
             )
-        if unified_task.preferred_skill_name:
-            result_metadata.setdefault("preferred_skill_name", unified_task.preferred_skill_name)
-        if unified_task.available_tool_names:
-            result_metadata.setdefault("available_tool_names", list(unified_task.available_tool_names))
+        if preferred_skill_name:
+            result_metadata.setdefault("preferred_skill_name", preferred_skill_name)
+        if available_tool_names:
+            result_metadata.setdefault("available_tool_names", available_tool_names)
         if descriptor is not None:
             result_metadata.setdefault("execution_mode", descriptor.execution_mode)
             result_metadata.setdefault("agent_descriptor_name", descriptor.name)
-        unified_result = UnifiedAgentResult(
+        result_message = AgentResultMessage(
             task_id=active_message.task_id,
-            agent_name=worker_agent,
+            agent_from=worker_agent,
+            agent_to=active_message.agent_from,
             task_type=active_message.task_type,
             status=status,  # type: ignore[arg-type]
             instruction=active_message.instruction,
@@ -1457,10 +1449,8 @@ class ResearchRuntimeBase:
             depends_on=list(active_message.depends_on),
             retry_count=active_message.retry_count,
             evaluation=result_payload.get("evaluation") if isinstance(result_payload, dict) else None,
-            action_output=action_output,
             metadata=result_metadata,
         )
-        result_message = unified_result.to_agent_result_message(reply_to=active_message.agent_from)
         completed = list(state.get("completed_agent_task_ids", []))
         failed = list(state.get("failed_agent_task_ids", []))
         if status in {"succeeded", "skipped"}:
@@ -1540,41 +1530,6 @@ class ResearchRuntimeBase:
             if not state.last_task_plan_id:
                 state.last_task_plan_id = None
         return states
-
-    def _serialize_task_plan(
-        self,
-        agent_messages: list[AgentMessage],
-        agent_results: list[AgentResultMessage],
-    ) -> list[dict[str, Any]]:
-        result_by_task_id = {result.task_id: result for result in agent_results}
-        serialized: list[dict[str, Any]] = []
-        for message in agent_messages:
-            result = result_by_task_id.get(message.task_id)
-            serialized_status = "planned"
-            if result is not None:
-                serialized_status = (
-                    "failed"
-                    if result.evaluation is not None and not result.evaluation.passed
-                    else result.status
-                )
-            serialized.append(
-                {
-                    "task_id": message.task_id,
-                    "assigned_to": message.agent_to,
-                    "task_type": message.task_type,
-                    "instruction": message.instruction,
-                    "depends_on": list(message.depends_on),
-                    "priority": message.priority,
-                    "retry_count": message.retry_count,
-                    "status": serialized_status,
-                    "evaluation": (
-                        result.evaluation.model_dump(mode="json")
-                        if result is not None and result.evaluation is not None
-                        else None
-                    ),
-                }
-            )
-        return serialized
 
     def _resolve_session_context(self, context: ResearchAgentToolContext) -> dict[str, Any]:
         """Extract session context from conversation snapshot (sync, no LLM)."""
@@ -1930,6 +1885,7 @@ class ResearchRuntimeBase:
         agent_results: list[AgentResultMessage],
         clarification_request: str | None,
         replan_count: int,
+        agent_exchange: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[ResearchMessage]:
         return self.response_formatter.build_messages(
             request,
@@ -1940,7 +1896,7 @@ class ResearchRuntimeBase:
             agent_results=agent_results,
             clarification_request=clarification_request,
             replan_count=replan_count,
-            serialize_task_plan_fn=self._serialize_task_plan,
+            agent_exchange=agent_exchange,
         )
 
     def _next_actions(

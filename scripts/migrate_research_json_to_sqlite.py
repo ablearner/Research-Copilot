@@ -10,10 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from adapters.storage.research_report_service import ResearchReportService
-from adapters.storage.sqlite_store import SQLiteStore
-from core.config import Settings
-from domain.schemas.research import (
+# Direct-script imports need the project-root bootstrap above.
+from adapters.storage.research_report_service import ResearchReportService  # noqa: E402
+from adapters.storage.sqlite_store import SQLiteStore  # noqa: E402
+from core.config import Settings  # noqa: E402
+from domain.schemas.research import (  # noqa: E402
     PaperCandidate,
     ResearchConversation,
     ResearchJob,
