@@ -21,3 +21,7 @@ The public `build_phase1_*` entrypoint names remain as compatibility adapters; t
 ## Concerns
 
 None identified in focused validation. Registry caches retain graph-runtime references for the lifetime of the supervisor runtime; production normally supplies one graph runtime, and this preserves descriptors for multiple runtimes when present.
+
+## Follow-up lint correction
+
+Removed a stale test import left after replacing the skeleton-adapter test. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m ruff check $(git diff --name-only 323ff4a...HEAD -- '*.py')` reported `All checks passed!`. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m pytest -q tests/unit/services/test_unified_runtime.py --tb=short` reported **7 passed, 2 dependency warnings**.
