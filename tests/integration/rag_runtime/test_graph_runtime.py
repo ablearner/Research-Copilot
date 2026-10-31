@@ -11,7 +11,7 @@ from domain.schemas.graph import GraphExtractionResult
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalHit, RetrievalQuery
 from rag_runtime.runtime import GraphRuntime
 from rag_runtime.schemas import GraphTaskRequest
-from agents.research_qa_agent import RagReActQAWorker as ReActReasoningAgent
+from agents.rag_react_qa_worker import RagReActQAWorker as ReActReasoningAgent
 from rag_runtime.services.embedding_index_service import EmbeddingIndexResult
 from rag_runtime.services.graph_index_service import GraphIndexStats
 from tooling.schemas import AnswerWithEvidenceToolInput, ToolSpec

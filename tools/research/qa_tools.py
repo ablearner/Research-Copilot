@@ -18,6 +18,7 @@ from tools.research.qa_schemas import ResearchQARouteDecision
 from domain.schemas.research_context import ResearchExecutionContext
 from tools.research.collection_qa_capability import ResearchCollectionQACapability
 from tools.research.knowledge_access import ResearchKnowledgeAccess
+from tools.research.visual_anchor import VisualAnchorTool
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +79,11 @@ class ResearchQAToolset:
     """Route-specific QA tools used by the task-level ResearchQAAgent."""
 
     def __init__(
-        self, *, chart_analysis_agent: Any,
+        self, *, visual_anchor_tool: VisualAnchorTool,
         load_cached_figure_payload: Callable[..., dict[str, Any] | None],
         collection_qa_capability: ResearchCollectionQACapability,
     ) -> None:
-        self.chart_analysis_agent = chart_analysis_agent
+        self.visual_anchor_tool = visual_anchor_tool
         self.load_cached_figure_payload = load_cached_figure_payload
         self.collection_qa_capability = collection_qa_capability
 
@@ -154,7 +155,7 @@ class ResearchQAToolset:
             )
 
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
-        visual_anchor_figure = self.chart_analysis_agent.resolve_visual_anchor_figure(
+        visual_anchor_figure = self.visual_anchor_tool.resolve_visual_anchor_figure(
             papers=papers,
             qa_metadata={"visual_anchor": qa_route_decision.visual_anchor},
             load_cached_figure_payload=self.load_cached_figure_payload,

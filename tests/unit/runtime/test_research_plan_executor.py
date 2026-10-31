@@ -205,3 +205,12 @@ def test_dispatch_allows_same_action_with_distinct_params():
     accepted = advance_plan(start_step(original, 1, 't'), [result()])
     dispatched = start_step(accepted, 2, 't2')
     assert dispatched.steps[1].status == 'running'
+
+
+def test_discovery_constraint_allows_separate_review_step():
+    created = create_plan(
+        [step(1), step(2, action='write_review', depends_on=[1])],
+        allowed_actions={'search_literature', 'write_review'}, workflow_constraint='discovery_only',
+    )
+    searched = advance_plan(start_step(created, 1, 'search'), [result('search')])
+    assert ready_step(searched).action == 'write_review'

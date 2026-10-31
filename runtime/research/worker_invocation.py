@@ -1,4 +1,4 @@
-"""Prepare isolated specialist data while retaining shared service handles."""
+"""Prepare isolated specialist data with explicit tool and service capabilities."""
 
 from copy import deepcopy
 from dataclasses import fields, replace
@@ -8,10 +8,11 @@ from agents.research_supervisor_agent import ResearchSupervisorDecision
 from runtime.research.agent_protocol.base import ResearchAgentToolContext
 from runtime.research.unified_action_adapters import resolve_active_message
 from runtime.research.worker_task_input import build_worker_task_input
+from runtime.research.worker_ports import build_worker_knowledge_port, build_worker_research_port
 
 
-# These are live program resources, never prompt data or per-task mutable state.
-_SHARED_RESOURCES = frozenset({
+# Exclude live resources from data copying; rebuild restricted ports below.
+_LIVE_RESOURCE_FIELDS = frozenset({
     "research_service", "graph_runtime", "unified_agent_registry", "knowledge_access",
     "progress_callback",
 })
@@ -31,8 +32,12 @@ def prepare_worker_invocation(
     worker = replace(context, **deepcopy({
         item.name: getattr(context, item.name)
         for item in fields(context)
-        if item.name not in _SHARED_RESOURCES and item.name != "result_artifacts"
+        if item.name not in _LIVE_RESOURCE_FIELDS and item.name != "result_artifacts"
     }), result_artifacts={})
+    worker.research_service = build_worker_research_port(context.research_service)
+    worker.graph_runtime = build_worker_knowledge_port(context.graph_runtime)
+    worker.knowledge_access = worker.graph_runtime.knowledge_access
+    worker.unified_agent_registry = None
     # Supervisor graph updates have already been applied before dispatch.
     # Workers need the task, not copies of pending tasks and the complete plan.
     task_decision = replace(

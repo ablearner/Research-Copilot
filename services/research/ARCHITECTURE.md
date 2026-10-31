@@ -48,10 +48,17 @@ still commit their own results. Downloads, document/vector ingestion, progress
 events, Zotero effects and derived figure-cache writes remain explicit tool or
 application effects; this boundary is not an external-effect transaction.
 
-`ResearchDiscoveryCapability` is the shared discovery engine used under
-`LiteratureDiscoveryCapability`. Topic planning, provider search, paper
-curation, report drafting, and TODO generation are centralized now that the old
-direct-discovery helpers are gone.
+Discovery and writing are separate runtime tasks. `LiteratureScoutAgent` owns
+topic planning, provider search and candidate curation. `ResearchWriterAgent`
+owns report synthesis and TODO generation. The discovery-only constraint allows
+`search_literature` followed by `write_review`, and forbids ingestion and QA.
+Refinement preserves the existing report until the separately dispatched Writer
+returns its replacement. Writer retains report identity, historical QA/TODO
+sections and metadata while refreshing the report-derived workspace. Source
+warnings and the saved answer-language preference cross the handoff explicitly.
+Report validation accepts the generated Chinese or English headings and still
+requires sufficient length and citations. A concise heuristic fallback may fail
+that quality gate; its partial report is preserved with a failed action status.
 
 `ResearchAgentContextBuilder` prepares the per-request
 `ResearchAgentToolContext`. It keeps conversation hydration, execution context,
@@ -59,9 +66,12 @@ unified agent registry, blueprint, and active skills
 in one construction path.
 
 Before specialist dispatch, `prepare_worker_invocation` creates an independent
-snapshot of mutable request/workspace/execution data. Service clients, the graph
-runtime, the agent registry, knowledge access and the progress callback remain
-shared program resources. A worker's instruction and Skill body come only from
+snapshot of mutable request/workspace/execution data. Fixed allowlisted ports
+expose service operations and knowledge tools; the full service, full graph
+runtime and executable Agent registry are not passed to Workers.
+KnowledgeAccess is rebuilt against the restricted graph port. Runtime resolves
+the executor from its own registry before giving it the Worker context.
+A worker's instruction and Skill body come only from
 the current task; an absent Skill clears any previous task's selection. The
 snapshot retains the complete workspace for state-delta construction.
 
@@ -93,8 +103,10 @@ the explicit-task answer path excludes unbounded workspace history and stale
 Skill fields while retaining scoped retrieval evidence and basic preferences.
 
 The graph remains serial. Snapshot isolation prevents accidental input mutation
-and instruction/Skill leakage; it does not make shared services or simultaneous
-state-delta commits safe for parallel execution.
+and instruction/Skill leakage; the explicit ports prevent ordinary peer-Agent
+lookup and dispatch. These are application dependency boundaries, not a Python
+security sandbox or process isolation. Shared clients and simultaneous
+state-delta commits are not made safe for parallel execution.
 
 `ResearchSkillResolver` is the Skill layer boundary. It reuses
 `core.SkillRegistry`, `core.SkillMatcher`, and `core.SkillValidator`. Skills
@@ -135,21 +147,24 @@ supervisor chain. It prefers registered runtime tools such as
 `hybrid_retrieve`, `query_graph_summary`, `answer_with_evidence`,
 `parse_document`, `index_document`, and `understand_chart`, while keeping
 fallbacks to the existing `RagRuntime` methods for compatibility.
+Grounded answering calls `AnswerTools` directly; it never delegates to the
+RAG ReAct worker from inside another Worker.
 
 Specialist agents keep their domain responsibilities:
 
-- `LiteratureScoutAgent`: paper discovery and search planning through
-  `LiteratureDiscoveryCapability`.
+- `LiteratureScoutAgent`: paper discovery and search planning through search
+  and curation tools.
 - `ResearchKnowledgeAgent`: paper ingestion, Zotero sync, retrieval-support,
   and context compression through `KnowledgeOpsCapability`.
 - `ResearchQAAgent`: task-level QA specialist for collection, document, and
   chart drilldown routes selected by the supervisor.
-- `ResearchWriterAgent`: review/report synthesis through
-  `ReviewWritingCapability`.
+- `ResearchWriterAgent`: review/report synthesis and TODO planning through
+  writing tools.
 - `PaperAnalysisAgent`: paper structure and comparison analysis through
   `PaperAnalysisCapability`.
 - `ChartAnalysisAgent`: chart and paper figure analysis through
-  `ChartAnalysisCapability`.
+  `ResearchPaperFigureTool` and `VisualAnchorTool`. QA and application figure
+  endpoints share these tools without invoking ChartAnalysisAgent.
 - `GeneralAnswerAgent`: general non-research answer branch through
   `GeneralAnswerCapability`.
 - `PreferenceMemoryAgent`: long-term preference observation and recommendations
@@ -161,6 +176,12 @@ internal capability providers behind `ResearchKnowledgeAccess`, not a separate
 public API surface.
 The RAG-layer ReAct QA worker is named `RagReActQAWorker` and is exposed as
 `RagRuntime.rag_qa_worker`; it is not the task-level `ResearchQAAgent`.
+It remains a standalone low-level entrypoint and is not exposed to research
+Workers. Research function tools likewise construct no Agents: paper analysis
+uses `PaperAnalysisTool`, and `TaskDecompositionTool` returns a validated task
+proposal without execution or Supervisor state. Its optional single LLM call
+and deterministic fallback are confined to search, QA, analysis and writing;
+workflow lifecycle actions remain Supervisor responsibilities.
 
 `ResearchMemoryGateway` is the research-domain memory boundary. It wraps
 `MemoryManager` and `GraphSessionMemory` operations used by the research

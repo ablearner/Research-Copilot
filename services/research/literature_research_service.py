@@ -6,7 +6,8 @@ from typing import Any
 from uuid import uuid4
 
 from core.utils import now_iso as _now_iso
-from agents.chart_analysis_agent import ChartAnalysisAgent
+from tools.research.paper_figures import ResearchPaperFigureTool
+from tools.research.visual_anchor import VisualAnchorTool
 from agents.preference_memory_agent import PreferenceMemoryAgent
 from domain.schemas.research import (
     ResearchConversation,
@@ -118,7 +119,8 @@ class LiteratureResearchService:
         self.qa_routing_tool = QARoutingTool(llm_adapter=llm_adapter)
         self.user_intent_resolver = IntentResolutionTool(llm_adapter=llm_adapter)
         self.visual_intent_router = VisualIntentRoutingTool(llm_adapter=llm_adapter)
-        self.chart_analysis_agent = ChartAnalysisAgent(
+        self.visual_anchor_tool = VisualAnchorTool(llm_adapter=llm_adapter)
+        self.paper_figure_tool = ResearchPaperFigureTool(
             llm_adapter=llm_adapter,
             storage_root=report_service.storage_root / "assets",
         )
@@ -165,7 +167,7 @@ class LiteratureResearchService:
             _update_research_memory=self._update_research_memory,
             append_runtime_event=lambda *args, **kwargs: self.append_runtime_event(*args, **kwargs),
             ask_task_collection=lambda *args, **kwargs: self.ask_task_collection(*args, **kwargs),
-            chart_analysis_agent=self.chart_analysis_agent,
+            paper_figure_tool=self.paper_figure_tool,
             get_task=lambda *args, **kwargs: self.get_task(*args, **kwargs),
             import_concurrency=self.import_concurrency,
             import_index_timeout_seconds=self.import_index_timeout_seconds,
@@ -183,7 +185,7 @@ class LiteratureResearchService:
         self.qa_service = QAApplicationService(
             _load_cached_figure_payload=self._load_cached_figure_payload,
             build_execution_context=lambda *args, **kwargs: self.build_execution_context(*args, **kwargs),
-            chart_analysis_agent=self.chart_analysis_agent,
+            visual_anchor_tool=self.visual_anchor_tool,
             get_collection_qa_capability=lambda: self.research_collection_qa_capability,
             list_paper_figures=lambda *args, **kwargs: self.list_paper_figures(*args, **kwargs),
             llm_adapter=self.llm_adapter,

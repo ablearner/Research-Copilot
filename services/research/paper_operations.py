@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
-from agents.chart_analysis_agent import ChartAnalysisAgent
+from tools.research.paper_figures import ResearchPaperFigureTool
 from tools.research.paper_import import PaperImportService
 from tools.research.paper_search import PaperSearchService
 from core.observability import ResearchObservabilityService
@@ -69,7 +69,7 @@ class PaperOperationsService:
         _update_research_memory: Callable[..., Any],
         append_runtime_event: Callable[..., Any],
         ask_task_collection: Callable[..., Any],
-        chart_analysis_agent: ChartAnalysisAgent,
+        paper_figure_tool: ResearchPaperFigureTool,
         get_task: Callable[..., ResearchTaskResponse],
         import_concurrency: int,
         import_index_timeout_seconds: float | None,
@@ -94,7 +94,7 @@ class PaperOperationsService:
         self._update_research_memory = _update_research_memory
         self.append_runtime_event = append_runtime_event
         self.ask_task_collection = ask_task_collection
-        self.chart_analysis_agent = chart_analysis_agent
+        self.paper_figure_tool = paper_figure_tool
         self.get_task = get_task
         self.import_concurrency = import_concurrency
         self.import_index_timeout_seconds = import_index_timeout_seconds
@@ -117,7 +117,7 @@ class PaperOperationsService:
         graph_runtime: Any,
     ) -> ResearchPaperFigureListResponse:
         task, paper = self._resolve_imported_paper(task_id=task_id, paper_id=paper_id)
-        return await self.chart_analysis_agent.list_paper_figures(
+        return await self.paper_figure_tool.list_paper_figures(
             task_id=task.task_id,
             paper=paper,
             graph_runtime=graph_runtime,
@@ -138,7 +138,7 @@ class PaperOperationsService:
         expert_context: dict[str, Any] | None = None,
     ) -> AnalyzeResearchPaperFigureResponse:
         _, paper = self._resolve_imported_paper(task_id=task_id, paper_id=paper_id)
-        return await self.chart_analysis_agent.analyze_paper_figure(
+        return await self.paper_figure_tool.analyze_paper_figure(
             task_id=task_id,
             paper=paper,
             request=request,

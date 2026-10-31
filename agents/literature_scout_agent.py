@@ -138,12 +138,10 @@ class LiteratureScoutAgent:
         paper_search_service: PaperSearchService | None = None,
         *,
         llm_adapter: Any | None = None,
-        research_writer_agent: Any | None = None,
         curation_tool: Any | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
-        self.research_writer_agent = research_writer_agent
         self.curation_tool = curation_tool
 
     # ------------------------------------------------------------------
@@ -159,7 +157,7 @@ class LiteratureScoutAgent:
 
         from core.utils import now_iso as _now_iso
         from domain.schemas.research import ResearchTaskResponse
-        from domain.research_workspace import build_workspace_from_task, build_workspace_state
+        from domain.research_workspace import build_workspace_state
         from runtime.research.agent_protocol.base import (
             ResearchStateDelta,
             ResearchToolResult,
@@ -186,10 +184,6 @@ class LiteratureScoutAgent:
             )
             active_task = task_response.task
 
-        writer_agent = (
-            self.research_writer_agent
-            or getattr(context.research_service, "research_writer_agent", None)
-        )
         curation_tool = (
             self.curation_tool
             or getattr(context.research_service, "paper_curation_tool", None)
@@ -253,132 +247,56 @@ class LiteratureScoutAgent:
         state.must_read_ids = must_read_ids
         state.ingest_candidate_ids = ingest_candidate_ids
 
-        _update_runtime_progress(context, stage="search_literature", node="search_literature:survey_writing", status="running", summary="Writing literature survey report.")
-        report = await self._discover_write_report(state, writer_agent=writer_agent)
-        state.report = report
-
-        _update_runtime_progress(context, stage="search_literature", node="search_literature:todo_planning", status="running", summary="Planning follow-up research todos.")
-        todo_items = await self._discover_plan_todos(state, writer_agent=writer_agent)
-
-        workspace = build_workspace_state(
-            objective=search_request.topic,
-            stage="complete",
-            papers=curated_papers,
-            imported_document_ids=[],
-            report=report,
-            plan=plan,
-            todo_items=todo_items,
-            must_read_ids=must_read_ids,
-            ingest_candidate_ids=ingest_candidate_ids,
-            stop_reason="Research discovery completed.",
-            metadata={
-                "decision_model": "supervisor_direct_execution",
-                "autonomy_rounds": 1,
-                "trace_steps": 0,
-            },
-        )
-        discovery_report = report.model_copy(
-            update={
-                "workspace": workspace,
-                "metadata": {
-                    **report.metadata,
-                    "autonomy_mode": "lead_agent_loop",
-                    "agent_architecture": "main_agents_plus_tools",
-                    "decision_model": "supervisor_direct_execution",
-                    "primary_agents": [
-                        "ResearchSupervisorAgent",
-                        "LiteratureScoutAgent",
-                        "ResearchWriterAgent",
-                    ],
-                    "primary_tools": ["PaperCurationTool"],
-                    "supervisor_agent_architecture": "supervisor_direct_execution",
-                    "supervisor_decision_model": "supervisor_direct_execution",
-                    "autonomy_rounds": 1,
-                    "search_plan": plan.model_dump(mode="json"),
-                },
-            }
-        )
-
-        # --- Build results (specialist owns the business logic, NOT persistence) ---
+        # Discovery produces evidence only. The supervisor schedules writing as
+        # a separate action, and an existing report remains unchanged until then.
         sm = {
             "last_search_query": search_request.topic,
             "last_search_discovered_paper_ids": [p.paper_id for p in curated_papers],
             "last_search_discovered_count": len(curated_papers),
             "search_plan": plan.model_dump(mode="json"),
         }
-
+        final_papers = self._refresh_paper_pool(
+            existing_papers=list(task_response.papers),
+            incoming_papers=curated_papers,
+            ranking_topic=search_request.topic,
+        )
+        final_report = task_response.report
+        discovery_workspace = build_workspace_state(
+            objective=active_task.topic,
+            stage="discover",
+            papers=final_papers,
+            imported_document_ids=list(active_task.imported_document_ids),
+            report=final_report,
+            plan=plan,
+            todo_items=list(active_task.todo_items),
+            must_read_ids=must_read_ids,
+            ingest_candidate_ids=ingest_candidate_ids,
+            extra_findings=[f"Discovered {len(curated_papers)} candidate papers for {search_request.topic}."],
+            metadata={**active_task.workspace.metadata, **sm},
+        )
+        workspace = discovery_workspace
         if context.task is not None:
-            existing_papers = context.research_service.report_service.load_papers(active_task.task_id)
-            merged_papers = self._refresh_paper_pool(
-                existing_papers=existing_papers,
-                incoming_papers=curated_papers,
-                ranking_topic=search_request.topic,
-            )
-            existing_report = context.research_service.report_service.load_report(active_task.task_id, active_task.report_id)
-            refreshed_report = discovery_report.model_copy(
-                update={
-                    "task_id": active_task.task_id,
-                    "report_id": existing_report.report_id if existing_report is not None else discovery_report.report_id,
-                    "generated_at": _now_iso(),
-                    "metadata": {
-                        **(existing_report.metadata if existing_report is not None else {}),
-                        **discovery_report.metadata,
-                        **sm,
-                    },
-                }
-            )
-            if existing_report is not None:
-                refreshed_report = self._merge_reports(refreshed_report, existing_report)
-            updated_task = active_task.model_copy(
-                update={
-                    "status": "completed",
-                    "paper_count": len(merged_papers),
-                    "report_id": refreshed_report.report_id,
-                    "updated_at": _now_iso(),
-                    "metadata": {**active_task.metadata, **sm},
-                }
-            )
-            updated_workspace = build_workspace_from_task(
-                task=updated_task,
-                report=refreshed_report,
-                papers=merged_papers,
-                plan=plan,
-                stop_reason="Literature discovery refreshed the current research workspace.",
-                metadata={
-                    **dict(updated_task.workspace.metadata),
-                    "last_search_query": search_request.topic,
-                    "last_search_discovered_count": len(curated_papers),
-                },
-            )
-            refreshed_report = refreshed_report.model_copy(update={"workspace": updated_workspace})
-            updated_task = updated_task.model_copy(update={"workspace": updated_workspace})
-            final_task = updated_task
-            final_papers = merged_papers
-            final_report = refreshed_report
-            response = ResearchTaskResponse(
-                task=updated_task, papers=merged_papers, report=refreshed_report, warnings=list(search_warnings),
-            )
-        else:
-            saved_report = discovery_report.model_copy(
-                update={"metadata": {**discovery_report.metadata, **sm}}
-            )
-            completed_task = active_task.model_copy(
-                update={
-                    "status": "completed",
-                    "paper_count": len(curated_papers),
-                    "report_id": saved_report.report_id,
-                    "todo_items": todo_items,
-                    "workspace": workspace,
-                    "updated_at": _now_iso(),
-                    "metadata": {**active_task.metadata, **sm},
-                }
-            )
-            final_task = completed_task
-            final_papers = curated_papers
-            final_report = saved_report
-            response = ResearchTaskResponse(
-                task=completed_task, papers=curated_papers, report=saved_report, warnings=list(search_warnings),
-            )
+            previous = active_task.workspace
+            workspace = previous.model_copy(update={
+                "current_stage": "discover",
+                "research_questions": list(dict.fromkeys([*previous.research_questions, *discovery_workspace.research_questions])),
+                "key_findings": list(dict.fromkeys([*previous.key_findings, *discovery_workspace.key_findings])),
+                "must_read_paper_ids": list(dict.fromkeys([*previous.must_read_paper_ids, *must_read_ids])),
+                "ingest_candidate_ids": list(dict.fromkeys([*previous.ingest_candidate_ids, *ingest_candidate_ids])),
+                "status_summary": discovery_workspace.status_summary,
+                "metadata": discovery_workspace.metadata,
+            })
+        final_task = active_task.model_copy(update={
+            "status": "completed",
+            "paper_count": len(final_papers),
+            "workspace": workspace,
+            "updated_at": _now_iso(),
+            "metadata": {**active_task.metadata, **sm},
+        })
+        response = ResearchTaskResponse(
+            task=final_task, papers=final_papers, report=final_report,
+            warnings=list(search_warnings),
+        )
 
         # --- P1: Build state delta (Runtime will apply + persist) ---
         delta = ResearchStateDelta(
@@ -452,115 +370,6 @@ class LiteratureScoutAgent:
                 max_papers=state.max_papers,
                 sources=state.sources,
             )
-
-    async def _discover_write_report(self, state: Any, *, writer_agent: Any) -> Any:
-        from runtime.research.agent_protocol.base import (
-            _SURVEY_WRITING_TIMEOUT_SECONDS,
-            _llm_stage_timeout_seconds,
-            _should_fallback_llm_stage,
-        )
-
-        timeout = _llm_stage_timeout_seconds(
-            writer_agent.llm_adapter,
-            fallback_seconds=_SURVEY_WRITING_TIMEOUT_SECONDS,
-            slack_seconds=15.0,
-        )
-        try:
-            return await asyncio.wait_for(
-                writer_agent.synthesize_async(state), timeout=timeout,
-            )
-        except Exception as exc:
-            if not _should_fallback_llm_stage(exc):
-                raise
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Survey writing timed out or hit transport failure; falling back to heuristic report generation: %s",
-                exc,
-            )
-            return writer_agent.synthesize(state)
-
-    async def _discover_plan_todos(self, state: Any, *, writer_agent: Any) -> list:
-        from runtime.research.agent_protocol.base import (
-            _TODO_PLANNING_TIMEOUT_SECONDS,
-            _llm_stage_timeout_seconds,
-            _should_fallback_llm_stage,
-        )
-
-        timeout = _llm_stage_timeout_seconds(
-            writer_agent.llm_adapter,
-            fallback_seconds=_TODO_PLANNING_TIMEOUT_SECONDS,
-            slack_seconds=8.0,
-        )
-        try:
-            return await asyncio.wait_for(
-                writer_agent.plan_todos_async(state), timeout=timeout,
-            )
-        except Exception as exc:
-            if not _should_fallback_llm_stage(exc):
-                raise
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "TODO planning timed out or hit transport failure; falling back to heuristic TODO generation: %s",
-                exc,
-            )
-            return writer_agent.plan_todos(state)
-
-    # ------------------------------------------------------------------
-    # Report merge + paper pool utilities
-    # ------------------------------------------------------------------
-
-    def _merge_reports(self, new_report: Any, existing_report: Any) -> Any:
-        markdown = new_report.markdown.rstrip()
-        qa_section = self._extract_markdown_section(existing_report.markdown, "## 研究集合问答补充")
-        todo_section = self._extract_markdown_section(existing_report.markdown, "## TODO 执行记录")
-        if qa_section:
-            markdown = f"{markdown}\n\n{qa_section.strip()}"
-        if todo_section:
-            markdown = f"{markdown}\n\n{todo_section.strip()}"
-        carry_highlights = [
-            item for item in existing_report.highlights
-            if item.startswith("问答补充：") or item.startswith("TODO执行：")
-        ]
-        return new_report.model_copy(
-            update={
-                "markdown": markdown,
-                "highlights": self._merge_text_entries(
-                    new_report.highlights, carry_highlights, limit=12,
-                ),
-                "gaps": self._merge_text_entries(
-                    new_report.gaps, list(existing_report.gaps), limit=12,
-                ),
-            }
-        )
-
-    @staticmethod
-    def _extract_markdown_section(markdown: str, heading: str) -> str | None:
-        md_lines = markdown.splitlines()
-        start_index: int | None = None
-        for index, line in enumerate(md_lines):
-            if line.strip() == heading:
-                start_index = index
-                break
-        if start_index is None:
-            return None
-        end_index = len(md_lines)
-        for index in range(start_index + 1, len(md_lines)):
-            if md_lines[index].startswith("## ") and md_lines[index].strip() != heading:
-                end_index = index
-                break
-        return "\n".join(md_lines[start_index:end_index]).strip()
-
-    @staticmethod
-    def _merge_text_entries(primary: list[str], secondary: list[str], *, limit: int) -> list[str]:
-        merged: list[str] = []
-        for item in [*primary, *secondary]:
-            if item and item not in merged:
-                merged.append(item)
-            if len(merged) >= limit:
-                break
-        return merged
 
     def _refresh_paper_pool(
         self,

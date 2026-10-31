@@ -23,8 +23,8 @@ def _validate_steps(
             "finalize", "clarify", "clarify_request",
         }:
             raise ValueError(f"Unsupported plan action: {step.action}")
-        if workflow_constraint == "discovery_only" and step.action != "search_literature":
-            raise ValueError("discovery_only plans may only search_literature")
+        if workflow_constraint == "discovery_only" and step.action not in {"search_literature", "write_review"}:
+            raise ValueError("discovery_only plans may only search_literature and write_review")
         if step.step_id in step.depends_on or not set(step.depends_on) <= known_ids:
             raise ValueError(f"Invalid dependencies for step {step.step_id}")
     resolved = set(completed_ids)

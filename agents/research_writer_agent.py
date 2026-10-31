@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -64,22 +65,22 @@ class ResearchWriterAgent:
             )
 
         review_input = build_review_draft_input(context=context, decision=decision)
-        if "task_context" in review_input.expert_context and not review_input.curated_papers:
+        if "task_context" in review_input.expert_context and not review_input.curated_papers and task_response.papers:
             return ResearchToolResult(
                 status="skipped",
                 observation="no papers are available for the review task scope",
                 metadata={"reason": "no_papers"},
             )
-        existing_report = review_input.report
-        candidate_report = await self.synthesize_async(review_input) if "task_context" in review_input.expert_context else (
-            existing_report or await self.synthesize_async(review_input)
-        )
+        candidate_report = await self._write_report(review_input)
         retry_count = 0
         quality = self._quality_metrics(candidate_report)
         if not quality["passed"]:
             retry_count += 1
-            candidate_report = await self.synthesize_async(review_input)
+            candidate_report = await self._write_report(review_input)
             quality = self._quality_metrics(candidate_report)
+
+        if task_response.report is not None:
+            candidate_report = self._preserve_report_history(candidate_report, task_response.report)
 
         generated_at = _now_iso()
         task = task_response.task
@@ -88,6 +89,8 @@ class ResearchWriterAgent:
                 "generated_at": generated_at,
                 "metadata": {
                     **candidate_report.metadata,
+                    "search_plan": task.metadata.get("search_plan", {}),
+                    "decision_model": "supervisor_direct_execution",
                     "worker_agent": "ResearchWriterAgent",
                     "write_review_retry_count": retry_count,
                     "write_review_quality_passed": quality["passed"],
@@ -95,20 +98,41 @@ class ResearchWriterAgent:
                 },
             }
         )
+        todo_state = review_input.model_copy(update={"report": saved_report})
+        generated_todos = await self._plan_report_todos(todo_state)
+        existing_contents = {item.content for item in task.todo_items}
+        todo_items = [*task.todo_items, *(item for item in generated_todos if item.content not in existing_contents)]
+        from domain.research_workspace import build_workspace_state
+
+        workspace = build_workspace_state(
+            objective=task.topic,
+            stage="qa" if task.imported_document_ids else "complete",
+            papers=list(task_response.papers),
+            imported_document_ids=list(task.imported_document_ids),
+            report=saved_report,
+            todo_items=todo_items,
+            must_read_ids=list(task.workspace.must_read_paper_ids),
+            ingest_candidate_ids=list(task.workspace.ingest_candidate_ids),
+            extra_questions=list(task.workspace.research_questions),
+            extra_findings=list(task.workspace.key_findings),
+            metadata={
+                **task.workspace.metadata,
+                "write_review_retry_count": retry_count,
+                "open_todo_count": sum(item.status == "open" for item in todo_items),
+                "gap_count": len(saved_report.gaps[:4]),
+            },
+        )
+        if task.workspace.hypotheses:
+            workspace = workspace.model_copy(update={"hypotheses": list(task.workspace.hypotheses)})
         updated_task = task.model_copy(
             update={
                 "updated_at": generated_at,
                 "report_id": saved_report.report_id,
-                "workspace": task.workspace.model_copy(
-                    update={
-                        "metadata": {
-                            **task.workspace.metadata,
-                            "write_review_retry_count": retry_count,
-                        }
-                    }
-                ),
+                "todo_items": todo_items,
+                "workspace": workspace,
             }
         )
+        saved_report = saved_report.model_copy(update={"workspace": updated_task.workspace})
         request = context.request
         updated_response = task_response.model_copy(update={"task": updated_task, "report": saved_report})
 
@@ -149,18 +173,68 @@ class ResearchWriterAgent:
             state_delta=delta,
         )
 
+    @staticmethod
+    def _preserve_report_history(new_report: ResearchReport, existing_report: ResearchReport) -> ResearchReport:
+        markdown = new_report.markdown.rstrip()
+        lines = existing_report.markdown.splitlines()
+        for heading in ("## 研究集合问答补充", "## TODO 执行记录"):
+            start = next((index for index, line in enumerate(lines) if line.strip() == heading), None)
+            if start is None:
+                continue
+            end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith("## ")), len(lines))
+            section = "\n".join(lines[start:end]).strip()
+            if section not in markdown:
+                markdown = f"{markdown}\n\n{section}"
+        carry_highlights = [item for item in existing_report.highlights if item.startswith(("问答补充：", "TODO执行："))]
+        return new_report.model_copy(update={
+            "report_id": existing_report.report_id,
+            "task_id": existing_report.task_id or new_report.task_id,
+            "markdown": markdown,
+            "highlights": list(dict.fromkeys([*new_report.highlights, *carry_highlights]))[:12],
+            "gaps": list(dict.fromkeys([*new_report.gaps, *existing_report.gaps]))[:12],
+            "metadata": {**existing_report.metadata, **new_report.metadata},
+        })
+
+    async def _write_report(self, state: Any) -> ResearchReport:
+        from runtime.research.agent_protocol.base import (
+            _SURVEY_WRITING_TIMEOUT_SECONDS, _llm_stage_timeout_seconds, _should_fallback_llm_stage,
+        )
+        try:
+            return await asyncio.wait_for(
+                self.synthesize_async(state),
+                timeout=_llm_stage_timeout_seconds(self.llm_adapter, fallback_seconds=_SURVEY_WRITING_TIMEOUT_SECONDS, slack_seconds=15.0),
+            )
+        except Exception as exc:
+            if not _should_fallback_llm_stage(exc):
+                raise
+            return self.synthesize(state)
+
+    async def _plan_report_todos(self, state: Any) -> list[ResearchTodoItem]:
+        from runtime.research.agent_protocol.base import (
+            _TODO_PLANNING_TIMEOUT_SECONDS, _llm_stage_timeout_seconds, _should_fallback_llm_stage,
+        )
+        try:
+            return await asyncio.wait_for(
+                self.plan_todos_async(state),
+                timeout=_llm_stage_timeout_seconds(self.llm_adapter, fallback_seconds=_TODO_PLANNING_TIMEOUT_SECONDS, slack_seconds=8.0),
+            )
+        except Exception as exc:
+            if not _should_fallback_llm_stage(exc):
+                raise
+            return self.plan_todos(state)
+
     def _quality_metrics(self, report: ResearchReport) -> dict[str, Any]:
         text = report.markdown
         word_count = len([token for token in text.replace("\n", " ").split(" ") if token.strip()])
         cjk_char_count = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
         effective_word_count = max(word_count, cjk_char_count // 2)
         has_citations = "[P" in text or "引用" in text
-        has_key_sections = all(
-            section in text
-            for section in ("## 研究背景", "## 核心问题", "## 方法对比", "## 关键发现")
-        ) or all(
-            section in text
-            for section in ("## 研究背景", "## 方法对比", "## 关键发现")
+        has_key_sections = any(
+            all(section in text for section in required_sections)
+            for required_sections in (
+                ("## 研究背景", "## 方法对比", "## 关键发现"),
+                ("## Background", "## Method Comparison", "## Key Findings"),
+            )
         )
         issues: list[str] = []
         if effective_word_count < 250:
@@ -420,6 +494,9 @@ class ResearchWriterAgent:
         return self.plan_todos(state)
 
     def _resolve_answer_language(self, state: Any) -> str:
+        explicit_language = str(getattr(state, "answer_language", None) or "").strip()
+        if explicit_language:
+            return explicit_language
         execution_context = getattr(state, "execution_context", None)
         preference_context = getattr(execution_context, "preference_context", None) or {}
         language = str(preference_context.get("answer_language") or "").strip()

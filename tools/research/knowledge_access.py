@@ -112,19 +112,8 @@ class ResearchKnowledgeAccess:
         memory_hints: dict[str, Any] | None = None,
         available_tool_names: list[str] | None = None,
     ) -> QAResponse:
-        rag_qa_worker = getattr(self.graph_runtime, "rag_qa_worker", None)
-        if rag_qa_worker is not None:
-            return await rag_qa_worker.answer(
-                question=question,
-                available_tool_names=available_tool_names or ["answer_with_evidence"],
-                metadata=metadata or {},
-                session_context=session_context or {},
-                task_context=task_context or {},
-                preference_context=preference_context or {},
-                initial_retrieval_result=retrieval_result,
-                initial_evidence_bundle=evidence_bundle,
-            )
-
+        # Kept for caller compatibility; this access layer executes tools only.
+        del available_tool_names
         payload = {
             "question": question,
             "evidence_bundle": evidence_bundle,

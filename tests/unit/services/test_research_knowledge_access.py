@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from domain.schemas.evidence import EvidenceBundle
+from domain.schemas.api import QAResponse
 from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 from tooling.executor import ToolExecutor
@@ -94,3 +97,20 @@ async def test_retrieve_falls_back_to_runtime_retrieval_tools() -> None:
     assert output.metadata["source"] == "fallback"
     assert fallback.called is True
     assert runtime.knowledge_access is ResearchKnowledgeAccess.from_runtime(runtime)
+
+
+@pytest.mark.asyncio
+async def test_answer_uses_tool_without_invoking_nested_agent() -> None:
+    expected = QAResponse(question="why", answer="Supported answer", evidence_bundle=EvidenceBundle())
+    answer_tool = AsyncMock(return_value=expected)
+    peer = AsyncMock(side_effect=AssertionError("a worker must not invoke a peer agent"))
+    runtime = SimpleNamespace(
+        rag_qa_worker=SimpleNamespace(answer=peer),
+        answer_tools=SimpleNamespace(answer_with_evidence=answer_tool),
+    )
+    output = await ResearchKnowledgeAccess.from_runtime(runtime).answer_with_evidence(
+        question="why", evidence_bundle=EvidenceBundle(),
+    )
+    assert output is expected
+    answer_tool.assert_awaited_once()
+    peer.assert_not_called()

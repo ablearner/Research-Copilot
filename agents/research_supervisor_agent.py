@@ -513,41 +513,23 @@ class ResearchSupervisorAgent:
     ) -> ResearchSupervisorDecision | None:
         if state.workflow_constraint != "discovery_only":
             return None
-        if state.last_action_name == "search_literature":
-            if state.latest_result_status == "succeeded" and (state.has_report or state.paper_count > 0):
-                return self._guardrail_finalize(
-                    state,
-                    all_messages=all_messages,
-                    results=results,
-                    planner_runs=planner_runs,
-                    replan_count=replan_count,
-                    reason="Discovery-only workflow completed after literature search.",
-                )
-            if state.latest_result_status == "failed":
-                return self._guardrail_finalize(
-                    state,
-                    all_messages=all_messages,
-                    results=results,
-                    planner_runs=planner_runs,
-                    replan_count=replan_count,
-                    reason="Discovery-only workflow stopped after literature search failed.",
-                )
+        if state.last_action_name == "write_review" or (
+            state.last_action_name == "search_literature" and state.latest_result_status == "failed"
+        ):
+            return self._guardrail_finalize(
+                state, all_messages=all_messages, results=results,
+                planner_runs=planner_runs, replan_count=replan_count,
+                reason="Discovery workflow completed." if state.latest_result_status == "succeeded" else "Discovery workflow stopped after a failed step.",
+            )
+        action = "write_review" if state.last_action_name == "search_literature" else "search_literature"
         return self._guardrail_worker_action(
-            action_name="search_literature",
-            state=state,
-            all_messages=all_messages,
-            results=results,
-            planner_runs=planner_runs,
-            replan_count=replan_count,
-            thought="This workflow is constrained to a single discovery pass, so the manager should execute literature search and stop.",
-            rationale="Discovery-only entry points should not branch into review drafting, import, or QA after the search result is produced.",
-            phase="act",
-            estimated_gain=0.96,
-            estimated_cost=0.18,
-            payload_overrides={
-                "trigger": "workflow_constraint",
-                "workflow_constraint": "discovery_only",
-            },
+            action_name=action, state=state, all_messages=all_messages, results=results,
+            planner_runs=planner_runs, replan_count=replan_count,
+            thought="Complete discovery through separate search and review actions.",
+            rationale="Discovery entry points require a report without branching into import or QA.",
+            phase="reflect" if action == "write_review" else "act",
+            estimated_gain=0.96, estimated_cost=0.18,
+            payload_overrides={"trigger": "workflow_constraint", "workflow_constraint": "discovery_only"},
             priority="high",
         )
 
@@ -2372,39 +2354,25 @@ class ResearchSupervisorAgent:
                 state_update=state_update,
             )
         if state.workflow_constraint == "discovery_only":
-            if state.last_action_name == "search_literature":
-                if state.latest_result_status == "succeeded" and (state.has_report or state.paper_count > 0):
-                    return self._fallback_finalize(
-                        state,
-                        stop_reason="Discovery-only workflow completed after literature search.",
-                        thought="The constrained discovery pass already produced a usable search result.",
-                        rationale="Search-only entry points should stop once the literature search result is available.",
-                        planner_runs=planner_runs,
-                        replan_count=replan_count,
-                        clarification_request=None,
-                        state_update=state_update,
-                    )
-                if state.latest_result_status == "failed":
-                    return self._fallback_finalize(
-                        state,
-                        stop_reason="Discovery-only workflow stopped after literature search failed.",
-                        thought="The constrained discovery pass cannot continue after the search step failed.",
-                        rationale="Search-only entry points should stop instead of branching into unrelated actions after a failed discovery attempt.",
-                        planner_runs=planner_runs,
-                        replan_count=replan_count,
-                        clarification_request=None,
-                        state_update=state_update,
-                    )
+            if state.last_action_name == "write_review" or (
+                state.last_action_name == "search_literature" and state.latest_result_status == "failed"
+            ):
+                return self._fallback_finalize(
+                    state,
+                    stop_reason="Discovery workflow completed." if state.latest_result_status == "succeeded" else "Discovery workflow stopped after a failed step.",
+                    thought="The constrained discovery workflow has finished.",
+                    rationale="Stop after the separate review step without import or QA.",
+                    planner_runs=planner_runs, replan_count=replan_count,
+                    clarification_request=None, state_update=state_update,
+                )
+            action = "write_review" if state.last_action_name == "search_literature" else "search_literature"
             return self._fallback_action_decision(
-                action_name="search_literature",
-                state=state,
-                thought="This workflow is constrained to a single discovery pass.",
-                rationale="Search-only entry points should execute literature search directly and stop after the result is produced.",
-                phase="act",
-                estimated_gain=0.96,
-                estimated_cost=0.18,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
+                action_name=action, state=state,
+                thought="Complete discovery through separate search and review actions.",
+                rationale="Discovery entry points require a report without import or QA.",
+                phase="reflect" if action == "write_review" else "act",
+                estimated_gain=0.96, estimated_cost=0.18,
+                planner_runs=planner_runs, replan_count=replan_count,
                 state_update=state_update,
             )
         if self._needs_goal_clarification(state):

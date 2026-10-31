@@ -204,6 +204,7 @@ class UnifiedActionOutput(BaseModel):
 
 class UnifiedReviewDraftInput(BaseModel):
     topic: str
+    answer_language: str | None = None
     task_id: str
     curated_papers: list[PaperCandidate] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

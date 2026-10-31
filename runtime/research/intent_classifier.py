@@ -375,7 +375,7 @@ def should_force_finalize(
     if (
         workflow_constraint == "discovery_only"
         and has_latest
-        and latest_task_type == "search_literature"
+        and latest_task_type == "write_review"
         and latest_status == "succeeded"
         and has_report
     ):
@@ -388,6 +388,7 @@ def should_force_finalize(
         not new_topic_detected
         and has_latest
         and latest_task_type == "search_literature"
+        and workflow_constraint != "discovery_only"
         and latest_status == "succeeded"
         and has_task_response
         and has_report

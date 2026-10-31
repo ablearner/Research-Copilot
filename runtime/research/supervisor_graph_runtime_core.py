@@ -125,7 +125,6 @@ class ResearchRuntimeBase:
             storage_root=research_service.report_service.storage_root,
             llm_adapter=llm_adapter,
         )
-        self.literature_scout_agent.research_writer_agent = self.research_writer_agent
         self.paper_curation_tool = PaperCurationTool(research_service.paper_search_service)
         self.literature_scout_agent.curation_tool = self.paper_curation_tool
         self._context_compressor = ContextCompressor(
@@ -530,8 +529,8 @@ class ResearchRuntimeBase:
         context: ResearchAgentToolContext,
         decision: ResearchSupervisorDecision,
         worker_agent: str,
+        registry: Any,
     ) -> ResearchToolResult | None:
-        registry = context.unified_agent_registry
         executor = registry.resolve_for_action(action_name) if registry is not None else None
         if executor is None or executor.descriptor.name != worker_agent:
             return None
@@ -1055,7 +1054,7 @@ class ResearchRuntimeBase:
         # Hydration must observe committed workflow, memory and conversation updates.
         if delta.rebuild_execution_context and delta.rebuild_execution_context_params is not None:
             context.execution_context = context.research_service.build_execution_context(
-                **delta.rebuild_execution_context_params,
+                **{**delta.rebuild_execution_context_params, "graph_runtime": context.graph_runtime},
             )
 
     def _execute_memory_op(self, context: ResearchAgentToolContext, mem_op: Any) -> None:
@@ -1129,6 +1128,7 @@ class ResearchRuntimeBase:
             context=context,
             decision=decision,
             worker_agent=worker_agent,
+            registry=state["context"].unified_agent_registry,
         )
         if result is None:
             result = ResearchToolResult(

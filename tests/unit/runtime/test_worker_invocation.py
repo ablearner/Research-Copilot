@@ -45,14 +45,18 @@ def decision(task_id="t1", skill=None):
                                       metadata={"active_message": message})
 
 
-def test_snapshot_isolates_data_but_shares_runtime_resources():
+def test_snapshot_isolates_data_and_limits_runtime_capabilities():
     parent = context()
     original_decision = decision(skill="task skill")
     original_decision.metadata["state_update"] = {"pending_agent_messages": ["unrelated"]}
     worker, task_decision = prepare_worker_invocation(context=parent, decision=original_decision, agent_results=[])
     assert worker is not parent
     for name in ("research_service", "graph_runtime", "knowledge_access", "unified_agent_registry"):
-        assert getattr(worker, name) is getattr(parent, name)
+        assert getattr(worker, name) is not getattr(parent, name)
+    assert worker.unified_agent_registry is None
+    assert worker.knowledge_access.graph_runtime is worker.graph_runtime
+    assert not hasattr(worker.research_service, "run_agent")
+    assert not hasattr(worker.graph_runtime, "rag_qa_worker")
     worker.request.metadata["nested"].append(2)
     worker.execution_context.research_context.research_goals.append("private")
     worker.general_answer_metadata["items"].append("private")
@@ -168,3 +172,83 @@ async def test_action_node_uses_snapshot_and_commits_only_returned_delta(status)
     assert next_worker.worker_input.dependency_summaries[0]["summary"] == "committed"
     assert next_worker.read_artifact("result:t1") == {"answer": "committed"}
     assert next_worker.result_artifacts == {}
+
+
+@pytest.mark.asyncio
+async def test_worker_tool_port_blocks_dispatch_but_runs_knowledge_tools():
+    from types import SimpleNamespace
+    calls = []
+    async def execute(name, payload):
+        calls.append((name, payload))
+        return SimpleNamespace(status="succeeded", output={"ok": True})
+    parent = context()
+    parent.graph_runtime = SimpleNamespace(
+        tool_registry=SimpleNamespace(get_tool=lambda name, **kwargs: object()),
+        tool_executor=SimpleNamespace(execute_tool_call=execute),
+        unified_agent_registry=object(), rag_qa_worker=object(),
+        research_function_service=SimpleNamespace(sync_paper_to_zotero=execute, analyze_papers=execute),
+    )
+    worker, _ = prepare_worker_invocation(context=parent, decision=decision(), agent_results=[])
+    assert worker.graph_runtime.tool_registry.get_tool("run_agent") is None
+    with pytest.raises(ValueError):
+        await worker.graph_runtime.tool_executor.execute_tool_call("run_agent", {})
+    result = await worker.graph_runtime.tool_executor.execute_tool_call("hybrid_retrieve", {"question": "q"})
+    assert result.output == {"ok": True}
+    assert calls == [("hybrid_retrieve", {"question": "q"})]
+    assert not hasattr(worker.graph_runtime.research_function_service, "analyze_papers")
+
+
+@pytest.mark.asyncio
+async def test_runtime_dispatches_with_parent_registry_without_giving_it_to_worker():
+    from types import SimpleNamespace
+    parent = context()
+    observed = []
+    async def execute(worker, task_decision, *, action_name):
+        assert worker.unified_agent_registry is None
+        assert not hasattr(worker.research_service, 'run_agent')
+        observed.append(action_name)
+        return ResearchToolResult(status='succeeded', observation='done', metadata={})
+    executor = SimpleNamespace(descriptor=SimpleNamespace(name='GeneralAnswerAgent'), execute_action=execute)
+    parent.unified_agent_registry = SimpleNamespace(resolve_for_action=lambda action: executor, get=lambda name: None)
+    runtime = ResearchSupervisorGraphRuntime.__new__(ResearchSupervisorGraphRuntime)
+    runtime._rebuild_execution_context = lambda **kwargs: None
+    runtime._persist_state_delta = lambda **kwargs: None
+    runtime._workspace_summary = lambda context: ''
+    current = decision()
+    message = current.metadata['active_message']
+    state = {'context': parent, 'current_decision': current, 'agent_messages': [message],
+             'pending_agent_messages': [message], 'agent_results': []}
+    update = await runtime._run_action_node(state, 'general_answer')
+    assert observed == ['general_answer']
+    assert update['agent_results'][0].status == 'succeeded'
+
+
+@pytest.mark.asyncio
+async def test_service_port_prevents_nested_dispatch_and_workflow_commits():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    parent = context()
+    qa = AsyncMock(return_value='qa result')
+    create = AsyncMock(return_value='task')
+    parent.research_service = SimpleNamespace(
+        create_task=create, run_agent=AsyncMock(), qa_service=SimpleNamespace(execute_qa=qa),
+        paper_service=SimpleNamespace(prepare_paper_import=AsyncMock(), run_agent=AsyncMock()),
+        report_service=SimpleNamespace(load_papers=lambda task: [], load_report=lambda *args: None, save_report=object()),
+    )
+    worker, _ = prepare_worker_invocation(context=parent, decision=decision(), agent_results=[])
+    port = worker.research_service
+    assert not hasattr(port.paper_service, 'run_agent')
+    assert not hasattr(port.report_service, 'save_report')
+    with pytest.raises(ValueError):
+        await port.create_task(SimpleNamespace(run_immediately=True))
+    with pytest.raises(ValueError):
+        await port.qa_service.execute_qa('task', object(), graph_runtime=worker.graph_runtime)
+    executor = object()
+    with pytest.raises(ValueError):
+        await port.qa_service.execute_qa('task', object(), graph_runtime=worker.graph_runtime, executor=executor, persist=True)
+    assert create.await_count == qa.await_count == 0
+    request = SimpleNamespace(run_immediately=False)
+    assert await port.create_task(request) == 'task'
+    assert await port.qa_service.execute_qa('task', request, graph_runtime=worker.graph_runtime, executor=executor) == 'qa result'
+    assert qa.call_args.kwargs['persist'] is False
+    assert qa.call_args.kwargs['executor'] is executor

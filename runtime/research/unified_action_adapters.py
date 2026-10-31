@@ -155,11 +155,14 @@ def build_review_draft_input(*, context: Any, decision: Any | None = None) -> Un
     if "task_context" in expert_context:
         selected_ids = set(expert_context["task_context"].get("context_slice", {}).get("selected_papers", []))
         papers = [paper for paper in papers if paper.paper_id in selected_ids]
+    execution_context = getattr(context, "execution_context", None)
+    preferences = getattr(execution_context, "preference_context", None) or {}
     return UnifiedReviewDraftInput(
         topic=task.topic,
+        answer_language=preferences.get("answer_language"),
         task_id=task.task_id,
         curated_papers=papers,
-        warnings=[],
+        warnings=list(task_response.warnings),
         must_read_ids=list(task.workspace.must_read_paper_ids),
         ingest_candidate_ids=list(task.workspace.ingest_candidate_ids),
         trace=[],

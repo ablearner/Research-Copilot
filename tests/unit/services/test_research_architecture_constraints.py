@@ -15,6 +15,31 @@ def _read(relative_path: str) -> str:
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def test_workers_and_research_tools_do_not_import_peer_agents() -> None:
+    worker_modules = {
+        "agents." + name.removesuffix(".py")
+        for name in (
+            "literature_scout_agent.py", "research_writer_agent.py", "research_qa_agent.py",
+            "research_knowledge_agent.py", "research_document_agent.py", "paper_analysis_agent.py",
+            "chart_analysis_agent.py", "general_answer_agent.py", "preference_memory_agent.py",
+        )
+    }
+    files = [PROJECT_ROOT / (name.replace(".", "/") + ".py") for name in worker_modules]
+    files.extend((PROJECT_ROOT / "tools" / "research").rglob("*.py"))
+    for path in files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                imported = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                imported = [alias.name for alias in node.names]
+            else:
+                continue
+            assert not any(name == "agents" or name.startswith("agents.") for name in imported), (
+                f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} imports an Agent; "
+                "shared behavior belongs in tools and dispatch belongs in Runtime"
+            )
+
+
 def test_direct_discovery_helper_removed_from_research_service_and_paper_operations() -> None:
     literature_service = _read("services/research/literature_research_service.py")
     paper_operations = _read("services/research/paper_operations.py")
@@ -102,7 +127,7 @@ def test_rag_layer_uses_rag_qa_worker_name_not_research_qa_agent_alias() -> None
     assert "self.rag_qa_worker = self.react_reasoning_agent" in rag_runtime
     assert "graph_runtime.research_qa_agent" not in api_runtime
     assert "self.research_qa_agent = self.react_reasoning_agent" not in rag_runtime
-    assert 'getattr(self.graph_runtime, "rag_qa_worker", None)' in knowledge_access
+    assert "rag_qa_worker" not in knowledge_access
     assert "RagReActQAWorker as ReActReasoningAgent" in api_runtime
 
 

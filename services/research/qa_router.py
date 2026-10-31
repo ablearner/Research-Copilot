@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from adapters.llm.base import BaseLLMAdapter
-from agents.chart_analysis_agent import ChartAnalysisAgent
+from tools.research.visual_anchor import VisualAnchorTool
 from tools.research import IntentResolutionTool, QARoutingTool, VisualIntentRoutingTool
 from tools.research.paper_search import PaperSearchService
 from tools.research.paper_selector import PaperSelectorService
@@ -42,7 +42,7 @@ class QAApplicationService:
         *,
         _load_cached_figure_payload: Callable[..., Any],
         build_execution_context: Callable[..., ResearchExecutionContext],
-        chart_analysis_agent: ChartAnalysisAgent,
+        visual_anchor_tool: VisualAnchorTool,
         get_collection_qa_capability: Callable[..., ResearchCollectionQACapability],
         list_paper_figures: Callable[..., Any],
         llm_adapter: BaseLLMAdapter | None,
@@ -59,7 +59,7 @@ class QAApplicationService:
     ) -> None:
         self._load_cached_figure_payload = _load_cached_figure_payload
         self.build_execution_context = build_execution_context
-        self.chart_analysis_agent = chart_analysis_agent
+        self.visual_anchor_tool = visual_anchor_tool
         self.get_collection_qa_capability = get_collection_qa_capability
         self.list_paper_figures = list_paper_figures
         self.llm_adapter = llm_adapter
@@ -234,7 +234,7 @@ class QAApplicationService:
         question: str,
         exclude_figure_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
-        return await self.chart_analysis_agent.infer_cached_visual_anchor(
+        return await self.visual_anchor_tool.infer_cached_visual_anchor(
             papers=papers,
             document_ids=document_ids,
             question=question,
@@ -391,7 +391,7 @@ class QAApplicationService:
         updated_gaps = list(report.gaps)
         qa_metadata = qa.metadata if isinstance(qa.metadata, dict) else {}
         visual_anchor = qa_metadata.get("visual_anchor") if isinstance(qa_metadata.get("visual_anchor"), dict) else None
-        visual_anchor_figure = self.chart_analysis_agent.resolve_visual_anchor_figure(
+        visual_anchor_figure = self.visual_anchor_tool.resolve_visual_anchor_figure(
             papers=papers,
             qa_metadata=qa_metadata,
             load_cached_figure_payload=self._load_cached_figure_payload,

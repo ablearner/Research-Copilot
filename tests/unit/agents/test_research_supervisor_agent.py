@@ -732,7 +732,7 @@ def test_research_supervisor_sync_fallback_stops_general_chat_provider_failure()
     assert "通用回答模型" in (decision.stop_reason or "")
 
 
-def test_research_supervisor_sync_fallback_finishes_completed_discovery() -> None:
+def test_research_supervisor_sync_fallback_writes_review_after_discovery() -> None:
     manager = ResearchSupervisorAgent()
     decision = manager.decide_next_action(
         ResearchSupervisorState(
@@ -744,7 +744,7 @@ def test_research_supervisor_sync_fallback_finishes_completed_discovery() -> Non
             paper_count=3,
         )
     )
-    assert decision.action_name == "finalize"
+    assert decision.action_name == "write_review"
 
 
 @pytest.mark.asyncio

@@ -12,8 +12,6 @@ from uuid import uuid4
 
 import httpx
 
-from agents.paper_analysis_agent import PaperAnalysisAgent
-from agents.research_supervisor_agent import ResearchSupervisorAgent, ResearchSupervisorState
 from domain.schemas.paper_knowledge import PaperKnowledgeRecord
 from domain.schemas.research import PaperCandidate
 from domain.schemas.research import ImportPapersRequest
@@ -36,7 +34,7 @@ from domain.schemas.research_functions import (
     SearchPaperResult,
     SearchPapersFunctionOutput,
 )
-from domain.schemas.sub_manager import TaskEvaluation, TaskStep
+from domain.schemas.sub_manager import TaskEvaluation
 from tools.research import (
     PaperAnalysisTool,
     PaperReadingTool,
@@ -45,6 +43,7 @@ from tools.research import (
 )
 from tools.research.external_tool_gateway import ResearchExternalToolGateway
 from tools.research.knowledge_access import ResearchKnowledgeAccess
+from tools.research.task_decomposition import TaskDecompositionTool
 from domain.schemas.retrieval import merge_retrieval_hits
 from tooling.research_runtime_schemas import (
     CodeExecutionToolOutput,
@@ -114,9 +113,6 @@ class ResearchFunctionService:
             paper_reading_tool=self.paper_reading_tool,
             llm_adapter=self._get_llm_adapter() if graph_runtime is not None else None,
         )
-        self.paper_analysis_agent = PaperAnalysisAgent(
-            paper_analysis_tool=self.paper_analysis_tool,
-        )
         self.review_writing_tool = (
             getattr(research_service, "review_writing_tool", None)
             or ReviewWritingTool()
@@ -126,11 +122,7 @@ class ResearchFunctionService:
             or ResearchEvaluationTool()
         )
         self.external_tool_gateway = ResearchExternalToolGateway(graph_runtime=graph_runtime)
-        _llm = None
-        if graph_runtime is not None:
-            _agent = getattr(graph_runtime, "plan_and_solve_reasoning_agent", None)
-            _llm = getattr(_agent, "llm_adapter", None) if _agent else None
-        self.manager_agent = ResearchSupervisorAgent(llm_adapter=_llm)
+        self.task_decomposition_tool = TaskDecompositionTool(llm_adapter=self._get_llm_adapter())
         self.code_execution_enabled = code_execution_enabled
         self.zotero_api_base_url = zotero_api_base_url.rstrip("/")
         self.zotero_api_key = zotero_api_key
@@ -144,12 +136,7 @@ class ResearchFunctionService:
 
     def _get_llm_adapter(self):
         """Get LLM adapter from graph_runtime if available."""
-        if self.graph_runtime is None:
-            return None
-        plan_and_solve_agent = getattr(self.graph_runtime, "plan_and_solve_reasoning_agent", None)
-        if plan_and_solve_agent is None:
-            return None
-        return getattr(plan_and_solve_agent, "llm_adapter", None)
+        return getattr(self.graph_runtime, "llm_adapter", None)
 
     def _current_topic(self) -> str:
         """Get current research topic from context if available."""
@@ -470,7 +457,7 @@ class ResearchFunctionService:
         top_k: int = 5,
     ) -> RecommendPapersFunctionOutput:
         corpus = self._list_all_papers()
-        analysis = await self.paper_analysis_agent.analyze(
+        analysis = await self.paper_analysis_tool.analyze_async(
             question=based_on_context or self._current_topic() or "推荐最值得阅读的论文",
             papers=corpus[: min(len(corpus), 12)],
             task_topic=self._current_topic(),
@@ -511,7 +498,7 @@ class ResearchFunctionService:
     ) -> AnalyzePapersFunctionOutput:
         papers = self._locate_papers(paper_ids)
         evidence_hits = await self._collect_analysis_evidence(question=question, papers=papers)
-        return await self.paper_analysis_agent.analyze(
+        return await self.paper_analysis_tool.analyze_async(
             question=question,
             papers=papers,
             task_topic=self._current_topic(),
@@ -550,64 +537,7 @@ class ResearchFunctionService:
         user_request: str,
         context: ResearchContext,
     ) -> DecomposeTaskFunctionOutput:
-        state = ResearchSupervisorState(
-            goal=user_request,
-            mode="qa" if "?" in user_request or "？" in user_request else "research",
-            task_id=context.metadata.get("task_id") if isinstance(context.metadata, dict) else None,
-            has_task=bool(context.metadata.get("task_id")) if isinstance(context.metadata, dict) else False,
-            has_report=bool(context.imported_papers or context.known_conclusions),
-            paper_count=len(context.imported_papers),
-            imported_document_count=len(context.imported_papers),
-            selected_paper_count=len(context.selected_papers),
-        )
-        decision = await self.manager_agent.decide_next_action_async(state, context_slice=None)
-        active_message = decision.metadata.get("active_message") if isinstance(decision.metadata, dict) else None
-        if active_message is not None:
-            task_plan = [
-                TaskStep(
-                    task_id=active_message.task_id,
-                    assigned_to=active_message.agent_to,
-                    instruction=active_message.instruction,
-                    task_type=active_message.task_type,
-                    depends_on=list(active_message.depends_on),
-                    context_slice=(
-                        active_message.context_slice.model_dump(mode="json")
-                        if hasattr(active_message.context_slice, "model_dump")
-                        else dict(active_message.context_slice)
-                    ),
-                    expected_output_schema=dict(active_message.expected_output_schema),
-                    priority="high" if active_message.priority in {"high", "critical"} else "normal",
-                    retry_count=active_message.retry_count,
-                    metadata=dict(active_message.metadata),
-                )
-            ]
-            return DecomposeTaskFunctionOutput(
-                task_plan=task_plan,
-                assigned_sub_manager=task_plan[0].assigned_to,
-                parallel_allowed=False,
-                clarification_needed=False,
-                clarification_question=None,
-                metadata={
-                    "decision_source": decision.metadata.get("decision_source") if isinstance(decision.metadata, dict) else None,
-                    "action_name": decision.action_name,
-                    "worker_agent": decision.metadata.get("worker_agent") if isinstance(decision.metadata, dict) else None,
-                },
-            )
-        fallback_task = TaskStep(
-            task_id=f"task_{uuid4().hex[:8]}",
-            assigned_to="ResearchSupervisorAgent",
-            instruction=decision.stop_reason or user_request,
-            task_type="finalize",
-            expected_output_schema={"required_fields": ["stop_reason"]},
-        )
-        return DecomposeTaskFunctionOutput(
-            task_plan=[fallback_task],
-            assigned_sub_manager="ResearchSupervisorAgent",
-            parallel_allowed=False,
-            clarification_needed=bool(decision.stop_reason),
-            clarification_question=decision.stop_reason,
-            metadata={"action_name": decision.action_name},
-        )
+        return await self.task_decomposition_tool.decompose(user_request=user_request, context=context)
 
     async def evaluate_result(
         self,

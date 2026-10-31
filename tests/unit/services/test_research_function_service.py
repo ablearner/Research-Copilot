@@ -368,7 +368,7 @@ async def test_research_function_service_library_sync_to_zotero_requires_config(
 
 
 @pytest.mark.asyncio
-async def test_research_function_service_decompose_task_uses_manager_decision(tmp_path) -> None:
+async def test_research_function_service_decompose_task_returns_search_proposal(tmp_path) -> None:
     service = _build_service(tmp_path)
 
     output = await service.decompose_task(

@@ -59,7 +59,7 @@ import runtime.research.supervisor_graph_runtime_core
 from core.prompt_resolver import PromptResolver
 from core.skill_registry import SkillRegistry
 from agents.research_supervisor_agent import _DEFAULT_SUPERVISOR_SOUL_PATH
-from agents.research_qa_agent import RagReActQAWorker
+from agents.rag_react_qa_worker import RagReActQAWorker
 from adapters.local_runtime import LocalLLMAdapter
 from chains.graph_extraction_chain import GraphExtractionChain
 

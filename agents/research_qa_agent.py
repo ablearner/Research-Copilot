@@ -6,14 +6,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-# Backward-compatible exports; implementation belongs to the RAG worker module.
-from agents.rag_react_qa_worker import (
-    RagReActQAWorker as RagReActQAWorker,
-    ReActDecision as ReActDecision,
-    ReActStep as ReActStep,
-    ReActFinalDraft as ReActFinalDraft,
-    ResearchQAAgentError as ResearchQAAgentError,
-)
 from domain.schemas.research import (
     DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style,  # noqa: F401
     ResearchTask, ResearchReport, ResearchTaskAskResponse,
@@ -266,9 +258,7 @@ class ResearchQAAgent:
         router = getattr(research_service, "visual_intent_router", None)
         if router is not None:
             return router
-        llm_adapter = getattr(getattr(research_service, "chart_analysis_agent", None), "llm_adapter", None)
-        if llm_adapter is None:
-            llm_adapter = getattr(research_service, "llm_adapter", None)
+        llm_adapter = getattr(research_service, "llm_adapter", None)
         return VisualIntentRoutingTool(llm_adapter=llm_adapter)
 
     @staticmethod
@@ -378,7 +368,7 @@ class ResearchQAAgent:
 
         svc = dependencies
         tools = ResearchQAToolset(
-            chart_analysis_agent=svc.chart_analysis_agent,
+            visual_anchor_tool=svc.visual_anchor_tool,
             load_cached_figure_payload=svc._load_cached_figure_payload,
             collection_qa_capability=svc.research_collection_qa_capability,
         )
@@ -701,7 +691,7 @@ class ResearchQAAgent:
             }
         )
         qa_metadata = qa.metadata if isinstance(qa.metadata, dict) else {}
-        visual_anchor_figure = svc.chart_analysis_agent.resolve_visual_anchor_figure(
+        visual_anchor_figure = svc.visual_anchor_tool.resolve_visual_anchor_figure(
             papers=scoped_papers,
             qa_metadata=qa_metadata,
             load_cached_figure_payload=svc._load_cached_figure_payload,

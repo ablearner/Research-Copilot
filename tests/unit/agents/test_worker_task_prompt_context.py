@@ -148,16 +148,28 @@ async def test_analysis_run_action_obeys_prepared_document_scope(scope_source, d
         paper.metadata["document_id"] = f"d{index}"
     retrieval_calls = []
 
-    class Access:
+    from domain.schemas.evidence import EvidenceBundle
+    from domain.schemas.retrieval import HybridRetrievalResult, RetrievalQuery
+    from tooling.schemas import GraphSummaryToolOutput, HybridRetrieveToolOutput
+
+    class RetrievalTools:
         async def retrieve(self, **kwargs):
             retrieval_calls.append(kwargs)
-            return SimpleNamespace(retrieval_result=SimpleNamespace(hits=[]))
+            return HybridRetrieveToolOutput(
+                question=kwargs["question"], document_ids=kwargs["document_ids"],
+                evidence_bundle=EvidenceBundle(),
+                retrieval_result=HybridRetrievalResult(query=RetrievalQuery(
+                    query=kwargs["question"], document_ids=kwargs["document_ids"],
+                )),
+            )
 
-        async def query_graph_summary(self, **kwargs):
-            retrieval_calls.append(kwargs)
-            return SimpleNamespace(hits=[])
+    async def query_graph_summary(**kwargs):
+        retrieval_calls.append(kwargs)
+        return GraphSummaryToolOutput()
 
-    parent.knowledge_access = Access()
+    parent.graph_runtime = SimpleNamespace(
+        retrieval_tools=RetrievalTools(), query_graph_summary=query_graph_summary,
+    )
     scope = {"document_ids": [document_id]}
     decision = ResearchSupervisorDecision(
         action_name="analyze_papers", thought="", rationale="",
@@ -286,7 +298,7 @@ async def test_loaded_qa_direct_route_does_not_restore_unselected_workspace_pape
         return None
 
     dependencies = SimpleNamespace(
-        chart_analysis_agent=None, _load_cached_figure_payload=None, research_collection_qa_capability=None,
+        visual_anchor_tool=None, _load_cached_figure_payload=None, research_collection_qa_capability=None,
         paper_selector_service=PaperSelectorService(), visual_intent_router=SimpleNamespace(decide_async=visual),
         _extract_visual_anchor=lambda **kwargs: None, _restore_visual_anchor_from_workspace=lambda **kwargs: None,
         _infer_or_discover_visual_anchor=infer, research_context_manager=None, paper_reading_tool=None,
