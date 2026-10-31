@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from adapters.llm.langchain_binding import ensure_provider_binding
+from core.resource_paths import resolve_bundled_path
 from domain.schemas.chart import ChartSchema
 from domain.schemas.document import TextBlock
 from domain.schemas.graph import GraphExtractionResult
@@ -19,7 +20,7 @@ class GraphExtractionChain:
         prompt_path: str | Path = "prompts/graph/extract_triples.txt",
     ) -> None:
         self.llm = ensure_provider_binding(llm)
-        self.prompt_path = Path(prompt_path)
+        self.prompt_path = resolve_bundled_path(prompt_path)
 
     async def ainvoke_from_text_blocks(
         self,

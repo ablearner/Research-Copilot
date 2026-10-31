@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
+from core.resource_paths import resolve_bundled_path
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.research import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style  # noqa: F401
@@ -881,8 +882,8 @@ class RagReActQAWorker:
         self.llm_adapter = llm_adapter
         self.tool_registry = tool_registry
         self.tool_executor = tool_executor
-        self.decision_prompt_path = Path(decision_prompt_path)
-        self.synthesis_prompt_path = Path(synthesis_prompt_path)
+        self.decision_prompt_path = resolve_bundled_path(decision_prompt_path)
+        self.synthesis_prompt_path = resolve_bundled_path(synthesis_prompt_path)
         self.external_tool_gateway = external_tool_gateway or (
             ResearchExternalToolGateway(registry=mcp_client_registry)
             if mcp_client_registry is not None

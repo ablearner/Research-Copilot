@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-_DEFAULT_SKILLS_DIR = Path("skills")
+_BUNDLED_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 _SKILL_FILENAME = "SKILL.md"
 _CONFIG_FILENAME = ".skill_config.json"
 _MAX_SKILL_BODY_SIZE = 50_000  # chars – safety cap
@@ -174,7 +174,13 @@ class SkillRegistry:
         skills_dir: str | Path | None = None,
         scan_subdirs: list[str] | None = None,
     ) -> None:
-        self.skills_dir = Path(skills_dir) if skills_dir else _DEFAULT_SKILLS_DIR
+        if skills_dir is not None:
+            self.skills_dir = Path(skills_dir)
+        else:
+            working_skills_dir = Path("skills")
+            self.skills_dir = (
+                working_skills_dir if working_skills_dir.is_dir() else _BUNDLED_SKILLS_DIR
+            )
         self._scan_subdirs = scan_subdirs or ["builtin", "community"]
         self._index: dict[str, SkillMeta] = {}
         self._config_overrides: dict[str, dict[str, Any]] = {}

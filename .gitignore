@@ -19,7 +19,13 @@ build/
 evaluation/datasets/pdfqa_benchmark/real-pdfQA/
 evaluation/datasets/scigraphqa_easy_50/images/
 docs/
-evaluation/
+/evaluation/*
+!/evaluation/README.md
+!/evaluation/*.py
+!/evaluation/sample_cases.json
+!/evaluation/datasets/
+/evaluation/datasets/*
+!/evaluation/datasets/core_cases.json
 代码结构.md
 mcp_servers.json
 skills/community/

@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from core.resource_paths import resolve_bundled_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,7 @@ class PromptResolver:
         mapping_path: str | Path = "prompts/skill_prompt_mapping.yaml",
         default_prompt_set: dict[str, str] | None = None,
     ) -> None:
-        self.mapping_path = Path(mapping_path)
+        self.mapping_path = resolve_bundled_path(mapping_path)
         self._mapping_cache: dict[str, Any] | None = None
         self.default_prompt_set = default_prompt_set or {
             "answer_prompt_path": "prompts/document/answer_question_with_hybrid_rag.txt",
@@ -96,7 +98,7 @@ class PromptResolver:
             candidates.append(fallback)
 
         for candidate in candidates:
-            path = Path(candidate)
+            path = resolve_bundled_path(candidate)
             if path.exists():
                 return path
 

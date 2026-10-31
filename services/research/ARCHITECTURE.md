@@ -10,11 +10,11 @@ apps/api/routers/research.py
   -> LiteratureResearchService.run_agent
   -> ResearchAgentContextBuilder
   -> ResearchSkillResolver
-  -> ResearchCapabilityRegistry (inventory view)
+  -> ResearchCapabilityRegistry (inventory metadata)
   -> ResearchSupervisorGraphRuntime
   -> ResearchSupervisorAgent
-  -> ResearchActionDispatcher
-  -> specialist agents
+  -> specialist agent selected from unified_agent_delegates
+  -> specialist.run_action(context, decision)
   -> specialist capabilities / ResearchKnowledgeAccess / ResearchMemoryGateway / ResearchExternalToolGateway
   -> RagRuntime / RetrievalTools / AnswerTools
   -> ResearchAgentGraphState
@@ -61,18 +61,20 @@ must carry `payload.qa_route` (`collection_qa`, `document_drilldown`, or
 return recovery observations, but lower layers do not silently pick a different
 route for supervisor-authorized calls.
 
-`ResearchActionDispatcher` is the unified delegation boundary. It builds the
-`UnifiedAgentTask`, injects supervisor/runtime context, invokes the selected
-specialist from the unified agent registry, and standardizes observation
-metadata for state updates. The old action-tool dispatcher remains only as a
-compatibility fallback when no unified specialist message is available.
-When a worker reports a recoverable QA route problem, the dispatcher preserves
-that observation so the next Supervisor decision can replan explicitly.
+The action node calls `ResearchSupervisorGraphRuntime._execute_agent_run_action`.
+It resolves the selected worker from `unified_agent_delegates` and invokes the
+specialist's `run_action(context, decision)`. `ResearchKnowledgeAgent` and
+`ChartAnalysisAgent` also receive `task_type=action_name`. The runtime
+standardizes the returned observation and execution metadata, applies any
+state delta, and records a missing-agent failure if no delegate is found.
+Recoverable QA route observations return to the supervisor for an explicit
+next decision.
 
 `ResearchCapabilityRegistry` is the read-only inventory boundary over
-supervisor action tools, runtime/knowledge tools, and MCP server availability.
-It is used both for skill matching and response metadata so the runtime no
-longer has separate tool-counting logic in multiple places.
+supervisor actions, runtime/knowledge tools, and MCP server availability.
+It supports skill matching and response metadata. The `UnifiedAgentRegistry`
+descriptors describe available specialists; the action node currently uses
+the direct `unified_agent_delegates` map for execution.
 
 `ResearchKnowledgeAccess` is the Knowledge/RAG access boundary used by the
 supervisor chain. It prefers registered runtime tools such as
@@ -127,8 +129,8 @@ shape.
 The old runtime methods remain available and delegate to the explicit layers:
 
 - `_build_tool_context` delegates to `ResearchAgentContextBuilder`.
-- Unified worker helpers delegate to `ResearchActionDispatcher`.
-- `_execute_action_tool` remains for compatibility fallback only.
+- Unified worker helpers and the action-tool registry remain for compatibility;
+  the action node uses direct specialist `run_action` calls.
 - `_build_response` delegates to `ResearchAgentResultAggregator`.
 
 The public API now exposes only the high-level research surface plus health and

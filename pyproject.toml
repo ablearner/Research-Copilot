@@ -67,6 +67,7 @@ include = [
     "mcp*",
     "planners*",
     "retrieval*",
+    "runtime*",
     "sdk*",
     "skills*",
     "services*",
@@ -76,5 +77,11 @@ include = [
     "observability*",
     "security*",
     "evaluation*",
+    "prompts",
+    "skills",
 ]
-exclude = ["prompts*", "tests*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+prompts = ["**/*.txt", "**/*.md", "*.yaml"]
+skills = ["builtin/*/SKILL.md"]
