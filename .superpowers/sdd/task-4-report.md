@@ -70,3 +70,22 @@ Removed unused local delta imports from chart/knowledge dispatch and unused sche
 - Ruff: `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m ruff check` over every Python path returned by `git diff --name-only 5f42254 -- '*.py'` — **All checks passed**.
 - Focused regression: `python -m pytest tests/unit/agents/test_research_qa_agent.py tests/unit/services/test_research_state_commit_boundary.py tests/unit/services/test_research_architecture_constraints.py tests/unit/reasoning/test_react_external_tools.py -q --tb=short` — **37 passed**, two existing dependency warnings, 7.29 seconds.
 - `git diff --check` — clean.
+
+## Important review findings — corrected application hydration boundary
+
+The review correctly identified two gaps in the initial implementation. The earlier statement that loaded QA performed no application loading was incomplete: it still invoked the injected `build_execution_context` callback. Also, import requested a context rebuild before its newly deferred memory/turn writes completed. Both are corrected locally:
+
+1. Requested execution-context hydration now runs at the end of `_persist_state_delta`, after workflow storage, deferred memory updates and conversation turn recording. The field-only `_apply_state_delta` no longer initiates hydration.
+2. `QAApplicationService.execute_qa` preloads/hydrates execution context alongside task/report/papers and passes it to the loaded executor. The executor uses `scope_qa_execution_context`, a pure calculation over that snapshot, the resolved papers/documents, and the existing context-manager/reading utilities. It updates scoped paper/document summaries and slices while retaining current workspace/conversation/memory details. No storage or hydration callback is invoked by loaded QA.
+
+Behavioral regressions now use real `GraphSessionMemory` and verify that the context visible after import contains the committed document ID/task intent, both with and without a conversation. The conversation case also checks the newly recorded import message is already visible. Loaded QA tests replace application storage/hydration callbacks with functions that fail on access, for both selected-paper and selected-document requests; they also verify the loaded snapshot is unchanged and the latest workspace finding survives slicing. The application test checks one hydration and that the preloaded context reaches the executor. The architecture constraint additionally forbids context-hydration callback names.
+
+RED before these corrections:
+`python -m pytest tests/unit/services/test_research_state_commit_boundary.py -q -k 'specialist_import_workflow or loaded_qa_never' --tb=short`
+— **2 failed**: missing `current_document_id` in the post-import execution context despite committed session state, and `AssertionError: loaded executor accessed application storage` from the forbidden build callback. The loaded-executor test was updated to pass the new required preloaded-context parameter after implementation. A fixture then needed its imported document IDs populated so selected-document scope matched the task's actual imported set.
+
+Final GREEN:
+`python -m pytest tests/unit/services/test_research_state_commit_boundary.py tests/unit/services/test_literature_research_service.py tests/unit/services/test_research_supervisor_graph_runtime.py tests/unit/agents/test_research_qa_agent.py tests/unit/services/test_research_architecture_constraints.py -q --tb=short`
+— **133 passed**, two baseline dependency warnings, 9.14 seconds.
+
+Ruff over all Task 4 changed Python paths (`git diff --name-only 5f42254 -- '*.py'`) — **All checks passed**. `git diff --check` — clean. No cache transaction, public route, or broader serialization redesign was included in this follow-up.

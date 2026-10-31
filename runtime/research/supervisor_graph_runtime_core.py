@@ -1010,10 +1010,6 @@ class ResearchRuntimeBase:
             context.chart_attempted = delta.chart_attempted
         if delta.zotero_sync_results is not None:
             context.zotero_sync_results = delta.zotero_sync_results
-        if delta.rebuild_execution_context and delta.rebuild_execution_context_params is not None:
-            context.execution_context = context.research_service.build_execution_context(
-                **delta.rebuild_execution_context_params,
-            )
 
     def _persist_state_delta(
         self,
@@ -1046,6 +1042,12 @@ class ResearchRuntimeBase:
 
         for mem_op in (delta.memory_ops or []):
             self._execute_memory_op(context, mem_op)
+
+        # Hydration must observe committed workflow, memory and conversation updates.
+        if delta.rebuild_execution_context and delta.rebuild_execution_context_params is not None:
+            context.execution_context = context.research_service.build_execution_context(
+                **delta.rebuild_execution_context_params,
+            )
 
     def _execute_memory_op(self, context: ResearchAgentToolContext, mem_op: Any) -> None:
         """Execute a single deferred memory operation."""

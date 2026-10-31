@@ -11,6 +11,8 @@ from agents.chart_analysis_agent import ChartAnalysisAgent
 from tools.research import IntentResolutionTool, QARoutingTool, VisualIntentRoutingTool
 from tools.research.paper_search import PaperSearchService
 from tools.research.paper_selector import PaperSelectorService
+from memory.research_context_manager import ResearchContextManager
+from tools.research import PaperReadingTool
 from tools.research.collection_qa_capability import ResearchCollectionQACapability
 from domain.schemas.research_context import ResearchExecutionContext
 from memory.research_memory_gateway import ResearchMemoryGateway
@@ -47,6 +49,8 @@ class QAApplicationService:
         memory_gateway: ResearchMemoryGateway,
         paper_search_service: PaperSearchService,
         paper_selector_service: PaperSelectorService,
+        research_context_manager: ResearchContextManager,
+        paper_reading_tool: PaperReadingTool,
         qa_routing_tool: QARoutingTool,
         report_service: ResearchReportService,
         save_task_state: Callable[..., ResearchTask],
@@ -62,6 +66,8 @@ class QAApplicationService:
         self.memory_gateway = memory_gateway
         self.paper_search_service = paper_search_service
         self.paper_selector_service = paper_selector_service
+        self.research_context_manager = research_context_manager
+        self.paper_reading_tool = paper_reading_tool
         self.qa_routing_tool = qa_routing_tool
         self.report_service = report_service
         self.save_task_state = save_task_state
@@ -93,8 +99,19 @@ class QAApplicationService:
             raise KeyError(task_id)
         report = self.report_service.load_report(task_id, task.report_id)
         papers = self.report_service.load_papers(task_id)
+        execution_context = self.build_execution_context(
+            graph_runtime=graph_runtime,
+            conversation_id=request.conversation_id,
+            task=task, report=report, papers=papers,
+            document_ids=request.document_ids,
+            selected_paper_ids=request.paper_ids,
+            skill_name=request.skill_name,
+            reasoning_style=request.reasoning_style,
+            metadata=request.metadata,
+        )
         result = await (executor or ResearchQAAgent()).execute_loaded_qa(
             self, task, report, papers, request, graph_runtime=graph_runtime,
+            execution_context=execution_context,
         )
         if persist:
             self.save_task_state(result.updated_task, conversation_id=request.conversation_id)

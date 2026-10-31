@@ -190,6 +190,8 @@ class LiteratureResearchService:
             memory_gateway=self.memory_gateway,
             paper_search_service=self.paper_search_service,
             paper_selector_service=self.paper_selector_service,
+            research_context_manager=self.research_context_manager,
+            paper_reading_tool=self.paper_reading_tool,
             qa_routing_tool=self.qa_routing_tool,
             report_service=self.report_service,
             save_task_state=lambda *args, **kwargs: self.save_task_state(*args, **kwargs),

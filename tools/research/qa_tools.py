@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
+from copy import deepcopy
 from typing import Any, Callable
 
+from memory.research_context_manager import ResearchContextManager
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
 from domain.schemas.research import (
@@ -17,6 +20,58 @@ from tools.research.collection_qa_capability import ResearchCollectionQACapabili
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 
 logger = logging.getLogger(__name__)
+
+
+def scope_qa_execution_context(
+    loaded: ResearchExecutionContext, *, papers: list[PaperCandidate],
+    document_ids: list[str], selected_paper_ids: list[str],
+    context_manager: ResearchContextManager, paper_reading_tool: Any,
+) -> ResearchExecutionContext:
+    """Slice an already hydrated snapshot without loading or modifying stored state."""
+    task_context = {
+        **deepcopy(loaded.task_context),
+        "paper_count": len(papers),
+        "paper_titles": [paper.title for paper in papers[:5]],
+        "document_ids": document_ids[:12],
+        "selected_paper_ids": selected_paper_ids[:8],
+    }
+    conversation_context = {
+        **deepcopy(loaded.conversation_context),
+        "selected_paper_ids": selected_paper_ids[:8],
+    }
+    research_context = loaded.research_context
+    slices = {}
+    if research_context is not None:
+        research_context = research_context.model_copy(deep=True, update={
+            "selected_papers": list(selected_paper_ids),
+            "imported_papers": [
+                context_manager.paper_meta_from_candidate(paper)
+                for paper in papers if paper.ingest_status == "ingested"
+            ],
+            "paper_summaries": context_manager.compress_papers(
+                papers=papers, selected_paper_ids=selected_paper_ids,
+                paper_reading_tool=paper_reading_tool,
+            ),
+        })
+        for key, previous in loaded.context_slices.items():
+            slices[key] = context_manager.slice_for_agent(
+                research_context, paper_ids=selected_paper_ids or None,
+                agent_scope=previous.context_scope,
+                summary_level=previous.summary_level,
+                sub_manager_key=key if key in {"research", "writing"} else None,
+            )
+    return replace(
+        loaded,
+        task_context=task_context,
+        conversation_context=conversation_context,
+        research_context=research_context,
+        context_slices=slices,
+        memory_hints={
+            **deepcopy(loaded.memory_hints),
+            "task": task_context,
+            "conversation": conversation_context,
+        },
+    )
 
 
 class ResearchQAToolset:

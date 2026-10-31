@@ -203,4 +203,4 @@ def test_loaded_qa_execution_has_no_storage_or_commit_and_worker_is_separate():
     execute = next((node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == 'execute_loaded_qa'), None)
     assert execute is not None
     calls = {node.func.attr for node in ast.walk(execute) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-    assert not calls & {'load_task', 'load_report', 'load_papers', 'save_task_state', 'save_report', 'persist_research_update', 'promote_conclusion_to_long_term'}
+    assert not calls & {'load_task', 'load_report', 'load_papers', 'build_execution_context', 'hydrate_context', 'load_user_profile', 'load_messages', 'load_conversation', 'save_task_state', 'save_report', 'persist_research_update', 'promote_conclusion_to_long_term'}

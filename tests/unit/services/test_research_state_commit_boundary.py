@@ -84,6 +84,7 @@ async def test_qa_application_loads_inputs_and_commits_once(persist, fail):
     import inspect
     from services.research.qa_router import QAApplicationService
     from agents.research_qa_agent import QAExecutionResult
+    from domain.schemas.research import ResearchTaskAskRequest
     task = SimpleNamespace(task_id='task', report_id='report')
     report, papers = object(), []
     store = Mock()
@@ -97,14 +98,16 @@ async def test_qa_application_loads_inputs_and_commits_once(persist, fail):
     class Executor:
         async def execute_loaded_qa(self, deps, loaded_task, loaded_report, loaded_papers, request, **kwargs):
             assert (loaded_task, loaded_report, loaded_papers) == (task, report, papers)
+            assert kwargs["execution_context"] is app.build_execution_context.return_value
             if fail:
                 raise RuntimeError('qa failed')
             return result
     if fail:
         with pytest.raises(RuntimeError, match='qa failed'):
-            await app.execute_qa('task', SimpleNamespace(conversation_id=None), graph_runtime=object(), executor=Executor(), persist=persist)
+            await app.execute_qa('task', ResearchTaskAskRequest(question='Question'), graph_runtime=object(), executor=Executor(), persist=persist)
     else:
-        assert await app.execute_qa('task', SimpleNamespace(conversation_id=None), graph_runtime=object(), executor=Executor(), persist=persist) is result
+        assert await app.execute_qa('task', ResearchTaskAskRequest(question='Question'), graph_runtime=object(), executor=Executor(), persist=persist) is result
+    assert app.build_execution_context.call_count == 1
     expected = int(persist and not fail)
     assert app.save_task_state.call_count == expected
     assert store.save_report.call_count == expected
@@ -206,7 +209,8 @@ async def test_zotero_result_is_deferred_including_failed_sync(sync_status):
 
 
 @pytest.mark.asyncio
-async def test_specialist_import_workflow_commits_once(tmp_path):
+@pytest.mark.parametrize("with_conversation", [False, True])
+async def test_specialist_import_workflow_commits_once(tmp_path, with_conversation):
     from agents.research_knowledge_agent import ResearchKnowledgeAgent
     from services.research.literature_research_service import LiteratureResearchService
     from adapters.storage.research_report_service import ResearchReportService
@@ -225,10 +229,16 @@ async def test_specialist_import_workflow_commits_once(tmp_path):
         )
     svc.paper_service._import_single_paper = import_one
     svc.save_task_state = Mock(wraps=svc.save_task_state)
-    svc._update_research_memory = Mock()
+    svc._update_research_memory = Mock(wraps=svc._update_research_memory)
+    from rag_runtime.memory import GraphSessionMemory
     ctx = context(task_response=ResearchTaskResponse(task=task, papers=[paper]))
     ctx.request.selected_paper_ids = ['paper']
     ctx.research_service = svc
+    if with_conversation:
+        from domain.schemas.research import CreateResearchConversationRequest
+        conversation = svc.create_conversation(CreateResearchConversationRequest(topic='topic'))
+        ctx.request.conversation_id = conversation.conversation.conversation_id
+    ctx.graph_runtime.session_memory = GraphSessionMemory()
     result = await ResearchKnowledgeAgent().run_action(ctx, SimpleNamespace(metadata={}), task_type='import_papers')
     assert result.status == 'succeeded'
     assert ctx.import_attempted is False
@@ -242,3 +252,54 @@ async def test_specialist_import_workflow_commits_once(tmp_path):
     assert store.load_task('task').imported_document_ids == ['doc']
     assert svc.save_task_state.call_count == 1
     assert svc._update_research_memory.call_count == 1
+    committed_session = ctx.graph_runtime.session_memory.load(ctx.request.conversation_id or 'task')
+    assert committed_session.current_document_id == 'doc'
+    assert ctx.execution_context.session_context['current_document_id'] == 'doc'
+    assert ctx.execution_context.session_context['current_task_intent'] == 'research_import'
+    assert ctx.execution_context.memory_hints['current_document_id'] == 'doc'
+
+
+    if with_conversation:
+        assert any(message['kind'] == 'import_result' for message in ctx.execution_context.conversation_context['recent_messages'])
+        assert ctx.execution_context.conversation_context['selected_paper_ids'] == ['paper']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", [{"paper_ids": ["paper-1"]}, {"document_ids": ["doc-1"]}])
+async def test_loaded_qa_never_reads_application_storage_and_preserves_scope(tmp_path, selection):
+    from agents.research_qa_agent import ResearchQAAgent
+    from services.research.literature_research_service import LiteratureResearchService
+    from adapters.storage.research_report_service import ResearchReportService
+    from domain.schemas.research import PaperCandidate, ResearchTaskAskRequest, ResearchReport, ResearchWorkspaceState
+    from domain.schemas.api import QAResponse
+    from domain.schemas.evidence import EvidenceBundle
+    from unittest.mock import AsyncMock
+    store = ResearchReportService(tmp_path)
+    task = ResearchTask(task_id='task', topic='topic', created_at='now', updated_at='now', imported_document_ids=['doc-0', 'doc-1'], workspace=ResearchWorkspaceState(status_summary='Latest workspace', key_findings=['Latest finding']))
+    report = ResearchReport(report_id='report', task_id='task', topic='topic', generated_at='now', markdown='Current report')
+    papers = [PaperCandidate(paper_id=f'paper-{n}', title=f'Paper {n}', source='arxiv', ingest_status='ingested', metadata={'document_id': f'doc-{n}'}) for n in range(2)]
+    svc = LiteratureResearchService(report_service=store, paper_search_service=SimpleNamespace(llm_adapter=None), paper_import_service=object())
+    graph = SimpleNamespace()
+    request = ResearchTaskAskRequest(question='Summarize the findings', **selection, metadata={'routing_authority': 'supervisor_llm', 'preferred_qa_route': 'collection_qa'})
+    loaded = svc.build_execution_context(graph_runtime=graph, task=task, report=report, papers=papers)
+    before = asdict(loaded)
+    captured = []
+    async def answer(**kwargs):
+        captured.append(kwargs['execution_context'])
+        return QAResponse(question=request.question, answer='Grounded answer', confidence=0.8, evidence_bundle=EvidenceBundle())
+    svc.research_collection_qa_capability = SimpleNamespace(run_collection_qa=AsyncMock(side_effect=answer))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('loaded executor accessed application storage')
+    svc.qa_service.build_execution_context = forbidden
+    svc.qa_service.report_service = SimpleNamespace(load_task=forbidden, load_report=forbidden, load_papers=forbidden, load_conversation=forbidden, load_messages=forbidden)
+    svc.qa_service.memory_gateway = SimpleNamespace(load_user_profile=forbidden, hydrate_context=forbidden)
+    # The executor receives context already hydrated by the application.
+    result = await ResearchQAAgent().execute_loaded_qa(svc.qa_service, task, report, papers, request, graph_runtime=graph, execution_context=loaded)
+    assert result.response.paper_ids == ['paper-1']
+    scoped = captured[0]
+    assert scoped.task_context['paper_titles'] == ['Paper 1']
+    assert scoped.task_context['document_ids'] == ['doc-1']
+    assert scoped.task_context['workspace_summary'] == 'Latest workspace'
+    assert scoped.research_context.selected_papers == ['paper-1']
+    assert 'Latest finding' in scoped.research_context.known_conclusions
+    assert asdict(loaded) == before

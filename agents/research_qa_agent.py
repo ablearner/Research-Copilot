@@ -18,6 +18,7 @@ from domain.schemas.research import (
     DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style,  # noqa: F401
     ResearchTask, ResearchReport, ResearchTaskAskResponse,
 )
+from domain.schemas.research_context import ResearchExecutionContext
 from tools.research.visual_intent import VisualIntentDecision, VisualIntentRoutingTool
 
 if TYPE_CHECKING:
@@ -354,12 +355,13 @@ class ResearchQAAgent:
     async def execute_loaded_qa(
         self, dependencies: Any, task: Any, report: Any, papers: list[Any], request: Any, *,
         graph_runtime: Any,
+        execution_context: ResearchExecutionContext,
     ) -> QAExecutionResult:
         """Execute QA against loaded inputs, returning proposed workflow changes."""
         from domain.schemas.research import ResearchTaskAskResponse
         from tools.research.qa_decisions import build_answer_quality_check, select_recovery_qa_route
         from tools.research.qa_schemas import ResearchQARouteDecision
-        from tools.research.qa_tools import ResearchQAToolset
+        from tools.research.qa_tools import ResearchQAToolset, scope_qa_execution_context
 
         svc = dependencies
         tools = ResearchQAToolset(
@@ -589,17 +591,13 @@ class ResearchQAAgent:
                 }
             }
         )
-        execution_context = svc.build_execution_context(
-            graph_runtime=graph_runtime,
-            conversation_id=request.conversation_id,
-            task=task,
-            report=report,
+        execution_context = scope_qa_execution_context(
+            execution_context,
             papers=scoped_papers,
             document_ids=document_ids,
             selected_paper_ids=scope.paper_ids,
-            skill_name=request.skill_name,
-            reasoning_style=request.reasoning_style,
-            metadata=scoped_request.metadata,
+            context_manager=svc.research_context_manager,
+            paper_reading_tool=svc.paper_reading_tool,
         )
         qa = await tools.run(
             graph_runtime=graph_runtime,
