@@ -610,6 +610,36 @@ class ResearchCollectionAnswerCapability:
             preference_context["skill_context"] = skill_context
             preference_context["expert_context"] = expert_context
         memory_hints = getattr(execution_context, "memory_hints", None) or {}
+        explicit_task = expert_context.get("task_context")
+        if isinstance(explicit_task, dict):
+            # The loaded execution context belongs to the workspace. Only the
+            # bounded invocation DTO may supply history and task prompt data.
+            context_slice = explicit_task.get("context_slice") or {}
+            session_context = {"session_history": context_slice.get("session_history", [])}
+            task_context = {
+                **explicit_task,
+                "research_task_id": state.task.task_id,
+                "research_topic": context_slice.get("research_topic", ""),
+                "paper_count": len(state.papers),
+                "question_scope_document_count": len(state.document_ids),
+            }
+            memory_hints = {}
+            preference_context = {
+                key: value for key, value in preference_context.items()
+                if key in {
+                    "citation_style", "review_style", "reasoning_style", "min_length",
+                    "return_citations", "answer_language", "follow_user_language",
+                    "preserve_paper_title_language",
+                }
+            }
+            for key in ("citation_style", "review_style", "answer_language"):
+                value = (context_slice.get("user_preferences") or {}).get(key)
+                if value:
+                    preference_context.setdefault(key, value)
+            preference_context["expert_context"] = expert_context
+            for key in ("supervisor_instruction", "skill_context", "active_skill_names"):
+                if expert_context.get(key):
+                    preference_context[key] = expert_context[key]
         selected_paper_analysis = await self._analyze_selected_papers(state)
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         qa = await knowledge_access.answer_with_evidence(
@@ -698,11 +728,23 @@ class ResearchCollectionAnswerCapability:
         paper_ids = list(getattr(state.request, "paper_ids", []) or [])
         if not paper_ids or not getattr(state, "papers", None):
             return None
+        metadata = getattr(state.request, "metadata", {}) or {}
+        expert_context = metadata.get("expert_context")
+        expert_context = expert_context if isinstance(expert_context, dict) else {}
+        explicit_task = isinstance(expert_context.get("task_context"), dict)
+        task_kwargs = {}
+        if explicit_task:
+            task_kwargs = {
+                "expert_context": expert_context,
+                "supervisor_instruction": expert_context.get("supervisor_instruction"),
+                "skill_context": expert_context.get("skill_context"),
+            }
         return await self.paper_analysis_tool.analyze_async(
             question=str(getattr(state, "original_question", state.question)),
             papers=list(state.papers),
             task_topic=getattr(state.task, "topic", ""),
-            report_highlights=list(getattr(getattr(state, "report", None), "highlights", [])[:4]),
+            report_highlights=[] if explicit_task else list(getattr(getattr(state, "report", None), "highlights", [])[:4]),
+            **task_kwargs,
         )
 
     def _preferred_answer_language(self, question: str) -> str:

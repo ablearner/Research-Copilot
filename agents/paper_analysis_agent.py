@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -80,15 +81,19 @@ class PaperAnalysisAgent:
                 metadata={"reason": "missing_task"},
             )
         payload = dict(active_message.payload or {}) if active_message is not None else {}
-        selected_paper_ids = [
-            str(item).strip()
-            for item in (payload.get("paper_ids") or context.request.selected_paper_ids)
-            if str(item).strip()
-        ]
-        papers = comparison_scope_papers(
-            papers=task_response.papers,
-            selected_paper_ids=selected_paper_ids,
-        )
+        if context.worker_input is not None:
+            selected_ids = set(context.worker_input.context_slice.selected_papers)
+            papers = [paper for paper in task_response.papers if paper.paper_id in selected_ids]
+        else:
+            selected_paper_ids = [
+                str(item).strip()
+                for item in (payload.get("paper_ids") or context.request.selected_paper_ids)
+                if str(item).strip()
+            ]
+            papers = comparison_scope_papers(
+                papers=task_response.papers,
+                selected_paper_ids=selected_paper_ids,
+            )
         if not papers:
             return ResearchToolResult(
                 status="skipped",
@@ -118,6 +123,7 @@ class PaperAnalysisAgent:
                 if isinstance(analysis_input.metadata.get("expert_context"), dict)
                 else None
             ),
+            expert_context=analysis_input.metadata.get("expert_context"),
         )
         ws_result = persist_workspace_results(
             context,
@@ -263,8 +269,9 @@ class PaperAnalysisAgent:
         evidence_hits: list[RetrievalHit] | None = None,
         supervisor_instruction: str | None = None,
         skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
     ) -> AnalyzePapersFunctionOutput:
-        return await self.paper_analysis_tool.analyze_async(
+        kwargs: dict[str, Any] = dict(
             question=question,
             papers=papers,
             task_topic=task_topic,
@@ -273,3 +280,8 @@ class PaperAnalysisAgent:
             supervisor_instruction=supervisor_instruction,
             skill_context=skill_context,
         )
+        if expert_context:
+            parameters = inspect.signature(self.paper_analysis_tool.analyze_async).parameters
+            if "expert_context" in parameters or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+                kwargs["expert_context"] = expert_context
+        return await self.paper_analysis_tool.analyze_async(**kwargs)

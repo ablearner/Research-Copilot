@@ -62,38 +62,30 @@ def build_expert_context(
         built_payload = context_builder()
         if isinstance(built_payload, dict):
             base_payload.update(built_payload)
+    explicit_task = "task_context" in base_payload
 
-    supervisor_instruction = (
-        _clean_text(base_payload.get("supervisor_instruction"))
-        or _clean_text(getattr(context, "supervisor_instruction", None))
-        or (
-            _clean_text(active_message.instruction)
-            if active_message is not None
-            else None
+    supervisor_instruction = _clean_text(base_payload.get("supervisor_instruction"))
+    skill_context = _clean_text(base_payload.get("skill_context"))
+    active_skill_names = _clean_string_list(base_payload.get("active_skill_names"))
+    if not explicit_task:
+        supervisor_instruction = supervisor_instruction or _clean_text(getattr(context, "supervisor_instruction", None)) or (
+            _clean_text(active_message.instruction) if active_message is not None else None
         )
-    )
-    skill_context = (
-        _clean_text(base_payload.get("skill_context"))
-        or _clean_text(getattr(context, "skill_context", None))
-        or _clean_text(message_metadata.get("skill_context"))
-        or _clean_text(decision_metadata.get("skill_context"))
-    )
-    active_skill_names = (
-        _clean_string_list(base_payload.get("active_skill_names"))
-        or _clean_string_list(message_metadata.get("active_skill_names"))
-        or _clean_string_list(decision_metadata.get("active_skill_names"))
-    )
+        skill_context = skill_context or _clean_text(getattr(context, "skill_context", None)) or _clean_text(message_metadata.get("skill_context")) or _clean_text(decision_metadata.get("skill_context"))
+        active_skill_names = active_skill_names or _clean_string_list(message_metadata.get("active_skill_names")) or _clean_string_list(decision_metadata.get("active_skill_names"))
     request = getattr(context, "request", None)
     requested_skill_name = _clean_text(getattr(request, "skill_name", None))
 
     payload: dict[str, Any] = {}
+    if explicit_task:
+        payload["task_context"] = base_payload["task_context"]
     if supervisor_instruction:
         payload["supervisor_instruction"] = supervisor_instruction
     if skill_context:
         payload["skill_context"] = skill_context
     if active_skill_names:
         payload["active_skill_names"] = active_skill_names
-    if requested_skill_name:
+    if requested_skill_name and not explicit_task:
         payload["requested_skill_name"] = requested_skill_name
     return payload
 
@@ -159,10 +151,14 @@ def build_review_draft_input(*, context: Any, decision: Any | None = None) -> Un
     assert task_response is not None
     task = task_response.task
     expert_context = build_expert_context(context=context, decision=decision)
+    papers = list(task_response.papers)
+    if "task_context" in expert_context:
+        selected_ids = set(expert_context["task_context"].get("context_slice", {}).get("selected_papers", []))
+        papers = [paper for paper in papers if paper.paper_id in selected_ids]
     return UnifiedReviewDraftInput(
         topic=task.topic,
         task_id=task.task_id,
-        curated_papers=list(task_response.papers),
+        curated_papers=papers,
         warnings=[],
         must_read_ids=list(task.workspace.must_read_paper_ids),
         ingest_candidate_ids=list(task.workspace.ingest_candidate_ids),
@@ -200,9 +196,13 @@ def build_collection_qa_input(
     context: Any,
     task_id: str,
     active_message: AgentMessage | None,
+    decision: Any | None = None,
 ) -> UnifiedCollectionQAInput:
     request = context.request
     payload = dict(active_message.payload or {}) if active_message is not None else {}
+    worker_input = getattr(context, "worker_input", None)
+    if worker_input is not None and decision is not None:
+        payload = {**(getattr(decision, "action_input", None) or {}), **payload}
     question = str(payload.get("question") or payload.get("goal") or request.message).strip()
     if not question:
         question = request.message.strip()
@@ -216,6 +216,26 @@ def build_collection_qa_input(
         for item in (payload.get("document_ids") or request.selected_document_ids)
         if str(item).strip()
     ]
+    if worker_input is not None:
+        paper_ids = list(worker_input.context_slice.selected_papers)
+        document_key = next((key for key in ("document_ids", "selected_document_ids") if key in payload), None)
+        if document_key is not None:
+            document_ids = [str(item).strip() for item in payload[document_key] or [] if str(item).strip()]
+        elif any(key in payload for key in ("paper_ids", "selected_paper_ids")):
+            selected_papers = set(paper_ids)
+            mapped_documents = {
+                str(paper.metadata.get("document_id")).strip()
+                for paper in context.papers if paper.paper_id in selected_papers and paper.metadata.get("document_id")
+            }
+            research_context = getattr(getattr(context, "execution_context", None), "research_context", None)
+            imported_papers = list(worker_input.context_slice.imported_papers)
+            if research_context is not None:
+                imported_papers.extend(research_context.imported_papers)
+            mapped_documents.update(
+                str(paper.document_id).strip()
+                for paper in imported_papers if paper.paper_id in selected_papers and paper.document_id
+            )
+            document_ids = [document_id for document_id in document_ids if document_id in mapped_documents]
     image_path = str(payload.get("image_path") or request.chart_image_path or "").strip() or None
     page_id = str(payload.get("page_id") or request.page_id or "").strip() or None
     chart_id = str(payload.get("chart_id") or request.chart_id or "").strip() or None
@@ -405,7 +425,11 @@ def build_paper_analysis_input(
         recommendation_goal=recommendation_goal,
         papers=papers,
         task_topic=task_response.task.topic,
-        report_highlights=list(task_response.report.highlights) if task_response.report else [],
+        report_highlights=(
+            list(task_response.report.highlights)
+            if task_response.report and ("task_context" not in expert_context or len(papers) == len(task_response.papers))
+            else []
+        ),
         metadata={
             **context.request.metadata,
             "agent_runtime": "research_agent",

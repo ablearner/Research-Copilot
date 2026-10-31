@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -63,8 +64,16 @@ class ResearchWriterAgent:
             )
 
         review_input = build_review_draft_input(context=context, decision=decision)
+        if "task_context" in review_input.expert_context and not review_input.curated_papers:
+            return ResearchToolResult(
+                status="skipped",
+                observation="no papers are available for the review task scope",
+                metadata={"reason": "no_papers"},
+            )
         existing_report = review_input.report
-        candidate_report = existing_report or await self.synthesize_async(review_input)
+        candidate_report = await self.synthesize_async(review_input) if "task_context" in review_input.expert_context else (
+            existing_report or await self.synthesize_async(review_input)
+        )
         retry_count = 0
         quality = self._quality_metrics(candidate_report)
         if not quality["passed"]:
@@ -117,7 +126,7 @@ class ResearchWriterAgent:
                 "conversation_id": request.conversation_id,
                 "task": updated_task,
                 "report": saved_report,
-                "papers": review_input.curated_papers,
+                "papers": task_response.papers,
                 "document_ids": updated_task.imported_document_ids,
                 "selected_paper_ids": request.selected_paper_ids,
                 "skill_name": request.skill_name,
@@ -190,7 +199,7 @@ class ResearchWriterAgent:
         """Async synthesize — uses LLM-powered survey generation if available."""
         paper_search_service = self._require_search_service()
         language = self._resolve_answer_language(state)
-        base_report = await paper_search_service.survey_writer.generate_async(
+        kwargs: dict[str, Any] = dict(
             topic=state.topic,
             task_id=state.task_id,
             papers=state.curated_papers,
@@ -199,6 +208,12 @@ class ResearchWriterAgent:
             supervisor_instruction=getattr(state, "supervisor_instruction", None),
             skill_context=getattr(state, "skill_context", None),
         )
+        expert_context = getattr(state, "expert_context", None)
+        if expert_context:
+            parameters = inspect.signature(paper_search_service.survey_writer.generate_async).parameters
+            if "expert_context" in parameters or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+                kwargs["expert_context"] = expert_context
+        base_report = await paper_search_service.survey_writer.generate_async(**kwargs)
         return self._finalize_report(base_report, state)
 
     def _finalize_report(self, base_report: ResearchReport, state: Any) -> ResearchReport:

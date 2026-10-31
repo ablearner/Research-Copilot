@@ -91,7 +91,14 @@ class ResearchQAAgent:
             context=context,
             task_id=task_response.task.task_id,
             active_message=active_message,
+            decision=decision,
         )
+        if (context.worker_input is not None and not qa_input.paper_ids
+                and not any((qa_input.document_ids, qa_input.image_path, qa_input.page_id, qa_input.chart_id))):
+            return ResearchToolResult(
+                status="skipped", observation="no papers are available for collection QA",
+                metadata={"reason": "no_papers"},
+            )
         visual_intent = await self._decide_visual_intent_for_context(
             context=context,
             question=qa_input.question,
@@ -376,17 +383,30 @@ class ResearchQAAgent:
             collection_qa_capability=svc.research_collection_qa_capability,
         )
         task_id = task.task_id
+        expert_context = request.metadata.get("expert_context")
+        expert_context = expert_context if isinstance(expert_context, dict) else {}
+        worker_task = expert_context.get("task_context")
+        explicit_task = isinstance(worker_task, dict)
         scope = svc.paper_selector_service.resolve_qa_scope(
             task=task,
             papers=papers,
             requested_paper_ids=request.paper_ids,
             requested_document_ids=request.document_ids,
         )
-        if scope.explicit_scope and not scope.paper_ids and not scope.document_ids:
+        if explicit_task:
+            allowed_paper_ids = set((worker_task.get("context_slice") or {}).get("selected_papers", []))
+            scope.papers = [paper for paper in scope.papers if paper.paper_id in allowed_paper_ids]
+            scope.paper_ids = [paper.paper_id for paper in scope.papers]
+            if not request.document_ids:
+                allowed_documents = {paper.metadata.get("document_id") for paper in scope.papers}
+                scope.document_ids = [document_id for document_id in scope.document_ids if document_id in allowed_documents]
+        has_direct_visual_input = any((request.image_path, request.page_id, request.chart_id))
+        if (scope.explicit_scope and not scope.paper_ids and not scope.document_ids
+                and not (explicit_task and has_direct_visual_input)):
             raise ValueError("The requested paper/document scope did not match the current research task.")
         document_ids = list(scope.document_ids)
-        scoped_papers = list(scope.papers or papers)
-        if not document_ids and not scoped_papers and report is None:
+        scoped_papers = list(scope.papers if explicit_task else (scope.papers or papers))
+        if not document_ids and not scoped_papers and report is None and not (explicit_task and has_direct_visual_input):
             raise ValueError(
                 f"Research task has no imported documents or persisted research artifacts available for QA: {task_id}"
             )
@@ -448,7 +468,7 @@ class ResearchQAAgent:
                 for paper_id in user_intent.resolved_paper_ids
                 if paper_id in {paper.paper_id for paper in papers}
             ]
-            if resolved_intent_paper_ids and not scope.paper_ids:
+            if resolved_intent_paper_ids and not scope.paper_ids and not explicit_task:
                 scope = svc.paper_selector_service.resolve_qa_scope(
                     task=task,
                     papers=papers,
@@ -456,7 +476,7 @@ class ResearchQAAgent:
                     requested_document_ids=request.document_ids,
                 )
                 document_ids = list(scope.document_ids)
-                scoped_papers = list(scope.papers or papers)
+                scoped_papers = list(scope.papers if explicit_task else (scope.papers or papers))
             if user_intent.needs_clarification:
                 raise ValueError(user_intent.clarification_question or "当前问题指向不明确，请补充具体论文或图表。")
 

@@ -58,6 +58,44 @@ direct-discovery helpers are gone.
 unified agent registry, blueprint, and active skills
 in one construction path.
 
+Before specialist dispatch, `prepare_worker_invocation` creates an independent
+snapshot of mutable request/workspace/execution data. Service clients, the graph
+runtime, the agent registry, knowledge access and the progress callback remain
+shared program resources. A worker's instruction and Skill body come only from
+the current task; an absent Skill clears any previous task's selection. The
+snapshot retains the complete workspace for state-delta construction.
+
+`WorkerTaskInput` is the separate JSON model-input contract. Its context slice is
+constructed for the current action and paper scope, with bounded summaries and
+history instead of copying the manager slice. Only explicit dependency task IDs
+contribute preceding result summaries. The runtime records substantive outputs
+from state deltas by their originating task ID, rather than retaining only action
+counters. Full dependency payloads are copied into the invocation's artifact
+map; `context.read_artifact(key)` returns a detached copy
+to worker code. These references are invocation-local, not a durable artifact
+store or an automatically registered LLM tool. Existing retrieval tools still
+provide document evidence when needed.
+
+`context.expert_context()` exposes the model-input contract to specialist prompt
+adapters. Analysis and survey writing carry it through to their final LLM calls;
+workers that already consume expert context receive it through the same path.
+Task/result audit messages retain the actual worker slice. Full workspace data
+and service handles are never serialized by this contract. Scoped writing uses
+selected papers for generation and the complete paper collection when rebuilding
+persisted execution context.
+
+Analysis and research QA enforce the selected IDs at the evidence boundary as
+well as in prompt metadata. An unmatched explicit scope never falls back to the
+whole collection. QA retains explicit document/image entrypoints, including
+documents without a candidate-paper mapping. Collection answering and its
+metadata-only analysis fallback both receive the task/dependency summaries;
+the explicit-task answer path excludes unbounded workspace history and stale
+Skill fields while retaining scoped retrieval evidence and basic preferences.
+
+The graph remains serial. Snapshot isolation prevents accidental input mutation
+and instruction/Skill leakage; it does not make shared services or simultaneous
+state-delta commits safe for parallel execution.
+
 `ResearchSkillResolver` is the Skill layer boundary. It reuses
 `core.SkillRegistry`, `core.SkillMatcher`, and `core.SkillValidator`. Skills
 provide workflow instructions, output rules, and validation criteria. Skills do

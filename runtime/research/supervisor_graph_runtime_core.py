@@ -46,6 +46,8 @@ from core.skill_registry import SkillRegistry
 from core.skill_matcher import SkillMatcher
 from core.utils import normalize_topic_text as _normalize_topic_text_impl
 from runtime.research.context_builder import ResearchAgentContextBuilder
+from runtime.research.worker_invocation import prepare_worker_invocation
+from runtime.research.worker_results import worker_result_artifact
 from runtime.research.response_formatter import ResearchResponseFormatter
 from runtime.research.result_aggregator import ResearchAgentResultAggregator
 from runtime.research.unified_runtime import ACTION_AGENT_CATALOG
@@ -1117,16 +1119,11 @@ class ResearchRuntimeBase:
         trace = list(state.get("trace", []))
         step_index = state.get("current_step_index", 0)
         worker_agent = self._worker_agent_name(decision)
+        context, decision = prepare_worker_invocation(
+            context=state["context"], decision=decision,
+            agent_results=state.get("agent_results", []),
+        )
         active_message = self._active_message(decision)
-        context = state["context"]
-        context.supervisor_instruction = (
-            active_message.instruction.strip() if active_message is not None else None
-        ) or None
-        if active_message is not None:
-            active_metadata = dict(active_message.metadata or {})
-            skill_context = str(active_metadata.get("skill_context") or "").strip()
-            if skill_context:
-                context.skill_context = skill_context
         result = await self._execute_agent_run_action(
             action_name=action_name,
             context=context,
@@ -1144,6 +1141,12 @@ class ResearchRuntimeBase:
         if result.state_delta is not None:
             self._apply_state_delta(context=state["context"], delta=result.state_delta)
             self._persist_state_delta(context=state["context"], delta=result.state_delta)
+
+        result_payload = dict(result.metadata)
+        if active_message is not None:
+            artifact, summary = worker_result_artifact(result)
+            state["context"].result_artifacts[active_message.task_id] = artifact
+            result_payload["summary"] = summary
 
         status = result.status if result.status in {"succeeded", "failed", "skipped"} else "succeeded"
         trace.append(
@@ -1168,6 +1171,7 @@ class ResearchRuntimeBase:
             )
         )
         update = {
+            "current_decision": decision,
             "trace": trace,
             "failed": bool(state.get("failed")) or result.status == "failed",
             **self._message_result_update(
@@ -1175,12 +1179,20 @@ class ResearchRuntimeBase:
                 active_message=active_message,
                 worker_agent=worker_agent,
                 status=status,
-                payload=dict(result.metadata),
+                payload=result_payload,
             ),
         }
+        if active_message is not None:
+            messages = list(state.get("agent_messages", []))
+            update["agent_messages"] = [
+                active_message if message.task_id == active_message.task_id else message
+                for message in messages
+            ]
+            if not any(message.task_id == active_message.task_id for message in messages):
+                update["agent_messages"].append(active_message)
         self._rebuild_execution_context(
             context=state["context"],
-            agent_messages=state.get("agent_messages", []),
+            agent_messages=update.get("agent_messages", state.get("agent_messages", [])),
             agent_results=update.get("agent_results", state.get("agent_results", [])),
             pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
             execution_plan=update.get("execution_plan", state.get("execution_plan")),

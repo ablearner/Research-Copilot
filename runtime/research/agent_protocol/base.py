@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 import logging
 from typing import Any, Awaitable, Callable, Protocol, TypedDict
 from uuid import uuid4
@@ -25,6 +26,7 @@ from domain.schemas.research import (
 from domain.schemas.research_functions import AnalyzePapersFunctionOutput, RecommendPapersFunctionOutput
 from core.utils import now_iso as _now_iso
 from domain.schemas.research_context import ResearchExecutionContext
+from domain.schemas.worker_task import WorkerTaskInput
 
 from typing import TYPE_CHECKING
 
@@ -114,6 +116,15 @@ class ResearchAgentToolContext:
     skill_selection: Any | None = None
     knowledge_access: Any | None = None
     supervisor_instruction: str | None = None
+    worker_input: WorkerTaskInput | None = None
+    # Full dependency payloads stay in Python; only references enter model input.
+    worker_artifacts: dict[str, Any] = field(default_factory=dict, repr=False)
+    # Runtime-owned outputs indexed by originating task ID, for this run only.
+    result_artifacts: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def read_artifact(self, key: str) -> Any:
+        """Resolve a dependency artifact within this invocation, without mutable aliases."""
+        return deepcopy(self.worker_artifacts[key])
 
     @property
     def task(self) -> ResearchTask | None:
@@ -137,6 +148,8 @@ class ResearchAgentToolContext:
 
     def expert_context(self) -> dict[str, Any]:
         payload: dict[str, Any] = {}
+        if self.worker_input is not None:
+            payload["task_context"] = self.worker_input.model_dump(mode="json")
         supervisor_instruction = str(self.supervisor_instruction or "").strip()
         if supervisor_instruction:
             payload["supervisor_instruction"] = supervisor_instruction
