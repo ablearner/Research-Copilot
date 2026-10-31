@@ -25,3 +25,7 @@ None identified in focused validation. Registry caches retain graph-runtime refe
 ## Follow-up lint correction
 
 Removed a stale test import left after replacing the skeleton-adapter test. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m ruff check $(git diff --name-only 323ff4a...HEAD -- '*.py')` reported `All checks passed!`. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m pytest -q tests/unit/services/test_unified_runtime.py --tb=short` reported **7 passed, 2 dependency warnings**.
+
+## Review follow-up
+
+Removed the unused `UnifiedRuntimeContext.tool_executor` field and its builder assignment, as identified in `task-3-review.md`. No research runtime reader remained. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m pytest -q tests/unit/services/test_unified_runtime.py --tb=short` reported **7 passed, 2 dependency warnings**. `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m ruff check runtime/research/unified_runtime.py tests/unit/services/test_unified_runtime.py` reported `All checks passed!`.

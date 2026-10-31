@@ -18,7 +18,6 @@ class UnifiedRuntimeContext:
     graph_runtime: Any
     research_service: Any
     tool_registry: Any | None = None
-    tool_executor: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -95,7 +94,6 @@ def build_phase1_unified_runtime_context(
         graph_runtime=graph_runtime,
         research_service=research_service,
         tool_registry=getattr(graph_runtime, "tool_registry", None),
-        tool_executor=getattr(graph_runtime, "tool_executor", None),
     )
 
 
