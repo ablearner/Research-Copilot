@@ -283,6 +283,9 @@ class ResearchAgentGraphState(TypedDict, total=False):
     failed_agent_task_ids: list[str]
     replanned_failure_task_ids: list[str]
     planner_runs: int
+    planning_llm_calls: int
+    supervisor_decision_count: int
+    execution_plan: dict[str, Any] | None
     replan_count: int
     clarification_request: str | None
     active_plan_id: str | None

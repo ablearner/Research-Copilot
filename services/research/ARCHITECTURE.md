@@ -148,6 +148,54 @@ interfaces, not execution envelopes.
 
 ## Compatibility
 
+### Explicit research plans
+
+Complex requests may return a structured plan. `domain.schemas.research_plan`
+defines its steps and runtime state; `runtime.research.plan_executor` validates
+dependencies and performs pure, serial transitions. `ResearchPlanCoordinator`
+adapts those transitions to the supervisor's existing worker dispatch boundary.
+Simple requests retain single-action routing.
+
+The graph explicitly carries `execution_plan`, `planning_llm_calls`, and
+`supervisor_decision_count`. Every dispatch binds a stable plan/step identity to
+a fresh worker task ID. Results complete only the matching running task. First
+and subsequent steps use the same action/instruction/parameter path; unknown
+paper references stop dispatch rather than expanding scope to the collection.
+Model-proposed runtime statuses, task IDs and attempt counts are reset.
+
+Plans reject duplicate IDs, missing/cyclic dependencies, unsupported actions,
+invalid supported parameters and discovery-only violations. Acceptance reuses
+`ResearchEvaluationTool`: plan requirements are checked even when a worker
+already returned a passing evaluation. Search needs candidates, analysis needs
+its paper metadata and requested paper coverage, import needs progress, and QA
+needs evidence unless its scope is explicitly metadata-only. Additional
+supported requirements can be proposed per step. A skipped step only satisfies
+dependencies when the plan permits skipping and the result passes acceptance.
+These are structural/evidence checks, not a guarantee of factual correctness.
+
+On failed acceptance, the planner receives completed work and failure evidence
+and proposes remaining steps. The executor preserves completed steps and
+archives replaced steps/results; exact repeated completed action/params are
+rejected. The supervisor allows two replanning invocations by default
+(`max_plan_replans`), and the existing runtime `max_steps` budget still applies.
+Retries are explicit replacement-plan decisions. No tool side effect is
+automatically retried or rolled back by the executor.
+
+The finalizer reconciles the last real worker result, including a result at the
+step limit. It preserves partial progress and reports incomplete plans with a
+reason rather than synthesizing another successful worker result.
+`research_context.current_task_plan` is a projection of the authoritative plan;
+its stable display IDs are `plan_id:step_id`, and execution task IDs are retained
+in metadata. Without a plan the legacy message-based projection is retained.
+
+Final response metadata includes the plan and separate
+`planning_llm_call_count`, `supervisor_decision_count`, `plan_replan_count`, and
+`worker_call_count`. A planning call counts an adapter invocation (including a
+failed invocation), not each provider retry inside the adapter. Compression
+guardrails do not increment the plan replan counter. Legacy counters
+remain available. Plan execution state is per run; this change does not add
+durable graph checkpoint/resume support or external-effect transactions.
+
 The old runtime methods remain available and delegate to the explicit layers:
 
 - `_build_tool_context` delegates to `ResearchAgentContextBuilder`.

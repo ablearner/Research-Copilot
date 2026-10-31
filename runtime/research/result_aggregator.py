@@ -35,8 +35,15 @@ class ResearchAgentResultAggregator:
         replan_count: int,
         clarification_request: str | None,
         active_plan_id: str | None,
+        execution_plan: dict[str, Any] | None = None,
+        planning_llm_calls: int = 0,
+        supervisor_decision_count: int = 0,
     ) -> ResearchAgentRunResponse:
         warnings = list(context.warnings or [])
+        if execution_plan is not None and execution_plan.get("status") != "completed":
+            reason = str(execution_plan.get("reason") or "Execution stopped before all plan steps completed.")
+            if reason not in warnings:
+                warnings.append(reason)
         if context.task_response:
             warnings.extend(warning for warning in context.task_response.warnings if warning not in warnings)
         if context.import_result:
@@ -183,6 +190,11 @@ class ResearchAgentResultAggregator:
                 "stop_reason": workspace.stop_reason,
                 "trace_steps": len(trace),
                 "manager_decision_count": planner_runs,
+                "supervisor_decision_count": supervisor_decision_count,
+                "planning_llm_call_count": planning_llm_calls,
+                "plan_replan_count": int(execution_plan.get("replan_attempts", 0)) if execution_plan is not None else 0,
+                "worker_call_count": len({result.task_id for result in agent_results if result.task_type not in {"finalize", "clarify_request"}}),
+                "execution_plan": execution_plan,
                 "recovery_decision_count": replan_count,
                 "agent_message_count": len(agent_messages),
                 "agent_result_count": len(agent_results),

@@ -13,6 +13,8 @@ from adapters.llm.base import BaseLLMAdapter, LLMAdapterError
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
 from domain.schemas.research_context import ResearchContextSlice
 from domain.schemas.sub_manager import TaskEvaluation
+from domain.schemas.research_plan import PlanStep, ResearchPlan
+from agents.research_plan_coordinator import ResearchPlanCoordinator
 from tools.research import ResearchEvaluationTool
 
 
@@ -43,12 +45,20 @@ _DEFAULT_SUPERVISOR_SOUL_PROMPT = (
     "When the user asks a general question that does not require literature search, paper import, local evidence retrieval, document parsing, or chart analysis, choose general_answer.\n"
     "When the user asks for broad, unscoped papers worth reading and the request should use the user's long-term interests instead of the current paper scope, choose recommend_from_preferences.\n"
     "For simple, single-intent requests, decide the single best next worker action now.\n"
-    "For complex, multi-intent requests (e.g. 'search papers, compare them, then import the best'), "
-    "produce a multi-step plan in the 'plan' field. Each step should have step_id, action, instruction, "
-    "params, and depends_on (list of step_ids this step depends on). Set action_name to the first step's action. "
-    "The runtime will execute steps in order, advancing automatically after each succeeds. "
-    "If a step fails, the plan is cleared and you will be called again to replan. "
-    "Only use plan for genuinely multi-step requests; do not plan for single actions.\n"
+    "For complex, multi-intent requests, produce a multi-step plan in the 'plan' field. Each step has a unique "
+    "step_id, action, instruction, params, and depends_on (step IDs). The plan step is authoritative for its "
+    "action, instruction and params; set action_name consistently with the first ready step. Runtime owns task "
+    "IDs, status and attempts. Dependencies must exist and be acyclic. Use only available worker actions, "
+    "never finalize/clarify_request as a plan step, and respect workflow constraints. Leave paper_ids "
+    "unspecified when a preceding search must discover them; never invent future paper IDs. Optional "
+    "expected_output_schema can strengthen acceptance with required_fields, min_paper_count, min_report_words, "
+    "min_imported_or_skipped, min_answer_chars, min_evidence_count, require_citations or require_key_sections. "
+    "Set allow_skip only when an already-satisfied step can be skipped and its outputs still pass acceptance. "
+    "The runtime advances after matching task results pass acceptance. If state.execution_plan needs "
+    "replanning, return only the remaining steps: preserve completed step IDs as dependency targets, do not "
+    "repeat completed operations, and use the retained results and failure reason. Recovery is bounded; if no "
+    "viable remaining plan exists, finalize with an explicit stop_reason. Simple single-intent requests can "
+    "use a single action without a plan.\n"
     "Use finalize when the workspace is already useful, a requested action is complete, a clarification is required, or no action has enough marginal value.\n"
     "Do not repeat a search, answer, paper analysis, import, or writing action that already succeeded in the recent results unless the state clearly changed.\n"
     "When selecting a worker action, provide a concrete instruction that helps the worker act independently.\n"
@@ -97,16 +107,6 @@ ResearchSupervisorActionName = Literal[
     "analyze_paper_figures",
     "finalize",
 ]
-
-
-class PlanStep(BaseModel):
-    """A single step in a multi-step execution plan."""
-    step_id: int
-    action: str
-    instruction: str = ""
-    params: dict[str, Any] = Field(default_factory=dict)
-    depends_on: list[int] = Field(default_factory=list)
-    status: Literal["pending", "running", "done", "failed", "skipped"] = "pending"
 
 
 @dataclass(slots=True)
@@ -166,7 +166,8 @@ class ResearchSupervisorState:
     user_intent: dict[str, Any] = field(default_factory=dict)
     skill_context: str | None = None
     skill_candidates: list[dict[str, Any]] = field(default_factory=list)
-    execution_plan: list[dict[str, Any]] = field(default_factory=list)
+    execution_plan: ResearchPlan | dict[str, Any] | None = None
+    planning_llm_calls: int = 0
 
 
 @dataclass(slots=True)
@@ -225,7 +226,9 @@ class ResearchSupervisorAgent:
         evaluation_tool: ResearchEvaluationTool | None = None,
         llm_adapter: BaseLLMAdapter | None = None,
         soul_prompt_path: str | Path | None = None,
+        max_plan_replans: int = 2,
     ) -> None:
+        self.plan_coordinator = ResearchPlanCoordinator(self, max_replans=max_plan_replans)
         self.evaluation_tool = evaluation_tool or ResearchEvaluationTool()
         self.llm_adapter = llm_adapter
         self.soul_prompt_path = (
@@ -251,50 +254,58 @@ class ResearchSupervisorAgent:
         clarification_request: str | None = None,
         active_plan_id: str | None = None,
     ) -> ResearchSupervisorDecision:
-        if self.llm_adapter is None:
-            logger.info("ResearchSupervisorAgent has no LLM adapter; using deterministic fallback policy")
-            return self._llm_unavailable_decision(
-                state,
-                pending_messages=pending_messages,
-                agent_messages=agent_messages,
-                agent_results=agent_results,
-                completed_task_ids=completed_task_ids,
-                failed_task_ids=failed_task_ids,
-                replanned_failure_task_ids=replanned_failure_task_ids,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                clarification_request=clarification_request,
-                active_plan_id=active_plan_id,
-            )
-
-        try:
-            return await self._decide_with_llm(
-                state,
-                pending_messages=pending_messages,
-                agent_messages=agent_messages,
-                agent_results=agent_results,
-                completed_task_ids=completed_task_ids,
-                failed_task_ids=failed_task_ids,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                context_slice=context_slice,
-            )
-        except (LLMAdapterError, ValueError) as exc:
-            logger.warning("LLM manager decision failed; stopping instead of rule-based fallback: %s", exc)
-            return self._llm_unavailable_decision(
-                state,
-                pending_messages=pending_messages,
-                agent_messages=agent_messages,
-                agent_results=agent_results,
-                completed_task_ids=completed_task_ids,
-                failed_task_ids=failed_task_ids,
-                replanned_failure_task_ids=replanned_failure_task_ids,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                clarification_request=clarification_request,
-                active_plan_id=active_plan_id,
-                reason=f"LLM manager decision failed: {exc}",
-            )
+        # Work on a detached snapshot; the graph only changes via state_update.
+        plan = ResearchPlan.model_validate(state.execution_plan).model_copy(deep=True) if state.execution_plan else None
+        state = replace(state, execution_plan=plan, user_intent=dict(state.user_intent))
+        messages = list(agent_messages or [])
+        results = self._evaluate_results(results=list(agent_results or []), agent_messages=messages)
+        state = self._state_with_recent_result_signal(state, results=results)
+        common = dict(state=state, all_messages=messages, results=results,
+                      planner_runs=planner_runs, replan_count=replan_count, context_slice=context_slice)
+        previous_replans = plan.replan_attempts if plan else 0
+        decision = self.plan_coordinator.advance(**common)
+        if decision is None:
+            if self.llm_adapter is None:
+                if state.execution_plan is not None:
+                    decision = self.plan_coordinator.stop(**{**common, "replan_count": replan_count},
+                                                          reason="Planning model unavailable; unfinished plan retained.")
+                else:
+                    decision = self._llm_unavailable_decision(
+                        state, pending_messages=pending_messages, agent_messages=messages,
+                        agent_results=results, completed_task_ids=completed_task_ids,
+                        failed_task_ids=failed_task_ids, replanned_failure_task_ids=replanned_failure_task_ids,
+                        planner_runs=planner_runs, replan_count=replan_count,
+                        clarification_request=clarification_request, active_plan_id=active_plan_id,
+                    )
+            else:
+                try:
+                    decision = await self._decide_with_llm(
+                        state, pending_messages=pending_messages, agent_messages=messages,
+                        agent_results=results, completed_task_ids=completed_task_ids,
+                        failed_task_ids=failed_task_ids, planner_runs=planner_runs,
+                        replan_count=replan_count, context_slice=context_slice,
+                    )
+                except (LLMAdapterError, ValueError) as exc:
+                    logger.warning("LLM manager decision failed: %s", exc)
+                    if state.execution_plan is not None:
+                        decision = self.plan_coordinator.stop(
+                            **{**common, "replan_count": replan_count}, reason=f"Replanning failed: {exc}")
+                    else:
+                        decision = self._llm_unavailable_decision(
+                            state, pending_messages=pending_messages, agent_messages=messages,
+                            agent_results=results, completed_task_ids=completed_task_ids,
+                            failed_task_ids=failed_task_ids, replanned_failure_task_ids=replanned_failure_task_ids,
+                            planner_runs=planner_runs, replan_count=replan_count,
+                            clarification_request=clarification_request, active_plan_id=active_plan_id,
+                            reason=f"LLM manager decision failed: {exc}",
+                        )
+        update = decision.metadata.setdefault("state_update", {})
+        update["execution_plan"] = state.execution_plan.model_dump(mode="json") if state.execution_plan else None
+        update["planning_llm_calls"] = state.planning_llm_calls
+        if state.execution_plan is not None:
+            update["active_plan_id"] = state.execution_plan.plan_id
+            update["replan_count"] = replan_count + state.execution_plan.replan_attempts - previous_replans
+        return decision
 
     async def _decide_with_llm(
         self,
@@ -312,7 +323,6 @@ class ResearchSupervisorAgent:
         assert self.llm_adapter is not None
         all_messages = list(agent_messages or [])
         results = self._evaluate_results(results=list(agent_results or []), agent_messages=all_messages)
-        state = self._state_with_recent_result_signal(state, results=results)
         context_oversize = self._context_exceeds_budget(context_slice)
         if context_oversize:
             already_compressed = any(
@@ -334,17 +344,6 @@ class ResearchSupervisorAgent:
                     priority="high",
                 )
             context_slice = self._truncate_context_slice(context_slice)
-        # ── Plan-and-Execute: advance active plan ──
-        plan_decision = self._advance_plan(
-            state=state,
-            all_messages=all_messages,
-            results=results,
-            planner_runs=planner_runs,
-            replan_count=replan_count,
-            context_slice=context_slice,
-        )
-        if plan_decision is not None:
-            return plan_decision
         guardrail_hints: list[dict[str, Any]] = []
         intent_guardrail = self._intent_guardrail_decision(
             state=state,
@@ -403,6 +402,9 @@ class ResearchSupervisorAgent:
                 "guardrail_hints": guardrail_hints,
                 "skill_candidates": list(state.skill_candidates),
         }
+        state.planning_llm_calls += 1
+        if state.execution_plan is not None and state.execution_plan.status in {"needs_replan", "blocked"}:
+            state.execution_plan.replan_attempts += 1
         try:
             llm_output = await self.llm_adapter.generate_structured(
                 prompt=self._llm_prompt(),
@@ -410,6 +412,8 @@ class ResearchSupervisorAgent:
                 response_model=ResearchSupervisorLLMDecision,
             )
         except (LLMAdapterError, ValueError):
+            if state.execution_plan is not None:
+                raise
             for _gr in (intent_guardrail, constrained_decision, guardrail_decision):
                 if _gr is not None:
                     return _gr
@@ -498,105 +502,6 @@ class ResearchSupervisorAgent:
             )
         return None
 
-    def _advance_plan(
-        self,
-        *,
-        state: ResearchSupervisorState,
-        all_messages: list[AgentMessage],
-        results: list[AgentResultMessage],
-        planner_runs: int,
-        replan_count: int,
-        context_slice: ResearchContextSlice | None,
-    ) -> ResearchSupervisorDecision | None:
-        """If an execution plan is active, advance to the next pending step.
-
-        Returns ``None`` when there is no plan, the plan is finished, or the
-        previous step failed (which clears the plan so the LLM can replan).
-        """
-        plan = state.execution_plan
-        if not plan:
-            return None
-
-        # Mark the previously running step based on latest result
-        latest = results[-1] if results else None
-        for step in plan:
-            if step.get("status") == "running":
-                if latest and latest.status in ("succeeded", "skipped"):
-                    step["status"] = "done"
-                elif latest and latest.status == "failed":
-                    step["status"] = "failed"
-                    # Clear the plan so the LLM can replan remaining steps
-                    logger.info(
-                        "Plan step %s (%s) failed; clearing plan for replan",
-                        step.get("step_id"),
-                        step.get("action"),
-                    )
-                    state.execution_plan = []
-                    return None
-
-        # Find the next pending step
-        next_step: dict[str, Any] | None = None
-        for step in plan:
-            if step.get("status") == "pending":
-                # Check dependencies are satisfied
-                deps = step.get("depends_on", [])
-                all_deps_done = all(
-                    any(
-                        s.get("step_id") == dep_id and s.get("status") == "done"
-                        for s in plan
-                    )
-                    for dep_id in deps
-                )
-                if all_deps_done:
-                    next_step = step
-                    break
-
-        if next_step is None:
-            # All steps done or no eligible step — clear plan
-            state.execution_plan = []
-            return None
-
-        # Mark step as running
-        next_step["status"] = "running"
-        action_name = self._normalize_action_name(next_step.get("action", "finalize"))
-        blocked_reason = self._skill_policy_block_reason(action_name, state)
-        if blocked_reason:
-            state.execution_plan = []
-            return self._guardrail_finalize(
-                state,
-                all_messages=all_messages,
-                results=results,
-                planner_runs=planner_runs,
-                replan_count=replan_count,
-                reason=blocked_reason,
-            )
-        instruction = next_step.get("instruction", "")
-        payload = dict(next_step.get("params") or {})
-        step_index = next_step.get("step_id", 0)
-        total_steps = len(plan)
-        remaining = sum(1 for s in plan if s.get("status") == "pending")
-
-        return self._guardrail_worker_action(
-            action_name=action_name,
-            state=state,
-            all_messages=all_messages,
-            results=results,
-            planner_runs=planner_runs,
-            replan_count=replan_count,
-            thought=f"Executing plan step {step_index}/{total_steps}: {action_name}. {remaining} steps remaining.",
-            rationale=instruction or f"Plan step {step_index} requires {action_name}.",
-            phase="act",
-            estimated_gain=0.8,
-            estimated_cost=0.15,
-            payload_overrides={
-                "trigger": "plan_execution",
-                "plan_step_id": step_index,
-                "plan_total_steps": total_steps,
-                **payload,
-            },
-            priority="high",
-        )
-
     def _workflow_constraint_decision(
         self,
         *,
@@ -657,6 +562,11 @@ class ResearchSupervisorAgent:
         replan_count: int,
         context_slice: ResearchContextSlice | None,
     ) -> ResearchSupervisorDecision:
+        if llm_output.plan or (state.execution_plan is not None and state.execution_plan.status in {"needs_replan", "blocked"}):
+            return self.plan_coordinator.accept(
+                llm_output=llm_output, state=state, all_messages=all_messages, results=results,
+                planner_runs=planner_runs, replan_count=replan_count, context_slice=context_slice,
+            )
         action_name = self._normalize_action_name(llm_output.action_name)
         thought = llm_output.thought.strip() or f"Manager selected {action_name} as the next best step."
         rationale = llm_output.rationale.strip() or "The manager chose the worker that can make the most progress."
@@ -669,18 +579,6 @@ class ResearchSupervisorAgent:
                 planner_runs=planner_runs + 1,
                 replan_count=replan_count,
                 reason=blocked_reason,
-            )
-        # ── Plan-and-Execute: store multi-step plan ──
-        execution_plan: list[dict[str, Any]] = []
-        if len(llm_output.plan) > 1:
-            execution_plan = [step.model_dump() for step in llm_output.plan]
-            # Mark the first step as running (it's the action_name the LLM chose)
-            if execution_plan:
-                execution_plan[0]["status"] = "running"
-            logger.info(
-                "LLM generated %d-step plan: %s",
-                len(execution_plan),
-                " → ".join(s.get("action", "?") for s in execution_plan),
             )
         metadata: dict[str, Any] = {
             "decision_source": "llm",
@@ -701,7 +599,6 @@ class ResearchSupervisorAgent:
                 "clarification_request": None,
                 "active_plan_id": None,
                 "new_topic_detected": state.new_topic_detected,
-                "execution_plan": execution_plan,
             },
         }
         if action_name == "finalize":
@@ -1919,7 +1816,7 @@ class ResearchSupervisorAgent:
                 for i, p in enumerate(list(state.candidate_papers)[:10])
             ]
         if state.execution_plan:
-            snapshot["execution_plan"] = state.execution_plan
+            snapshot["execution_plan"] = state.execution_plan.model_dump(mode="json")
         return snapshot
 
     def _message_snapshot(self, message: AgentMessage) -> dict[str, Any]:
@@ -3096,10 +2993,11 @@ class ResearchSupervisorAgent:
         message_by_task_id = {message.task_id: message for message in agent_messages}
         evaluated: list[AgentResultMessage] = []
         for result in results:
-            if result.evaluation is not None:
+            source_message = message_by_task_id.get(result.task_id)
+            is_plan_step = source_message is not None and source_message.metadata.get("decision_source") == "plan_executor"
+            if result.evaluation is not None and not is_plan_step:
                 evaluated.append(result)
                 continue
-            source_message = message_by_task_id.get(result.task_id)
             evaluation = self._evaluate_result(
                 result=result,
                 task_instruction=source_message.instruction if source_message is not None else result.instruction,
@@ -3109,6 +3007,12 @@ class ResearchSupervisorAgent:
                     else result.expected_output_schema
                 ),
             )
+            if result.evaluation is not None and not result.evaluation.passed:
+                evaluation = evaluation.model_copy(update={
+                    "passed": False,
+                    "score": min(evaluation.score, result.evaluation.score),
+                    "issues": list(dict.fromkeys([*evaluation.issues, *result.evaluation.issues])),
+                })
             evaluated.append(result.model_copy(update={"evaluation": evaluation}))
         return evaluated
 

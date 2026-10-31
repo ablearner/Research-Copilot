@@ -19,6 +19,8 @@ from agents.research_supervisor_agent import (
 )
 from agents.research_writer_agent import ResearchWriterAgent
 from domain.schemas.agent_message import AgentMessage, AgentResultMessage
+from domain.schemas.research_plan import ResearchPlan
+from runtime.research.plan_executor import advance_plan
 from domain.schemas.research import (
     PaperCandidate,
     ResearchAdvancedStrategy,
@@ -591,8 +593,9 @@ class ResearchRuntimeBase:
             trace=state.get("trace", []),
             user_intent=user_intent,
             session_context=session_ctx,
-            execution_plan=state.get("execution_plan", []),
+            execution_plan=state.get("execution_plan"),
         )
+        supervisor_state.planning_llm_calls = int(state.get("planning_llm_calls", 0) or 0)
         decision = await self.manager_agent.decide_next_action_async(
             supervisor_state,
             pending_messages=state.get("pending_agent_messages", []),
@@ -618,6 +621,8 @@ class ResearchRuntimeBase:
         state: ResearchAgentGraphState,
     ) -> ResearchSupervisorDecision | None:
         """Return a pre-built decision for trivial messages, or None to fall through to LLM."""
+        if state.get("execution_plan") is not None:
+            return None
         route_mode = session_ctx.get("route_mode", "")
         intent_name = str(getattr(user_intent, "intent", "") or "").strip()
         has_task = context.task is not None
@@ -805,6 +810,8 @@ class ResearchRuntimeBase:
         )
 
     def _should_force_finalize(self, state: ResearchAgentGraphState) -> bool:
+        if state.get("execution_plan") is not None:
+            return bool(state.get("exhausted")) or int(state.get("stagnant_decision_count", 0) or 0) >= 2
         context = state["context"]
         request = context.request
         latest_result = state.get("agent_results", [])[-1] if state.get("agent_results") else None
@@ -853,7 +860,7 @@ class ResearchRuntimeBase:
         reason = "Research loop reached a natural stopping point."
         if stagnant >= 2:
             reason = "Research loop stopped because workspace progress stalled across consecutive decisions."
-        elif repeated >= 2:
+        elif repeated >= 2 and state.get("execution_plan") is None:
             reason = "Research loop stopped because the manager repeated the same action without enough new progress."
         elif state.get("exhausted"):
             reason = f"Research loop stopped after reaching max_steps={self.max_steps}."
@@ -917,6 +924,7 @@ class ResearchRuntimeBase:
                 agent_messages=update.get("agent_messages", state.get("agent_messages", [])),
                 agent_results=update.get("agent_results", state.get("agent_results", [])),
                 pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
+                execution_plan=update.get("execution_plan", state.get("execution_plan")),
             )
             self._persist_execution_context(state["context"])
             return update  # type: ignore[return-value]
@@ -1175,6 +1183,7 @@ class ResearchRuntimeBase:
             agent_messages=state.get("agent_messages", []),
             agent_results=update.get("agent_results", state.get("agent_results", [])),
             pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
+            execution_plan=update.get("execution_plan", state.get("execution_plan")),
         )
         return update
 
@@ -1184,6 +1193,31 @@ class ResearchRuntimeBase:
 
     async def finalize_node(self, state: ResearchAgentGraphState) -> ResearchAgentGraphState:
         decision = state.get("current_decision")
+        plan_update: dict[str, Any] = {}
+        if state.get("execution_plan") is not None:
+            evaluated = self.manager_agent._evaluate_results(
+                results=state.get("agent_results", []), agent_messages=state.get("agent_messages", []),
+            )
+            plan = advance_plan(ResearchPlan.model_validate(state["execution_plan"]), evaluated)
+            if plan.status != "completed":
+                reason = (self._forced_finalize_decision(state).stop_reason if state.get("exhausted")
+                          or int(state.get("stagnant_decision_count", 0) or 0) >= 2
+                          else (decision.stop_reason if decision else None))
+                plan.reason = "; ".join(dict.fromkeys(filter(None, [plan.reason, reason]))) or "Execution stopped before all plan steps completed."
+                plan.status = "failed" if plan.status in {"failed", "needs_replan"} else "blocked"
+                warnings = state["context"].warnings
+                if warnings is None:
+                    warnings = state["context"].warnings = []
+                if plan.reason not in warnings:
+                    warnings.append(plan.reason)
+            plan_update = {"execution_plan": plan.model_dump(mode="json"), "agent_results": evaluated}
+            if plan.status == "completed":
+                plan_update["exhausted"] = False
+            if decision is None or decision.action_name not in {"finalize", "clarify_request"}:
+                decision = self._forced_finalize_decision({**state, **plan_update})
+                if plan.status == "completed":
+                    decision.stop_reason = "All execution plan steps completed."
+                    decision.rationale = decision.stop_reason
         if decision is None:
             return {}
         _update_runtime_progress(
@@ -1196,7 +1230,7 @@ class ResearchRuntimeBase:
         )
         trace = list(state.get("trace", []))
         worker_agent = self._worker_agent_name(decision)
-        active_message = self._active_message(decision)
+        active_message = None if plan_update else self._active_message(decision)
         trace.append(
             ResearchAgentTraceStep(
                 step_index=state.get("current_step_index", 0),
@@ -1242,11 +1276,13 @@ class ResearchRuntimeBase:
                 },
             ),
         }
+        update.update(plan_update)
         self._rebuild_execution_context(
             context=state["context"],
             agent_messages=state.get("agent_messages", []),
             agent_results=update.get("agent_results", state.get("agent_results", [])),
             pending_messages=update.get("pending_agent_messages", state.get("pending_agent_messages", [])),
+            execution_plan=update.get("execution_plan", state.get("execution_plan")),
         )
         self._persist_execution_context(state["context"])
         return update
@@ -1264,6 +1300,7 @@ class ResearchRuntimeBase:
         agent_messages: list[AgentMessage],
         agent_results: list[AgentResultMessage],
         pending_messages: list[AgentMessage],
+        execution_plan: dict[str, Any] | None = None,
     ) -> None:
         """Rebuild in-memory execution context (task plan + slices). No I/O."""
         execution_context = context.execution_context
@@ -1300,6 +1337,26 @@ class ResearchRuntimeBase:
                     metadata=dict(message.metadata),
                 )
             )
+
+        if execution_plan is not None:
+            plan = ResearchPlan.model_validate(execution_plan)
+            statuses = {"pending": "planned", "running": "running", "done": "succeeded",
+                        "failed": "failed", "skipped": "skipped"}
+            message_by_task = {message.task_id: message for message in agent_messages}
+            task_plan = []
+            for step in plan.steps:
+                message = message_by_task.get(step.task_id)
+                task_plan.append(TaskStep(
+                    task_id=f"{plan.plan_id}:{step.step_id}",
+                    assigned_to=message.agent_to if message else step.action,
+                    instruction=step.instruction, task_type=step.action,
+                    depends_on=[f"{plan.plan_id}:{dependency}" for dependency in step.depends_on],
+                    expected_output_schema=dict(message.expected_output_schema if message else step.expected_output_schema),
+                    status=statuses[step.status],
+                    metadata={"plan_id": plan.plan_id, "step_id": step.step_id,
+                              "task_id": step.task_id, "plan_step_status": step.status,
+                              "plan_revision": plan.revision},
+                ))
 
         research_context.current_task_plan = task_plan
         research_context.sub_manager_states = self._build_sub_manager_states(task_plan)
@@ -1573,7 +1630,7 @@ class ResearchRuntimeBase:
         trace: list[ResearchAgentTraceStep] | None = None,
         user_intent: ResearchUserIntentResult | None = None,
         session_context: dict[str, Any] | None = None,
-        execution_plan: list[dict[str, Any]] | None = None,
+        execution_plan: dict[str, Any] | None = None,
     ) -> ResearchSupervisorState:
         task = context.task
         papers = context.papers
@@ -1756,7 +1813,7 @@ class ResearchRuntimeBase:
                 if context.skill_selection is not None
                 else []
             ),
-            execution_plan=list(execution_plan or []),
+            execution_plan=ResearchPlan.model_validate(execution_plan) if execution_plan is not None else None,
         )
 
     def _topic_continuity_score(self, current: str | None, previous: str | None) -> float:
@@ -1813,6 +1870,9 @@ class ResearchRuntimeBase:
         replan_count: int,
         clarification_request: str | None,
         active_plan_id: str | None,
+        execution_plan: dict[str, Any] | None = None,
+        planning_llm_calls: int = 0,
+        supervisor_decision_count: int = 0,
     ) -> ResearchAgentRunResponse:
         return self.result_aggregator.build_response(
             request=request,
@@ -1826,6 +1886,9 @@ class ResearchRuntimeBase:
             replan_count=replan_count,
             clarification_request=clarification_request,
             active_plan_id=active_plan_id,
+            execution_plan=execution_plan,
+            planning_llm_calls=planning_llm_calls,
+            supervisor_decision_count=supervisor_decision_count,
         )
 
     def _log_internal_runtime_state(
@@ -2308,7 +2371,9 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             "replan_count": 0,
             "clarification_request": None,
             "active_plan_id": None,
-            "execution_plan": [],
+            "execution_plan": None,
+            "planning_llm_calls": 0,
+            "supervisor_decision_count": 0,
             "progress_signature": "",
             "stagnant_decision_count": 0,
             "repeated_action_count": 0,
@@ -2333,6 +2398,9 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             replan_count=int(graph_state.get("replan_count", 0) or 0),
             clarification_request=graph_state.get("clarification_request"),
             active_plan_id=graph_state.get("active_plan_id"),
+            execution_plan=graph_state.get("execution_plan"),
+            planning_llm_calls=int(graph_state.get("planning_llm_calls", 0) or 0),
+            supervisor_decision_count=int(graph_state.get("supervisor_decision_count", 0) or 0),
         )
 
     async def _heartbeat_runtime_progress(self, context: ResearchAgentToolContext) -> None:
@@ -2460,6 +2528,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
         current_step_index = int(state.get("current_step_index", 0) or 0)
         if current_step_index >= self.max_steps:
             return {"exhausted": True}
+        decision_count = int(state.get("supervisor_decision_count", 0) or 0) + 1
         if self._should_force_finalize(state):
             decision = self._forced_finalize_decision(state)
             update = self._on_decision(state, current_step_index + 1, decision)
@@ -2467,6 +2536,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
                 "current_step_index": current_step_index + 1,
                 "current_decision": decision,
                 **update,
+                "supervisor_decision_count": decision_count,
             }
         step_index = current_step_index + 1
         decision = await self._decide_next_action(state)
@@ -2475,6 +2545,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             "current_step_index": step_index,
             "current_decision": decision,
             **update,
+            "supervisor_decision_count": decision_count,
         }
 
     async def literature_scout_node(self, state: ResearchAgentGraphState):
