@@ -129,7 +129,7 @@ async def test_legacy_writer_preserves_language_citations_and_selected_analysis(
             seen.update(kwargs)
             return QAResponse(
                 question=kwargs["question"], answer="Insufficient evidence.",
-                evidence_bundle=EvidenceBundle(), metadata={},
+                evidence_bundle=EvidenceBundle(), metadata=dict(kwargs["metadata"]),
             )
 
     class PaperAnalysis:
@@ -165,11 +165,19 @@ async def test_legacy_writer_preserves_language_citations_and_selected_analysis(
     assert response.answer == "该论文的方法值得阅读。"
     assert seen["preference_context"]["answer_language"] == "zh-CN"
     assert seen["metadata"]["writer_agent"] == "ResearchWriterAgent"
+    assert seen["metadata"]["agent_architecture"] == "main_agents_only"
+    assert response.metadata["agent_architecture"] == "main_agents_only"
     assert response.metadata["citations"][0]["label"] == "P1"
     assert response.metadata["citations"][0]["section"] == "Methods"
     assert response.metadata["selected_paper_analysis"]["answer"] == response.answer
     assert response.metadata["recommended_paper_ids"] == ["paper"]
     assert "当前结论仍需补充更多直接证据" in response.metadata["extended_analysis"]
+
+    canonical = await ResearchCollectionAnswerCapability(paper_analysis_tool=PaperAnalysis()).answer_collection_question(
+        graph_runtime=object(), state=state, primary_agents=["ResearchQAAgent"]
+    )
+    assert seen["metadata"]["agent_architecture"] == "supervisor_to_research_qa_agent"
+    assert canonical.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
 
 
 def test_legacy_decision_delegates_to_knowledge_capability(monkeypatch):
@@ -180,3 +188,18 @@ def test_legacy_decision_delegates_to_knowledge_capability(monkeypatch):
     )
     result = ResearchKnowledgeAgent().decide(SimpleNamespace(queries=[]))
     assert result == ("finish", "capability decision")
+
+
+def test_legacy_sync_query_adapters_use_public_capability_methods():
+    state = SimpleNamespace(
+        question="How does planning work?", task=SimpleNamespace(topic="UAV"),
+        report=None, papers=[SimpleNamespace(title="UAV Survey", summary="method survey", abstract="")],
+        request=SimpleNamespace(reasoning_style="react"), execution_context=None, queries=[],
+    )
+    capability = ResearchCollectionKnowledgeCapability()
+    agent = ResearchKnowledgeAgent()
+
+    assert agent.plan(state) == capability.plan_collection_queries_heuristic(
+        state, max_queries=3, include_cross_lingual=False
+    )
+    assert agent.propose_queries(state) == capability.propose_collection_queries_heuristic(state)

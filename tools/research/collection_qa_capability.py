@@ -211,6 +211,13 @@ class ResearchCollectionKnowledgeCapability:
                 )
         return hits
 
+    def plan_collection_queries_heuristic(
+        self, state: Any, *, max_queries: int = 5, include_cross_lingual: bool = True
+    ) -> list[str]:
+        return self._heuristic_plan_collection_queries(
+            state, max_queries=max_queries, include_cross_lingual=include_cross_lingual
+        )
+
     def _heuristic_plan_collection_queries(
         self, state: Any, *, max_queries: int = 5, include_cross_lingual: bool = True
     ) -> list[str]:
@@ -330,6 +337,9 @@ class ResearchCollectionKnowledgeCapability:
             max_queries=2,
         )
         return self._normalize_queries([*reasoning_plan["queries"], *refined], limit=2)
+
+    def propose_collection_queries_heuristic(self, state: Any) -> list[str]:
+        return self._heuristic_propose_collection_queries(state)
 
     def _heuristic_propose_collection_queries(self, state: Any) -> list[str]:
         focus_terms: list[str] = []
@@ -556,7 +566,7 @@ class ResearchCollectionAnswerCapability:
             "research_topic": state.task.topic,
             "qa_mode": "research_collection",
             "autonomy_mode": "lead_agent_loop",
-            "agent_architecture": "supervisor_to_research_qa_agent",
+            "agent_architecture": "main_agents_only" if writer_agent else "supervisor_to_research_qa_agent",
             "primary_agents": primary_agents,
             "answer_capability": self.__class__.__name__,
             **({"writer_agent": writer_agent} if writer_agent else {}),
@@ -649,6 +659,8 @@ class ResearchCollectionAnswerCapability:
                 "retrieval_result": retrieval_result,
                 "metadata": {
                     **qa.metadata,
+                    "agent_architecture": answer_metadata["agent_architecture"],
+                    **({"writer_agent": writer_agent} if writer_agent else {}),
                     "answer_format": "direct_research_collection",
                     "original_question": original_question,
                     "resolved_question": resolved_question,

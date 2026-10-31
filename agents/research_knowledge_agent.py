@@ -281,7 +281,7 @@ class ResearchKnowledgeAgent:
         )
 
     def plan(self, state: Any) -> list[str]:
-        return self._collection_qa._heuristic_plan_collection_queries(
+        return self._collection_qa.plan_collection_queries_heuristic(
             state, max_queries=3, include_cross_lingual=False
         )
 
@@ -308,4 +308,4 @@ class ResearchKnowledgeAgent:
         return await self._collection_qa.propose_collection_queries(state)
 
     def propose_queries(self, state: Any) -> list[str]:
-        return self._collection_qa._heuristic_propose_collection_queries(state)
+        return self._collection_qa.propose_collection_queries_heuristic(state)
