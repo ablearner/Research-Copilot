@@ -303,3 +303,81 @@ async def test_loaded_qa_never_reads_application_storage_and_preserves_scope(tmp
     assert scoped.research_context.selected_papers == ['paper-1']
     assert 'Latest finding' in scoped.research_context.known_conclusions
     assert asdict(loaded) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('needs_recovery', [False, True])
+async def test_qa_action_commits_current_snapshot_for_next_action(tmp_path, needs_recovery):
+    from unittest.mock import AsyncMock
+    from agents.research_qa_agent import ResearchQAAgent
+    from agents.research_supervisor_agent import ResearchSupervisorDecision
+    from adapters.storage.research_report_service import ResearchReportService
+    from services.research.literature_research_service import LiteratureResearchService
+    from domain.schemas.agent_message import AgentMessage
+    from domain.schemas.research import PaperCandidate, ResearchReport, ResearchWorkspaceState
+    from domain.schemas.api import QAResponse
+    from domain.schemas.evidence import Evidence, EvidenceBundle
+    from rag_runtime.memory import GraphSessionMemory
+
+    store = ResearchReportService(tmp_path)
+    task = ResearchTask(task_id='task', topic='topic', created_at='now', updated_at='now', report_id='report', imported_document_ids=['doc'], workspace=ResearchWorkspaceState(status_summary='Before QA'))
+    report = ResearchReport(report_id='report', task_id='task', topic='topic', generated_at='now', markdown='Before report', workspace=task.workspace)
+    paper = PaperCandidate(paper_id='paper', title='Paper', source='arxiv', ingest_status='ingested', metadata={'document_id': 'doc'})
+    store.save_task(task)
+    store.save_report(report)
+    store.save_papers('task', [paper])
+    svc = LiteratureResearchService(report_service=store, paper_search_service=SimpleNamespace(llm_adapter=None), paper_import_service=object())
+    original_get_task = svc.get_task
+    svc.get_task = lambda task_id: original_get_task(task_id).model_copy(update={'warnings': ['current response warning']})
+    ctx = context(task_response=svc.get_task('task'))
+    ctx.research_service = svc
+    ctx.graph_runtime.session_memory = GraphSessionMemory()
+    ctx.request.message = 'Explain the findings'
+    ctx.request.selected_paper_ids = ['paper']
+    async def answer(**kwargs):
+        # Figure tools may refresh derived paper cache before the workflow commit.
+        store.save_papers('task', [paper.model_copy(update={'metadata': {**paper.metadata, 'paper_figure_cache': {'fresh': True}}})])
+        return QAResponse(
+            question=ctx.request.message,
+            answer='Evidence is insufficient' if needs_recovery else 'After QA supported finding',
+            confidence=0.1 if needs_recovery else 0.9,
+            evidence_bundle=EvidenceBundle(evidences=[] if needs_recovery else [Evidence(id='evidence', source_type='document', document_id='doc', snippet='Supporting finding')]),
+        )
+    svc.research_collection_qa_capability = SimpleNamespace(run_collection_qa=AsyncMock(side_effect=answer))
+    svc.save_task_state = Mock(wraps=svc.save_task_state)
+    store.save_report = Mock(wraps=store.save_report)
+    store.save_papers = Mock(wraps=store.save_papers)
+    agent = ResearchQAAgent()
+    results = []
+    async def execute(**kwargs):
+        result = await agent.run_action(kwargs['context'], kwargs['decision'])
+        assert store.load_task('task').workspace.status_summary == 'Before QA'
+        assert ctx.workspace.status_summary == 'Before QA'
+        results.append(result)
+        return result
+    runtime = object.__new__(ResearchSupervisorGraphRuntime)
+    runtime._execute_agent_run_action = execute
+    runtime._message_result_update = Mock(return_value={})
+    runtime._rebuild_execution_context = Mock()
+    message = AgentMessage(task_id='qa', agent_from='ResearchSupervisorAgent', agent_to='ResearchQAAgent', task_type='answer_question', payload={'question': ctx.request.message, 'qa_route': 'collection_qa', 'routing_authority': 'supervisor_llm'})
+    decision = ResearchSupervisorDecision(action_name='answer_question', thought='Answer', rationale='Question', metadata={'active_message': message})
+    await runtime._run_action_node({'context': ctx, 'current_decision': decision}, 'answer_question')
+
+    committed = svc.get_task('task')
+    assert results[0].status == ('skipped' if needs_recovery else 'succeeded')
+    assert committed.task.todo_items
+    assert committed.report.markdown != report.markdown
+    assert ctx.task == committed.task
+    assert ctx.report == committed.report
+    assert ctx.workspace == committed.task.workspace
+    assert ctx.task_response.warnings == ['current response warning']
+    assert ctx.papers[0].metadata['paper_figure_cache'] == {'fresh': True}
+    assert ctx.execution_context.task_context['workspace_summary'] == committed.task.workspace.status_summary
+    assert ctx.execution_context.task_context['report_highlights'] == committed.report.highlights[:3]
+    assert ctx.execution_context.task_context['report_gaps'] == committed.report.gaps[:2]
+    next_action = persist_workspace_results(ctx, compression_summary={'summary_count': 1}, persist=False)
+    assert next_action.updated_task.todo_items == committed.task.todo_items
+    assert next_action.updated_report.markdown == committed.report.markdown
+    assert svc.save_task_state.call_count == 1
+    assert store.save_report.call_count == 1
+    assert store.save_papers.call_count == 1  # only the external cache effect

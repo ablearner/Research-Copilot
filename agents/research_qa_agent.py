@@ -145,19 +145,25 @@ class ResearchQAAgent:
                 params=pp["promote_conclusion"],
             ))
         refreshed_task_response = context.research_service.get_task(task_response.task.task_id)
+        # Keep newly discovered paper caches and response metadata, but publish the
+        # proposed QA artifacts rather than the pre-commit task/report snapshot.
+        proposed_task_response = refreshed_task_response.model_copy(update={
+            "task": exec_result.updated_task if exec_result.updated_task is not None else refreshed_task_response.task,
+            "report": exec_result.updated_report if exec_result.updated_report is not None else refreshed_task_response.report,
+        })
         delta = ResearchStateDelta(
             task=exec_result.updated_task,
             report=exec_result.updated_report,
             qa_result=qa_result,
-            task_response=refreshed_task_response,
+            task_response=proposed_task_response,
             save_task_conversation_id=request.conversation_id,
             rebuild_execution_context=True,
             rebuild_execution_context_params={
                 "graph_runtime": context.graph_runtime,
                 "conversation_id": request.conversation_id,
-                "task": refreshed_task_response.task if refreshed_task_response else None,
-                "report": refreshed_task_response.report if refreshed_task_response else None,
-                "papers": refreshed_task_response.papers if refreshed_task_response else None,
+                "task": proposed_task_response.task,
+                "report": proposed_task_response.report,
+                "papers": proposed_task_response.papers,
                 "document_ids": list(qa_result.document_ids),
                 "selected_paper_ids": list(qa_result.paper_ids),
                 "skill_name": request.skill_name,

@@ -170,7 +170,7 @@ supervisor response back to their legacy response models.
 
 Use `python -m pytest -q -p no:cacheprovider` for offline regression checks,
 `python -m ruff check .` for Python lint, and
-`npm run build` in `frontend/` for TypeScript and the web build. The installed
+`npm run build` in `web/` for TypeScript and the web build. The installed
 wheel import smoke is described in the Task 5 report under `.superpowers/sdd/`.
 The runtime state commit boundary does not roll back downloads, indexing,
 progress events, Zotero writes, or derived figure-cache writes. The public
