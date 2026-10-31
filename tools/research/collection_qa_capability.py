@@ -51,12 +51,59 @@ def _tokenize_research_text(text: str) -> list[str]:
     return tokens
 
 
+def _is_insufficient_research_answer(*, answer: str, confidence: float, evidence_count: int) -> bool:
+    lowered = answer.lower()
+    uncertainty_signals = ("证据不足", "无法确认", "不能确认", "信息不足", "insufficient evidence", "not enough evidence")
+    if any(signal in lowered for signal in uncertainty_signals):
+        return True
+    return evidence_count == 0 or confidence < 0.35
+
+
 class ResearchCollectionKnowledgeCapability:
     def __init__(self, *, llm_adapter: Any | None = None) -> None:
         self.llm_adapter = llm_adapter
 
-    async def plan_collection_queries(self, state: Any) -> list[str]:
-        planned = self._heuristic_plan_collection_queries(state)
+    def decide(self, state: Any) -> tuple[str, str]:
+        if not state.queries:
+            return "plan_queries", "A collection-aware query plan is needed before evidence gathering."
+        if state.document_ids and state.pending_query() is not None:
+            return "retrieve_collection_evidence", "There are pending collection retrieval queries that have not run yet."
+        if state.document_ids and not state.summary_checked:
+            return "retrieve_graph_summary", "Graph summary evidence can still strengthen collection-level coverage."
+        if not state.manifest_built:
+            return "build_collection_manifest", "The assistant should synthesize paper pool and report metadata into collection evidence."
+        if state.qa is None and self._should_refine_before_answer(state):
+            return "refine_query", "Evidence is still thin, so the knowledge agent should broaden the collection query."
+        if state.qa is None:
+            return "answer_question", "Enough collection evidence is available to produce a grounded answer."
+        if self._should_refine_after_answer(state):
+            return "refine_query", "The draft answer is still under-supported, so one more retrieval pass is justified."
+        return "finish", "The collection QA loop has completed evidence gathering, synthesis, and grounded answering."
+
+
+    def _should_refine_before_answer(self, state: Any) -> bool:
+        if state.refinement_used or not state.document_ids:
+            return False
+        return len(state.all_hits()) < 2
+
+
+    def _should_refine_after_answer(self, state: Any) -> bool:
+        if state.refinement_used or not state.document_ids or state.qa is None:
+            return False
+        confidence = state.qa.confidence if state.qa.confidence is not None else 0.0
+        return _is_insufficient_research_answer(
+            answer=state.qa.answer,
+            confidence=confidence,
+            evidence_count=len(state.evidence_bundle.evidences),
+        )
+
+
+    async def plan_collection_queries(
+        self, state: Any, *, max_queries: int = 5, include_cross_lingual: bool = True
+    ) -> list[str]:
+        planned = self._heuristic_plan_collection_queries(
+            state, max_queries=max_queries, include_cross_lingual=include_cross_lingual
+        )
         if not self._should_use_plan_and_execute(state) or self.llm_adapter is None:
             return planned
         reasoning_plan = await self._plan_queries(
@@ -68,9 +115,9 @@ class ResearchCollectionKnowledgeCapability:
                 "paper_titles": [paper.title for paper in state.papers[:5]],
                 "memory_hints": self._memory_hints(state),
             },
-            max_queries=5,
+            max_queries=max_queries,
         )
-        return self._normalize_queries([*reasoning_plan["queries"], *planned], limit=5)
+        return self._normalize_queries([*reasoning_plan["queries"], *planned], limit=max_queries)
 
     async def retrieve_collection_evidence(self, *, graph_runtime: Any, state: Any, query: str) -> list[RetrievalHit]:
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
@@ -112,11 +159,13 @@ class ResearchCollectionKnowledgeCapability:
         )
         return list(getattr(summary_output, "hits", []) or [])
 
-    def build_collection_manifest(self, state: Any) -> list[RetrievalHit]:
+    def build_collection_manifest(
+        self, state: Any, *, knowledge_agent: str | None = None
+    ) -> list[RetrievalHit]:
         hits: list[RetrievalHit] = []
         top_papers = state.papers[: max(3, min(len(state.papers), state.top_k))]
         for index, paper in enumerate(top_papers, start=1):
-            hits.append(self._paper_manifest_hit(index=index, paper=paper))
+            hits.append(self._paper_manifest_hit(index=index, paper=paper, knowledge_agent=knowledge_agent))
         if state.report and self._should_include_report_summary_evidence(state):
             for index, highlight in enumerate(state.report.highlights[:3], start=1):
                 hits.append(
@@ -135,6 +184,7 @@ class ResearchCollectionKnowledgeCapability:
                             "llm_generated_summary": True,
                             "report_id": state.report.report_id,
                             "knowledge_capability": self.__class__.__name__,
+                            **({"knowledge_agent": knowledge_agent} if knowledge_agent else {}),
                         },
                     )
                 )
@@ -155,12 +205,15 @@ class ResearchCollectionKnowledgeCapability:
                             "llm_generated_summary": True,
                             "report_id": state.report.report_id,
                             "knowledge_capability": self.__class__.__name__,
+                            **({"knowledge_agent": knowledge_agent} if knowledge_agent else {}),
                         },
                     )
                 )
         return hits
 
-    def _heuristic_plan_collection_queries(self, state: Any) -> list[str]:
+    def _heuristic_plan_collection_queries(
+        self, state: Any, *, max_queries: int = 5, include_cross_lingual: bool = True
+    ) -> list[str]:
         candidates = [state.question]
         topic = state.task.topic.strip()
         if topic and topic not in state.question:
@@ -171,13 +224,14 @@ class ResearchCollectionKnowledgeCapability:
         memory_focus = str(memory_hints.get("current_task_intent") or "").strip()
         if memory_focus and memory_focus not in state.question:
             candidates.append(f"{state.question} {memory_focus}")
-        candidates.extend(self._cross_lingual_queries(state))
+        if include_cross_lingual:
+            candidates.extend(self._cross_lingual_queries(state))
         planned: list[str] = []
         for item in candidates:
             normalized = " ".join(item.strip().split())
             if normalized and normalized not in planned:
                 planned.append(normalized)
-        return planned[:5]
+        return planned[:max_queries]
 
     def _cross_lingual_queries(self, state: Any) -> list[str]:
         question = state.question
@@ -259,6 +313,47 @@ class ResearchCollectionKnowledgeCapability:
             queries.append(' '.join(en_keywords[:4]))
         return queries
 
+    async def propose_collection_queries(self, state: Any) -> list[str]:
+        refined = self._heuristic_propose_collection_queries(state)
+        if not self._should_use_plan_and_execute(state) or self.llm_adapter is None:
+            return refined
+        reasoning_plan = await self._plan_queries(
+            objective=f"Broaden evidence coverage for research QA: {state.question}",
+            seed_queries=refined or list(state.queries),
+            context={
+                "research_topic": state.task.topic,
+                "existing_queries": list(state.queries),
+                "report_gaps": state.report.gaps[:2] if state.report else [],
+                "paper_titles": [paper.title for paper in state.papers[:5]],
+                "memory_hints": self._memory_hints(state),
+            },
+            max_queries=2,
+        )
+        return self._normalize_queries([*reasoning_plan["queries"], *refined], limit=2)
+
+    def _heuristic_propose_collection_queries(self, state: Any) -> list[str]:
+        focus_terms: list[str] = []
+        for paper in state.papers[:5]:
+            focus_terms.extend(_tokenize_research_text(f"{paper.title} {paper.summary or paper.abstract}")[:6])
+        if state.report:
+            focus_terms.extend(_tokenize_research_text(" ".join(state.report.highlights[:3]))[:6])
+        for value in self._memory_hints(state).values():
+            if isinstance(value, str):
+                focus_terms.extend(_tokenize_research_text(value)[:4])
+        dedup_terms = list(dict.fromkeys(focus_terms))
+        candidates = [
+            f"{state.task.topic} {state.question}",
+            f"{state.question} evidence summary",
+            f"{state.task.topic} {' '.join(dedup_terms[:4])}".strip(),
+        ]
+        refined: list[str] = []
+        existing = set(state.queries)
+        for query in candidates:
+            normalized = " ".join(query.strip().split())
+            if normalized and normalized not in existing and normalized not in refined:
+                refined.append(normalized)
+        return refined[:2]
+
     def _scope_filters(self, state: Any) -> dict[str, Any]:
         metadata = dict(getattr(state.request, "metadata", {}) or {})
         return {
@@ -276,7 +371,9 @@ class ResearchCollectionKnowledgeCapability:
             return False
         return not bool(getattr(state, "retrieval_hits", []) or getattr(state, "summary_hits", []))
 
-    def _paper_manifest_hit(self, *, index: int, paper: PaperCandidate) -> RetrievalHit:
+    def _paper_manifest_hit(
+        self, *, index: int, paper: PaperCandidate, knowledge_agent: str | None = None
+    ) -> RetrievalHit:
         snippet_parts = [f"候选论文 #{index}: {paper.title}", f"source={paper.source}"]
         if paper.authors:
             snippet_parts.append(f"authors={', '.join(paper.authors[:4])}")
@@ -310,6 +407,7 @@ class ResearchCollectionKnowledgeCapability:
                 "title": paper.title,
                 "year": paper.year,
                 "knowledge_capability": self.__class__.__name__,
+                **({"knowledge_agent": knowledge_agent} if knowledge_agent else {}),
             },
         )
 
@@ -422,6 +520,7 @@ class ResearchCollectionAnswerCapability:
         graph_runtime: Any,
         state: Any,
         primary_agents: list[str],
+        writer_agent: str | None = None,
     ) -> QAResponse:
         all_hits = merge_retrieval_hits(state.retrieval_hits, state.summary_hits, state.manifest_hits)
         evidence_bundle = build_evidence_bundle(all_hits[: max(state.top_k * 2, 12)])
@@ -460,6 +559,7 @@ class ResearchCollectionAnswerCapability:
             "agent_architecture": "supervisor_to_research_qa_agent",
             "primary_agents": primary_agents,
             "answer_capability": self.__class__.__name__,
+            **({"writer_agent": writer_agent} if writer_agent else {}),
             "original_question": original_question,
             "resolved_question": resolved_question,
         }
@@ -518,6 +618,7 @@ class ResearchCollectionAnswerCapability:
             state=state,
             citations=citations,
             evidence_bundle=evidence_bundle,
+            legacy_writer=bool(writer_agent),
         )
         scope_mode = str(getattr(state.request, "metadata", {}).get("qa_scope_mode") or "all_imported")
         use_selected_paper_analysis_answer = (
@@ -678,9 +779,13 @@ class ResearchCollectionAnswerCapability:
         state: Any,
         citations: list[dict[str, Any]],
         evidence_bundle: EvidenceBundle,
+        legacy_writer: bool = False,
     ) -> str:
         if self.llm_adapter is None:
-            return self._build_extended_analysis(citations=citations, evidence_bundle=evidence_bundle)
+            return self._build_extended_analysis(
+                citations=citations, evidence_bundle=evidence_bundle,
+                state=state, legacy_writer=legacy_writer,
+            )
         try:
             from pydantic import BaseModel, Field
 
@@ -709,15 +814,27 @@ class ResearchCollectionAnswerCapability:
             )
             return result.analysis
         except Exception:
-            return self._build_extended_analysis(citations=citations, evidence_bundle=evidence_bundle)
+            return self._build_extended_analysis(
+                citations=citations, evidence_bundle=evidence_bundle,
+                state=state, legacy_writer=legacy_writer,
+            )
 
-    def _build_extended_analysis(self, *, citations: list[dict[str, Any]], evidence_bundle: EvidenceBundle) -> str:
+    def _build_extended_analysis(
+        self, *, citations: list[dict[str, Any]], evidence_bundle: EvidenceBundle,
+        state: Any | None = None, legacy_writer: bool = False,
+    ) -> str:
         citation_counter = Counter(citation["label"] for citation in citations if citation.get("label"))
         most_supported = ", ".join(f"[{label}]×{count}" for label, count in citation_counter.most_common(3)) or "当前没有形成稳定的论文支持分布"
-        return (
+        analysis = (
             f"从证据覆盖度看，本轮回答主要依赖 {len(evidence_bundle.evidences)} 条证据与 "
             f"{len(citations)} 个可回溯引用条目，最主要的支持来源为 {most_supported}。"
         )
+        if not legacy_writer:
+            return analysis
+        warnings = list(getattr(state.request, "metadata", {}).get("selection_warnings") or [])
+        reliability = "当前结论的可靠性偏高。" if len(evidence_bundle.evidences) >= 3 else "当前结论仍需补充更多直接证据。"
+        warning_text = " 选择范围提示：" + "；".join(warnings[:3]) if warnings else ""
+        return f"{analysis}{reliability}{warning_text}"
 
     def _related_sections(self, citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         related: list[dict[str, Any]] = []
