@@ -62,3 +62,11 @@ The test runs emit two pre-existing dependency deprecation warnings (hyppo/scipy
 
 Final annotation/indentation follow-up command:
 `python -m pytest tests/unit/services/test_research_state_commit_boundary.py tests/unit/services/test_research_architecture_constraints.py -q --tb=short` — **31 passed**, the same two dependency warnings, in 7.20 seconds.
+
+## Controller lint follow-up
+
+Removed unused local delta imports from chart/knowledge dispatch and unused schema imports from the conversation service. Moved worker compatibility imports to the normal top-level import section with explicit re-export aliases (no blanket suppression).
+
+- Ruff: `/home/myc/miniconda3/envs/Research-Copilot/bin/python -m ruff check` over every Python path returned by `git diff --name-only 5f42254 -- '*.py'` — **All checks passed**.
+- Focused regression: `python -m pytest tests/unit/agents/test_research_qa_agent.py tests/unit/services/test_research_state_commit_boundary.py tests/unit/services/test_research_architecture_constraints.py tests/unit/reasoning/test_react_external_tools.py -q --tb=short` — **37 passed**, two existing dependency warnings, 7.29 seconds.
+- `git diff --check` — clean.

@@ -61,7 +61,7 @@ class ChartAnalysisAgent:
         *,
         task_type: str = "supervisor_understand_chart",
     ) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchToolResult
 
         if task_type == "supervisor_understand_chart":
             return await self._run_understand_chart(context=context, decision=decision)

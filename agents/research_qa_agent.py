@@ -6,6 +6,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+# Backward-compatible exports; implementation belongs to the RAG worker module.
+from agents.rag_react_qa_worker import (
+    RagReActQAWorker as RagReActQAWorker,
+    ReActDecision as ReActDecision,
+    ReActStep as ReActStep,
+    ReActFinalDraft as ReActFinalDraft,
+    ResearchQAAgentError as ResearchQAAgentError,
+)
 from domain.schemas.research import (
     DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style,  # noqa: F401
     ResearchTask, ResearchReport, ResearchTaskAskResponse,
@@ -811,10 +819,3 @@ class ResearchQAAgent:
             }
         )
         return recovered_qa, rerouted, recovered_quality
-
-
-
-# Backward-compatible imports; implementation belongs to the RAG worker module.
-from agents.rag_react_qa_worker import (  # noqa: F401
-    RagReActQAWorker, ReActDecision, ReActStep, ReActFinalDraft, ResearchQAAgentError,
-)

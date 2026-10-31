@@ -54,7 +54,7 @@ class ResearchKnowledgeAgent:
         *,
         task_type: str = "compress_context",
     ) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchToolResult
 
         if task_type == "import_papers":
             return await self._run_import_papers(context=context, decision=decision)
