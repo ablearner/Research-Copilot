@@ -87,6 +87,38 @@ def _write_skill(
 
 
 class TestSkillRegistry:
+    def test_default_keeps_bundled_skills_beside_empty_local_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "skills").mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        registry = SkillRegistry()
+        assert registry.get_meta("research-qa") is not None
+
+    def test_default_merges_local_community_and_overrides_bundled_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        local_skills = tmp_path / "skills"
+        _write_skill(local_skills / "community", "local-specialist")
+        _write_skill(
+            local_skills / "community", "research-qa", description="Local QA override"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        registry = SkillRegistry()
+        assert registry.get_meta("paper-reading") is not None
+        assert registry.get_meta("local-specialist") is not None
+        overridden = registry.get_meta("research-qa")
+        assert overridden is not None
+        assert overridden.description == "Local QA override"
+        assert overridden.trust_level == "community"
+
+    def test_explicit_directory_does_not_merge_bundled_skills(self, tmp_skills_dir: Path) -> None:
+        _write_skill(tmp_skills_dir / "community", "only-local")
+        registry = SkillRegistry(skills_dir=tmp_skills_dir)
+        assert {meta.name for meta in registry.scan()} == {"only-local"}
+
     def test_scan_empty_dir(self, tmp_skills_dir: Path) -> None:
         registry = SkillRegistry(skills_dir=tmp_skills_dir)
         metas = registry.scan()

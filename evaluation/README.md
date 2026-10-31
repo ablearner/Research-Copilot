@@ -45,13 +45,13 @@
 运行 sample runtime：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py --runtime sample --recall-k 5
+python evaluation/run_agent_metrics.py --runtime sample --recall-k 5
 ```
 
 运行 live runtime：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py --runtime live --cases evaluation/sample_cases.json --recall-k 5
+python evaluation/run_agent_metrics.py --runtime live --cases evaluation/sample_cases.json --recall-k 5
 ```
 
 如果本地没有启动 Neo4j / MySQL，可以临时切到内存后端：
@@ -60,7 +60,7 @@
 RUNTIME_BACKEND=local \
 GRAPH_STORE_PROVIDER=memory \
 SESSION_MEMORY_PROVIDER=memory \
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py \
+python evaluation/run_agent_metrics.py \
   --runtime live \
   --cases evaluation/sample_cases.json \
   --recall-k 5
@@ -105,7 +105,7 @@ SESSION_MEMORY_PROVIDER=memory \
 先构建外部 benchmark：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/build_research_benchmarks.py \
+python evaluation/build_research_benchmarks.py \
   --limit-scifact-cases 100 \
   --limit-ragbench-cases 100 \
   --ragbench-subset pubmedqa \
@@ -122,7 +122,7 @@ SESSION_MEMORY_PROVIDER=memory \
 如果已经手动下载了 Hugging Face 文件，也可以用本地文件构建：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/build_research_benchmarks.py \
+python evaluation/build_research_benchmarks.py \
   --local-scifact-corpus path/to/scifact/corpus.parquet \
   --local-scifact-queries path/to/scifact/queries.parquet \
   --local-scifact-qrels path/to/scifact/qrels.tsv \
@@ -132,11 +132,11 @@ SESSION_MEMORY_PROVIDER=memory \
 然后把知识库灌入当前配置的向量库：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/ingest_benchmark_kb.py \
+python evaluation/ingest_benchmark_kb.py \
   --knowledge-base evaluation/benchmarks/scifact_v1/knowledge_base.json \
   --delete-existing
 
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/ingest_benchmark_kb.py \
+python evaluation/ingest_benchmark_kb.py \
   --knowledge-base evaluation/benchmarks/ragbench_pubmedqa_test_v1/knowledge_base.json \
   --delete-existing
 ```
@@ -144,14 +144,14 @@ SESSION_MEMORY_PROVIDER=memory \
 最后分别跑 live 评测：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py \
+python evaluation/run_agent_metrics.py \
   --runtime live \
   --cases evaluation/benchmarks/scifact_v1/cases.json \
   --knowledge-base evaluation/benchmarks/scifact_v1/knowledge_base.json \
   --recall-k 5 \
   --output evaluation/benchmarks/scifact_v1/report_full_api_scifact_100.json
 
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py \
+python evaluation/run_agent_metrics.py \
   --runtime live \
   --cases evaluation/benchmarks/ragbench_pubmedqa_test_v1/cases.json \
   --knowledge-base evaluation/benchmarks/ragbench_pubmedqa_test_v1/knowledge_base.json \
@@ -162,7 +162,7 @@ SESSION_MEMORY_PROVIDER=memory \
 如果只想做 smoke：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_agent_metrics.py \
+python evaluation/run_agent_metrics.py \
   --runtime live \
   --cases evaluation/benchmarks/scifact_v1/cases.json \
   --case-id scifact_1 \
@@ -179,7 +179,7 @@ GRAPH_STORE_PROVIDER=memory \
 SESSION_MEMORY_PROVIDER=memory \
 LLM_PROVIDER=local \
 EMBEDDING_PROVIDER=local \
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/run_retrieval_metrics.py \
+python evaluation/run_retrieval_metrics.py \
   --cases evaluation/benchmarks/scifact_v1/cases.json \
   --knowledge-base evaluation/benchmarks/scifact_v1/knowledge_base.json \
   --recall-k 5 \
@@ -190,13 +190,13 @@ EMBEDDING_PROVIDER=local \
 如果 live 全量评测已经有报告，但想补齐增强指标和摘要，不必整套重跑：
 
 ```bash
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/summarize_benchmark_report.py \
+python evaluation/summarize_benchmark_report.py \
   --report evaluation/benchmarks/scifact_v1/report_full_api_scifact_100.json \
   --cases evaluation/benchmarks/scifact_v1/cases.json \
   --output evaluation/benchmarks/scifact_v1/report_full_api_scifact_100_enriched.json \
   --summary-output evaluation/benchmarks/scifact_v1/summary_full_api_scifact_100_enriched.json
 
-/home/myc/miniconda3/envs/Research-Copilot/bin/python evaluation/summarize_benchmark_report.py \
+python evaluation/summarize_benchmark_report.py \
   --report evaluation/benchmarks/ragbench_pubmedqa_test_v1/report_full_api_ragbench_pubmedqa_100.json \
   --cases evaluation/benchmarks/ragbench_pubmedqa_test_v1/cases.json \
   --output evaluation/benchmarks/ragbench_pubmedqa_test_v1/report_full_api_ragbench_pubmedqa_100_enriched.json \

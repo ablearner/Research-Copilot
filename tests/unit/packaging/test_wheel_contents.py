@@ -77,6 +77,24 @@ qa_agent = RagReActQAWorker(None, None, None)
 assert qa_agent.decision_prompt_path.is_file()
 assert qa_agent.synthesis_prompt_path.is_file()
 assert GraphExtractionChain(llm=LocalLLMAdapter()).prompt_path.is_file()
+local_skills = Path('skills')
+local_skills.mkdir()
+assert SkillRegistry().get_meta('research-qa') is not None
+community = local_skills / 'community' / 'local-specialist'
+community.mkdir(parents=True)
+(community / 'SKILL.md').write_text(
+    '''---
+name: local-specialist
+description: Local specialist
+---
+
+Local instructions.
+''',
+    encoding='utf-8',
+)
+with_local = SkillRegistry()
+assert with_local.get_meta('paper-reading') is not None
+assert with_local.get_meta('local-specialist') is not None
 """
     subprocess.run(
         [sys.executable, "-c", code],

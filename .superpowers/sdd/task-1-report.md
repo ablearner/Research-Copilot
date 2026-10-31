@@ -24,3 +24,12 @@
 ## Limits
 
 The installed-wheel smoke uses the existing project Python environment and `pip install --no-deps`; it validates packaging and path resolution, not a clean dependency installation. The parent will run the full suite at the end of the overall refactor.
+
+## Review follow-up: local skill directories
+
+The initial default `SkillRegistry()` chose a working-directory `skills/` tree whenever it existed. An empty or community-only tree therefore hid the wheel's built-in skills. New unit regressions cover an empty local directory, a community directory with a same-name override, and isolation of an explicit `skills_dir`. The installed-wheel smoke now creates both empty and community-only local layouts after installation.
+
+- RED: four focused tests produced `3 failed, 1 passed`; the empty and community-only default scans lacked bundled skills, while the explicit-root isolation test passed. After correcting the smoke's embedded Python string, its installed-wheel assertion also failed specifically because `research-qa` disappeared beside an empty local `skills/` directory.
+- GREEN: default scans now load bundled skills first, then the working-directory tree so local skills can override by name. Explicit custom roots scan only that root. Config overrides remain in the working-directory tree for default construction.
+- Verification: `python -m pytest -q tests/unit/packaging/test_wheel_contents.py tests/unit/skills/test_skill_system.py` → `54 passed`; `python -m ruff check core/skill_registry.py tests/unit/packaging/test_wheel_contents.py tests/unit/skills/test_skill_system.py` → all checks passed; `git diff --check` → no errors.
+- Replaced machine-specific Python paths in `evaluation/README.md` examples with `python`. The two baseline third-party deprecation warnings remain documented above; no dependency changes were made.

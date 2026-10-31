@@ -174,13 +174,8 @@ class SkillRegistry:
         skills_dir: str | Path | None = None,
         scan_subdirs: list[str] | None = None,
     ) -> None:
-        if skills_dir is not None:
-            self.skills_dir = Path(skills_dir)
-        else:
-            working_skills_dir = Path("skills")
-            self.skills_dir = (
-                working_skills_dir if working_skills_dir.is_dir() else _BUNDLED_SKILLS_DIR
-            )
+        self._explicit_skills_dir = skills_dir is not None
+        self.skills_dir = Path(skills_dir) if skills_dir is not None else Path("skills")
         self._scan_subdirs = scan_subdirs or ["builtin", "community"]
         self._index: dict[str, SkillMeta] = {}
         self._config_overrides: dict[str, dict[str, Any]] = {}
@@ -225,36 +220,34 @@ class SkillRegistry:
         """Scan all skill sub-directories and build the L1 index."""
         self._index.clear()
         self._load_config()
-        for subdir_name in self._scan_subdirs:
-            subdir = self.skills_dir / subdir_name
-            if not subdir.is_dir():
-                continue
-            trust = "builtin" if subdir_name == "builtin" else "community"
-            for skill_file in sorted(subdir.rglob(_SKILL_FILENAME)):
+        roots = [self.skills_dir]
+        if not self._explicit_skills_dir and self.skills_dir.resolve() != _BUNDLED_SKILLS_DIR:
+            roots.insert(0, _BUNDLED_SKILLS_DIR)
+        for root in roots:
+            for subdir_name in self._scan_subdirs:
+                subdir = root / subdir_name
+                if not subdir.is_dir():
+                    continue
+                trust = "builtin" if subdir_name == "builtin" else "community"
+                for skill_file in sorted(subdir.rglob(_SKILL_FILENAME)):
+                    meta = parse_skill_meta(skill_file)
+                    if meta is None:
+                        continue
+                    meta.trust_level = trust
+                    override = self._config_overrides.get(meta.name, {})
+                    if "enabled" in override:
+                        meta.enabled = override["enabled"]
+                    self._index[meta.name] = meta
+            # Also scan root-level skills (flat layout).
+            for skill_file in sorted(root.glob(f"*/{_SKILL_FILENAME}")):
                 meta = parse_skill_meta(skill_file)
                 if meta is None:
                     continue
-                meta.trust_level = trust
-                # Apply config overrides
                 override = self._config_overrides.get(meta.name, {})
                 if "enabled" in override:
                     meta.enabled = override["enabled"]
-                self._index[meta.name] = meta
-        # Also scan root-level skills (flat layout)
-        for skill_file in sorted(self.skills_dir.glob(f"*/{_SKILL_FILENAME}")):
-            if any(
-                skill_file.is_relative_to(self.skills_dir / sd)
-                for sd in self._scan_subdirs
-            ):
-                continue  # already scanned
-            meta = parse_skill_meta(skill_file)
-            if meta is None:
-                continue
-            override = self._config_overrides.get(meta.name, {})
-            if "enabled" in override:
-                meta.enabled = override["enabled"]
-            if meta.name not in self._index:
-                self._index[meta.name] = meta
+                if meta.name not in self._index or root != _BUNDLED_SKILLS_DIR:
+                    self._index[meta.name] = meta
 
         logger.info("Skill registry scanned %d skill(s)", len(self._index))
         return list(self._index.values())
