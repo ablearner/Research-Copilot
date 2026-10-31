@@ -34,6 +34,7 @@ from runtime.research.unified_runtime import (
     serialize_unified_agent_results,
     serialize_unified_delegation_plan,
 )
+from runtime.research.agent_protocol import ResearchToolResult
 from tooling.registry import ToolRegistry
 from tooling.schemas import ToolSpec
 
@@ -178,16 +179,19 @@ def test_build_phase1_blueprint_for_current_repo_shape():
     assert "hybrid_retrieve" in knowledge_descriptor.available_tool_names
 
 
-def test_build_phase1_unified_agent_registry_uses_skeleton_adapters():
+def test_registry_support_matches_action_catalog():
+    from runtime.research.unified_runtime import ACTION_AGENT_CATALOG
     graph_runtime = _build_runtime_stub()
     registry = build_phase1_unified_agent_registry(
         graph_runtime=graph_runtime,
         research_service=SimpleNamespace(),
+        agent_delegates={"ResearchQAAgent": SimpleNamespace(run_action=lambda *_: None)},
     )
     executors = registry.resolve_for_task("answer_question")
     assert executors
     executor_names = {item.descriptor.name for item in executors}
     assert executor_names == {"ResearchQAAgent"}
+    assert ACTION_AGENT_CATALOG["answer_question"] == "ResearchQAAgent"
 
 
 def test_unified_execution_inputs_normalize_worker_payloads():
@@ -349,6 +353,7 @@ def test_unified_serializers_include_agent_descriptors():
     registry = build_phase1_unified_agent_registry(
         graph_runtime=graph_runtime,
         research_service=SimpleNamespace(),
+        agent_delegates={"ResearchQAAgent": SimpleNamespace(run_action=lambda *_: None)},
     )
     message = AgentMessage(
         task_id="task_2",
@@ -390,48 +395,27 @@ def test_unified_serializers_include_agent_descriptors():
 
 
 @pytest.mark.asyncio
-async def test_phase1_registry_can_execute_real_handler_when_bound():
+async def test_registry_executes_bound_specialist_without_converting_result():
     graph_runtime = _build_runtime_stub()
+    calls = []
+    expected = ResearchToolResult(status="succeeded", observation="compressed", metadata={})
 
-    async def _execution_handler(task, context, agent_delegate):
-        return UnifiedAgentResult(
-            task_id=task.task_id,
-            agent_name="ResearchKnowledgeAgent",
-            task_type=task.task_type,
-            status="succeeded",
-            instruction=task.instruction,
-            metadata={
-                "execution_engine": "unified_agent_registry",
-                "delegate_type": agent_delegate.__class__.__name__ if agent_delegate is not None else None,
-                "context_has_tool_registry": context.tool_registry is not None,
-            },
-        )
+    class Specialist:
+        async def run_action(self, context, decision, *, task_type):
+            calls.append((context, decision, task_type))
+            return expected
 
     registry = build_phase1_unified_agent_registry(
         graph_runtime=graph_runtime,
         research_service=SimpleNamespace(),
-        agent_delegates={"ResearchKnowledgeAgent": SimpleNamespace(name="knowledge")},
-        execution_handlers={"ResearchKnowledgeAgent": _execution_handler},
+        agent_delegates={"ResearchKnowledgeAgent": Specialist()},
     )
     executor = registry.get("ResearchKnowledgeAgent")
     assert executor is not None
 
-    runtime_context = build_phase1_unified_runtime_context(
-        graph_runtime=graph_runtime,
-        research_service=SimpleNamespace(),
-    )
-    result = await executor.execute(
-        UnifiedAgentTask(
-            task_id="task_3",
-            agent_from="ResearchSupervisorAgent",
-            agent_to="ResearchKnowledgeAgent",
-            task_type="compress_context",
-            instruction="compress",
-        ),
-        runtime_context,
-    )
+    context = object()
+    decision = object()
+    result = await executor.execute_action(context, decision, action_name="compress_context")
 
-    assert result.status == "succeeded"
-    assert result.metadata["execution_engine"] == "unified_agent_registry"
-    assert result.metadata["delegate_type"] == "SimpleNamespace"
-    assert result.metadata["context_has_tool_registry"] is True
+    assert result is expected
+    assert calls == [(context, decision, "compress_context")]

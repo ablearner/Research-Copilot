@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Protocol
 
 from domain.schemas.unified_runtime import (
     UnifiedAgentDescriptor,
@@ -22,17 +22,27 @@ class UnifiedRuntimeContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+ACTION_AGENT_CATALOG: dict[str, str] = {
+    "search_literature": "LiteratureScoutAgent",
+    "write_review": "ResearchWriterAgent",
+    "import_papers": "ResearchKnowledgeAgent",
+    "sync_to_zotero": "ResearchKnowledgeAgent",
+    "answer_question": "ResearchQAAgent",
+    "general_answer": "GeneralAnswerAgent",
+    "recommend_from_preferences": "PreferenceMemoryAgent",
+    "analyze_papers": "PaperAnalysisAgent",
+    "compress_context": "ResearchKnowledgeAgent",
+    "understand_document": "ResearchDocumentAgent",
+    "supervisor_understand_chart": "ChartAnalysisAgent",
+    "analyze_paper_figures": "ChartAnalysisAgent",
+}
+
+
 class UnifiedAgentExecutor(Protocol):
     descriptor: UnifiedAgentDescriptor
 
-    async def execute(self, task: UnifiedAgentTask, context: UnifiedRuntimeContext) -> UnifiedAgentResult:
+    async def execute_action(self, context: Any, decision: Any, *, action_name: str) -> Any:
         ...
-
-
-UnifiedExecutionHandler = Callable[
-    [UnifiedAgentTask, UnifiedRuntimeContext, Any | None],
-    Awaitable[UnifiedAgentResult],
-]
 
 
 class UnifiedAgentRegistry:
@@ -59,37 +69,21 @@ class UnifiedAgentRegistry:
             if task_type in executor.descriptor.supported_task_types
         ]
 
+    def resolve_for_action(self, action_name: str) -> UnifiedAgentExecutor | None:
+        agent_name = ACTION_AGENT_CATALOG.get(action_name)
+        return self.get(agent_name) if agent_name else None
+
 
 @dataclass(slots=True)
-class PhaseOneUnifiedAgentAdapter:
+class SpecialistAgentExecutor:
     descriptor: UnifiedAgentDescriptor
-    agent_delegate: Any | None = None
-    execution_handler: UnifiedExecutionHandler | None = None
+    agent_delegate: Any
 
-    async def execute(self, task: UnifiedAgentTask, context: UnifiedRuntimeContext) -> UnifiedAgentResult:
-        if self.execution_handler is not None:
-            return await self.execution_handler(task, context, self.agent_delegate)
-        del context
-        return UnifiedAgentResult(
-            task_id=task.task_id,
-            agent_name=self.descriptor.name,
-            task_type=task.task_type,
-            status="skipped",
-            instruction=task.instruction,
-            payload={},
-            context_slice=task.context_slice,
-            priority=task.priority,
-            expected_output_schema=task.expected_output_schema,
-            depends_on=task.depends_on,
-            retry_count=task.retry_count,
-            metadata={
-                "migration_phase": "phase1_skeleton",
-                "reason": "legacy runtime still owns execution; this adapter only standardizes composition metadata",
-                "delegate_type": (
-                    self.agent_delegate.__class__.__name__ if self.agent_delegate is not None else None
-                ),
-            },
-        )
+    async def execute_action(self, context: Any, decision: Any, *, action_name: str) -> Any:
+        if action_name not in self.descriptor.supported_task_types:
+            raise ValueError(f"{self.descriptor.name} cannot execute {action_name}")
+        kwargs = {"task_type": action_name} if self.descriptor.name in {"ResearchKnowledgeAgent", "ChartAnalysisAgent"} else {}
+        return await self.agent_delegate.run_action(context, decision, **kwargs)
 
 
 def build_phase1_unified_runtime_context(
@@ -319,23 +313,18 @@ def build_phase1_unified_agent_registry(
     graph_runtime: Any,
     research_service: Any,
     agent_delegates: dict[str, Any] | None = None,
-    execution_handlers: dict[str, UnifiedExecutionHandler] | None = None,
+    blueprint: UnifiedRuntimeBlueprint | None = None,
 ) -> UnifiedAgentRegistry:
-    blueprint = build_phase1_unified_blueprint(
+    blueprint = blueprint or build_phase1_unified_blueprint(
         graph_runtime=graph_runtime,
         research_service=research_service,
     )
     registry = UnifiedAgentRegistry()
     delegates = agent_delegates or {}
-    handlers = execution_handlers or {}
     for descriptor in blueprint.agent_descriptors:
-        registry.register(
-            PhaseOneUnifiedAgentAdapter(
-                descriptor=descriptor,
-                agent_delegate=delegates.get(descriptor.name),
-                execution_handler=handlers.get(descriptor.name),
-            )
-        )
+        delegate = delegates.get(descriptor.name)
+        if descriptor.kind == "specialist" and delegate is not None and hasattr(delegate, "run_action"):
+            registry.register(SpecialistAgentExecutor(descriptor=descriptor, agent_delegate=delegate))
     return registry
 
 
@@ -457,6 +446,8 @@ def _build_descriptor(
     notes: list[str],
 ) -> UnifiedAgentDescriptor:
     available = [tool_name for tool_name in preferred_tool_names if tool_name in set(available_tool_names)]
+    if kind == "specialist":
+        supported_task_types = [action for action, agent in ACTION_AGENT_CATALOG.items() if agent == name]
     return UnifiedAgentDescriptor(
         name=name,
         description=description,

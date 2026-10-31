@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import logging
 from typing import Any
 
@@ -28,6 +29,7 @@ class ResearchAgentContextBuilder:
     ) -> None:
         self.runtime = runtime
         self.skill_resolver = skill_resolver
+        self._registry_cache: dict[int, tuple[Any, Any, dict[str, Any]]] = {}
 
     async def build(
         self,
@@ -82,16 +84,22 @@ class ResearchAgentContextBuilder:
             graph_runtime=graph_runtime,
             research_service=self.runtime.research_service,
         )
-        context.unified_agent_registry = build_phase1_unified_agent_registry(
-            graph_runtime=graph_runtime,
-            research_service=self.runtime.research_service,
-            agent_delegates=getattr(self.runtime, "unified_agent_delegates", {}),
-            execution_handlers=getattr(self.runtime, "unified_execution_handlers", {}),
-        )
-        context.unified_blueprint = build_phase1_unified_blueprint(
-            graph_runtime=graph_runtime,
-            research_service=self.runtime.research_service,
-        ).model_dump(mode="json")
+        cached = self._registry_cache.get(id(graph_runtime))
+        if cached is None or cached[0] is not graph_runtime:
+            blueprint_model = build_phase1_unified_blueprint(
+                graph_runtime=graph_runtime,
+                research_service=self.runtime.research_service,
+            )
+            registry = build_phase1_unified_agent_registry(
+                graph_runtime=graph_runtime,
+                research_service=self.runtime.research_service,
+                agent_delegates=self.runtime.unified_agent_delegates,
+                blueprint=blueprint_model,
+            )
+            cached = (graph_runtime, registry, blueprint_model.model_dump(mode="json"))
+            self._registry_cache[id(graph_runtime)] = cached
+        context.unified_agent_registry = cached[1]
+        context.unified_blueprint = deepcopy(cached[2])
 
         await skill_task
         return context

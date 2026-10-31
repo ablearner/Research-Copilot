@@ -708,20 +708,43 @@ async def test_research_supervisor_agent_guardrail_keeps_explicit_figure_scope_w
     assert decision.metadata["active_message"].payload["paper_scope_source"] == "user_intent_resolver"
 
 
-def test_research_supervisor_agent_stops_without_llm_instead_of_using_legacy_rule_fallback() -> None:
+def test_research_supervisor_sync_fallback_searches_discovery_only() -> None:
     manager = ResearchSupervisorAgent()
 
     decision = manager.decide_next_action(
         ResearchSupervisorState(
-            goal="AI",
+            goal="agentic retrieval",
             mode="research",
             has_task=False,
+            workflow_constraint="discovery_only",
         )
     )
 
+    assert decision.action_name == "search_literature"
+
+
+def test_research_supervisor_sync_fallback_stops_general_chat_provider_failure() -> None:
+    manager = ResearchSupervisorAgent()
+    decision = manager.decide_next_action(
+        ResearchSupervisorState(goal="What is Python?", mode="auto", route_mode="general_chat")
+    )
     assert decision.action_name == "finalize"
-    assert decision.metadata["decision_source"] == "guardrail"
-    assert "Rule-based planning has been removed" in (decision.stop_reason or "")
+    assert "通用回答模型" in (decision.stop_reason or "")
+
+
+def test_research_supervisor_sync_fallback_finishes_completed_discovery() -> None:
+    manager = ResearchSupervisorAgent()
+    decision = manager.decide_next_action(
+        ResearchSupervisorState(
+            goal="agentic retrieval",
+            mode="research",
+            workflow_constraint="discovery_only",
+            last_action_name="search_literature",
+            latest_result_status="succeeded",
+            paper_count=3,
+        )
+    )
+    assert decision.action_name == "finalize"
 
 
 @pytest.mark.asyncio

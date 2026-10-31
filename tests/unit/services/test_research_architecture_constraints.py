@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
+from types import SimpleNamespace
+
+from agents.research_supervisor_agent import ResearchSupervisorAgent
+from runtime.research.unified_runtime import ACTION_AGENT_CATALOG, build_phase1_unified_blueprint
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -57,22 +62,13 @@ def test_supervisor_authorized_qa_requires_explicit_route() -> None:
 
 
 def test_answer_question_is_owned_by_research_qa_agent_in_unified_runtime() -> None:
-    supervisor_agent = _read("agents/research_supervisor_agent.py")
-    runtime_core = _read("runtime/research/supervisor_graph_runtime_core.py")
-    unified_runtime = _read("runtime/research/unified_runtime.py")
+    manager = ResearchSupervisorAgent()
+    blueprint = build_phase1_unified_blueprint(graph_runtime=SimpleNamespace(), research_service=SimpleNamespace())
+    descriptors = {item.name: item for item in blueprint.agent_descriptors}
 
-    assert '"answer_question": "ResearchQAAgent"' in supervisor_agent
-    assert '"understand_document": "ResearchDocumentAgent"' in supervisor_agent
-    assert 'self._action_descriptor("answer_question", "ResearchQAAgent"' in supervisor_agent
-    assert 'self._action_descriptor("understand_document", "ResearchDocumentAgent"' in supervisor_agent
-    assert '"ResearchQAAgent": self.research_qa_agent' in runtime_core
-    assert '"ResearchDocumentAgent": self.research_document_agent' in runtime_core
-    assert '_execute_agent_run_action' in runtime_core
-    assert 'name="ResearchQAAgent"' in unified_runtime
-    assert 'name="ResearchDocumentAgent"' in unified_runtime
-    assert 'supported_task_types=["answer_question"]' in unified_runtime
-    assert 'supported_task_types=["understand_document"]' in unified_runtime
-    assert 'supported_task_types=["import_papers", "sync_to_zotero", "compress_context"]' in unified_runtime
+    for action_name, expected_agent in ACTION_AGENT_CATALOG.items():
+        assert manager._worker_for_action(action_name, "WrongAgent") == expected_agent
+        assert action_name in descriptors[expected_agent].supported_task_types
 
 
 def test_service_layer_no_longer_contains_qa_execution_subchain() -> None:
@@ -127,15 +123,12 @@ def test_services_use_external_tool_gateway_instead_of_raw_registry_calls() -> N
 
 
 def test_specialists_use_direct_agent_run_action_dispatch() -> None:
-    runtime_core = _read("runtime/research/supervisor_graph_runtime_core.py")
-    unified_runtime = _read("runtime/research/unified_runtime.py")
-
-    assert "phase1_wrapped_action_tool" not in runtime_core
-    assert "_execute_agent_run_action" in runtime_core
-    assert "_TASK_TYPE_AGENTS" in runtime_core
-    assert "agent.run_action(context, decision" in runtime_core
-    assert "unresolved_boundaries=[]" in unified_runtime
-    assert "legacy_boundaries=[]" in unified_runtime
+    tree = ast.parse(_read("runtime/research/supervisor_graph_runtime_core.py"))
+    execute = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_execute_agent_run_action")
+    calls = [node.func for node in ast.walk(execute) if isinstance(node, ast.Call)]
+    assert any(isinstance(call, ast.Attribute) and call.attr == "resolve_for_action" for call in calls)
+    assert any(isinstance(call, ast.Attribute) and call.attr == "execute_action" for call in calls)
+    assert not any(isinstance(call, ast.Attribute) and call.attr == "run_action" for call in calls)
 
 
 def test_workspace_persistence_uses_standalone_functions() -> None:

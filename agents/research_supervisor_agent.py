@@ -252,7 +252,7 @@ class ResearchSupervisorAgent:
         active_plan_id: str | None = None,
     ) -> ResearchSupervisorDecision:
         if self.llm_adapter is None:
-            logger.warning("ResearchSupervisorAgent has no LLM adapter; refusing rule-based orchestration")
+            logger.info("ResearchSupervisorAgent has no LLM adapter; using deterministic fallback policy")
             return self._llm_unavailable_decision(
                 state,
                 pending_messages=pending_messages,
@@ -1762,7 +1762,7 @@ class ResearchSupervisorAgent:
     ) -> dict[str, Any]:
         return {
             "action_name": action_name,
-            "worker_agent": worker_agent,
+            "worker_agent": self._worker_for_action(action_name, worker_agent),
             "when_to_use": when_to_use,
             "default_task_type": self._task_type_for_action(action_name),  # type: ignore[arg-type]
             "expected_output_schema": self._expected_output_schema_for_action(action_name),  # type: ignore[arg-type]
@@ -2014,27 +2014,10 @@ class ResearchSupervisorAgent:
         return normalized  # type: ignore[return-value]
 
     def _worker_for_action(self, action_name: ResearchSupervisorActionName, worker_agent: str | None) -> str:
-        defaults = {
-            "clarify_request": "ResearchSupervisorAgent",
-            "search_literature": "LiteratureScoutAgent",
-            "write_review": "ResearchWriterAgent",
-            "import_papers": "ResearchKnowledgeAgent",
-            "sync_to_zotero": "ResearchKnowledgeAgent",
-            "answer_question": "ResearchQAAgent",
-            "general_answer": "GeneralAnswerAgent",
-            "recommend_from_preferences": "PreferenceMemoryAgent",
-            "analyze_papers": "PaperAnalysisAgent",
-            "compress_context": "ResearchKnowledgeAgent",
-            "understand_document": "ResearchDocumentAgent",
-            "supervisor_understand_chart": "ChartAnalysisAgent",
-            "analyze_paper_figures": "ChartAnalysisAgent",
-            "finalize": "ResearchSupervisorAgent",
-        }
-        if action_name == "answer_question":
-            return "ResearchQAAgent"
-        if worker_agent and worker_agent.strip():
-            return worker_agent.strip()
-        return defaults[action_name]
+        from runtime.research.unified_runtime import ACTION_AGENT_CATALOG
+
+        del worker_agent
+        return ACTION_AGENT_CATALOG.get(action_name, "ResearchSupervisorAgent")
 
     def _task_type_for_action(self, action_name: ResearchSupervisorActionName) -> str:
         mapping = {
@@ -2306,36 +2289,19 @@ class ResearchSupervisorAgent:
         clarification_request: str | None = None,
         active_plan_id: str | None = None,
     ) -> ResearchSupervisorDecision:
-        results = self._evaluate_results(
-            results=list(agent_results or []),
-            agent_messages=list(agent_messages or []),
-        )
-        state_update = {
-            "pending_agent_messages": list(pending_messages or []),
-            "agent_messages": list(agent_messages or []),
-            "agent_results": results,
-            "completed_agent_task_ids": self._dedupe_ids(completed_task_ids or []),
-            "failed_agent_task_ids": self._dedupe_ids(failed_task_ids or []),
-            "replanned_failure_task_ids": self._dedupe_ids(replanned_failure_task_ids or []),
-            "planner_runs": planner_runs,
-            "replan_count": replan_count,
-            "clarification_request": clarification_request,
-            "active_plan_id": active_plan_id,
-            "new_topic_detected": state.new_topic_detected,
-        }
-        return self._decision(
-            action_name="finalize",
-            thought="Manager cannot find a safe next tool step without an LLM decision channel.",
-            rationale="Rule-based planning has been removed; the manager requires LLM-driven decisions on the synchronous fallback path.",
-            phase="commit",
-            estimated_gain=0.0,
-            estimated_cost=0.0,
-            stop_reason="Rule-based planning has been removed; manager requires LLM-driven decisions.",
-            metadata={
-                "decision_source": "guardrail",
-                "worker_agent": "ResearchSupervisorAgent",
-                "state_update": {**state_update, "pending_agent_messages": []},
-            },
+        del context_slice
+        return self._llm_unavailable_decision(
+            state,
+            pending_messages=pending_messages,
+            agent_messages=agent_messages,
+            agent_results=agent_results,
+            completed_task_ids=completed_task_ids,
+            failed_task_ids=failed_task_ids,
+            replanned_failure_task_ids=replanned_failure_task_ids,
+            planner_runs=planner_runs,
+            replan_count=replan_count,
+            clarification_request=clarification_request,
+            active_plan_id=active_plan_id,
         )
 
     def decompose_with_llm(

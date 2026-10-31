@@ -62,19 +62,19 @@ return recovery observations, but lower layers do not silently pick a different
 route for supervisor-authorized calls.
 
 The action node calls `ResearchSupervisorGraphRuntime._execute_agent_run_action`.
-It resolves the selected worker from `unified_agent_delegates` and invokes the
-specialist's `run_action(context, decision)`. `ResearchKnowledgeAgent` and
+It resolves the selected worker from `UnifiedAgentRegistry`, which binds each
+descriptor to a specialist's `run_action(context, decision)`. `ResearchKnowledgeAgent` and
 `ChartAnalysisAgent` also receive `task_type=action_name`. The runtime
 standardizes the returned observation and execution metadata, applies any
-state delta, and records a missing-agent failure if no delegate is found.
+state delta, and records a missing-agent failure if no registry entry is found.
 Recoverable QA route observations return to the supervisor for an explicit
 next decision.
 
 `ResearchCapabilityRegistry` is the read-only inventory boundary over
 supervisor actions, runtime/knowledge tools, and MCP server availability.
 It supports skill matching and response metadata. The `UnifiedAgentRegistry`
-descriptors describe available specialists; the action node currently uses
-the direct `unified_agent_delegates` map for execution.
+holds the executable specialist bindings and descriptors for the supplied
+graph runtime.
 
 `ResearchKnowledgeAccess` is the Knowledge/RAG access boundary used by the
 supervisor chain. It prefers registered runtime tools such as

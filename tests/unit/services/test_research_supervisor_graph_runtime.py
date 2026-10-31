@@ -722,6 +722,29 @@ async def test_research_supervisor_context_builder_resolves_skill_candidates(tmp
 
 
 @pytest.mark.asyncio
+async def test_context_builder_reuses_registry_per_graph_runtime_and_isolates_blueprints(tmp_path) -> None:
+    runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
+    graph_a = GraphRuntimeStub()
+    graph_b = GraphRuntimeStub()
+    graph_a.tool_registry = SimpleNamespace(list_tools=lambda **_: [SimpleNamespace(name="parse_document", enabled=True, tags=[], category="runtime")])
+    graph_b.tool_registry = SimpleNamespace(list_tools=lambda **_: [SimpleNamespace(name="hybrid_retrieve", enabled=True, tags=[], category="runtime")])
+    request = ResearchAgentRunRequest(message="Find papers on retrieval", mode="research")
+
+    first = await runtime.context_builder.build(request=request, graph_runtime=graph_a)
+    second = await runtime.context_builder.build(request=request, graph_runtime=graph_a)
+    other = await runtime.context_builder.build(request=request, graph_runtime=graph_b)
+
+    assert first.unified_agent_registry is second.unified_agent_registry
+    assert first.unified_agent_registry is not other.unified_agent_registry
+    assert first.unified_runtime_context is not second.unified_runtime_context
+    assert first.unified_blueprint is not second.unified_blueprint
+    assert first.unified_blueprint["tool_names"] == ["parse_document"]
+    assert other.unified_blueprint["tool_names"] == ["hybrid_retrieve"]
+    assert first.unified_agent_registry.get("ResearchDocumentAgent").descriptor.available_tool_names == ["parse_document"]
+    assert other.unified_agent_registry.get("ResearchDocumentAgent").descriptor.available_tool_names == []
+
+
+@pytest.mark.asyncio
 async def test_research_supervisor_injects_only_selected_skill_context(tmp_path) -> None:
     runtime = ResearchSupervisorGraphRuntime(research_service=build_service(tmp_path))
 
@@ -906,7 +929,7 @@ async def test_research_supervisor_graph_creates_task_and_imports_relevant_paper
     assert response.workspace.stop_reason is not None
     assert response.metadata["routing_engine"] == "langgraph_supervisor_specialists"
     assert response.metadata["manager_engine"] == "langgraph_supervisor"
-    assert response.metadata["supervisor_action_tool_engine"] == "tool_executor"
+    assert response.metadata["supervisor_action_tool_engine"] == "unified_agent_registry"
     assert response.metadata["supervisor_worker_execution_engine"] == "unified_agent_registry"
     assert response.metadata["supervisor_action_trace_count"] >= 3
     assert response.metadata["unified_supervisor_mode"] == "pure_supervisor"

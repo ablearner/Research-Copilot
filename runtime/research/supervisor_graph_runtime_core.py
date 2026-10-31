@@ -39,7 +39,6 @@ from domain.schemas.unified_runtime import (
 from domain.research_workspace import build_workspace_from_task, build_workspace_state
 from tools.research import PaperAnalysisTool, PaperReadingTool, IntentResolutionTool, PaperCurationTool
 from tools.research.user_intent import ResearchUserIntentResult
-from tooling.executor import ToolExecutor
 from tooling.registry import ToolRegistry
 from context.compressor import ContextCompressor
 from core.skill_registry import SkillRegistry
@@ -48,6 +47,7 @@ from core.utils import normalize_topic_text as _normalize_topic_text_impl
 from runtime.research.context_builder import ResearchAgentContextBuilder
 from runtime.research.response_formatter import ResearchResponseFormatter
 from runtime.research.result_aggregator import ResearchAgentResultAggregator
+from runtime.research.unified_runtime import ACTION_AGENT_CATALOG
 from tools.research.capability_registry import ResearchCapabilityRegistry
 from tools.research.skill_resolver import ResearchSkillResolver, ResearchSkillSelection
 
@@ -131,7 +131,6 @@ class ResearchRuntimeBase:
         )
         self.unified_agent_delegates = self._build_unified_agent_delegates()
         self.tool_registry = ToolRegistry()
-        self.action_tool_executor = ToolExecutor(self.tool_registry)
         self.skill_registry = SkillRegistry()
         self.skill_matcher = SkillMatcher(self.skill_registry)
         self.skill_registry.scan()
@@ -434,9 +433,6 @@ class ResearchRuntimeBase:
             "GeneralAnswerAgent": self.general_answer_agent,
         }
 
-    def _build_unified_execution_handlers(self) -> dict[str, Any]:
-        return {}
-
     def _with_standardized_observation(
         self,
         *,
@@ -524,8 +520,6 @@ class ResearchRuntimeBase:
         return metadata
 
 
-    _TASK_TYPE_AGENTS = {"ResearchKnowledgeAgent", "ChartAnalysisAgent"}
-
     async def _execute_agent_run_action(
         self,
         *,
@@ -534,14 +528,12 @@ class ResearchRuntimeBase:
         decision: ResearchSupervisorDecision,
         worker_agent: str,
     ) -> ResearchToolResult | None:
-        agent = self.unified_agent_delegates.get(worker_agent)
-        if agent is None or not hasattr(agent, "run_action"):
+        registry = context.unified_agent_registry
+        executor = registry.resolve_for_action(action_name) if registry is not None else None
+        if executor is None or executor.descriptor.name != worker_agent:
             return None
-        kwargs: dict[str, Any] = {}
-        if worker_agent in self._TASK_TYPE_AGENTS:
-            kwargs["task_type"] = action_name
         try:
-            result = await agent.run_action(context, decision, **kwargs)
+            result = await executor.execute_action(context, decision, action_name=action_name)
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s.run_action() failed", worker_agent, exc_info=True)
             return ResearchToolResult(
@@ -551,12 +543,12 @@ class ResearchRuntimeBase:
                     "reason": "tool_execution_failed",
                     "specialist_error_type": exc.__class__.__name__,
                     "execution_engine": "unified_agent_registry",
-                    "execution_adapter": f"agent_run_action:{agent.name}",
+                    "execution_adapter": f"agent_run_action:{executor.descriptor.name}",
                 },
             )
         metadata = dict(result.metadata)
         metadata.setdefault("execution_engine", "unified_agent_registry")
-        metadata.setdefault("execution_adapter", f"agent_run_action:{agent.name}")
+        metadata.setdefault("execution_adapter", f"agent_run_action:{executor.descriptor.name}")
         enriched_metadata = self._with_standardized_observation(
             action_name=action_name,
             context=context,
@@ -1316,6 +1308,8 @@ class ResearchRuntimeBase:
         return None
 
     def _worker_agent_name(self, decision: ResearchSupervisorDecision) -> str:
+        if decision.action_name in ACTION_AGENT_CATALOG:
+            return ACTION_AGENT_CATALOG[decision.action_name]
         if isinstance(decision.metadata, dict):
             worker_agent = decision.metadata.get("worker_agent")
             if isinstance(worker_agent, str) and worker_agent.strip():
