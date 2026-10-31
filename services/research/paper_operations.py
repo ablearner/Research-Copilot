@@ -1,22 +1,21 @@
-"""Paper import, figure analysis, and TODO operations mixin.
-
-Extracts paper-centric operations from LiteratureResearchService into
-a cohesive mixin to reduce the size of the main service file.
-"""
+"""Paper import, figure analysis and TODO application operations."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import UTC, datetime
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
-from core.utils import (
-    now_iso as _now_iso,
-    normalize_paper_title as _normalize_paper_title,
-)
+from agents.chart_analysis_agent import ChartAnalysisAgent
+from tools.research.paper_import import PaperImportService
+from tools.research.paper_search import PaperSearchService
+from core.observability import ResearchObservabilityService
+from adapters.storage.research_report_service import ResearchReportService
 from domain.schemas.research import (
+    ResearchStatusMetadata,
     AnalyzeResearchPaperFigureRequest,
     AnalyzeResearchPaperFigureResponse,
     ImportPapersRequest,
@@ -36,6 +35,7 @@ from domain.schemas.research import (
     ResearchTodoItem,
     ResearchWorkspaceState,
 )
+from core.utils import now_iso as _now_iso, normalize_paper_title as _normalize_paper_title
 from tools.research.knowledge_access import ResearchKnowledgeAccess
 from domain.research_workspace import build_workspace_from_task
 from tools.paper_figure_toolkit import PaperFigureAnalyzeTarget
@@ -45,23 +45,69 @@ logger = logging.getLogger(__name__)
 ImportProgressCallback = Callable[[int, int, ImportedPaperResult], Awaitable[None] | None]
 
 
-class PaperOperationsMixin:
-    """Mixin providing paper import, figure analysis, and TODO operations.
+@dataclass
+class PaperImportExecutionResult:
+    response: ImportPapersResponse
+    task_response: ResearchTaskResponse | None
+    papers: list[PaperCandidate]
+    memory_update_params: dict[str, Any]
 
-    Assumes the host class exposes (from ``LiteratureResearchService``):
 
-    * ``report_service``, ``paper_import_service``, ``paper_search_service``
-    * ``chart_analysis_agent``, ``literature_scout_agent``, ``paper_curation_tool``
-    * ``research_writer_agent``, ``observability_service``
-    * ``import_concurrency``, ``_job_tasks``
-    * ``get_task(...)``, ``save_task_state(...)``, ``save_job_state(...)``
-    * ``_build_status_metadata(...)``, ``_update_job(...)``
-    * ``_set_conversation_active_job(...)``, ``append_runtime_event(...)``
-    * ``_persist_runtime_conversation_snapshot(...)``
-    * ``_resolve_research_session_id(...)``, ``_update_research_memory(...)``
-    * ``_refresh_existing_pool(...)`` (from QARoutingMixin)
-    * ``record_import_turn(...)``, ``record_qa_turn(...)``, ``record_notice(...)`` (from ConversationMixin)
-    """
+class PaperOperationsService:
+    """Own paper ingestion jobs, figure access and TODO operations."""
+
+    def __init__(
+        self,
+        *,
+        _build_discovery_only_request: Callable[..., Any],
+        _build_status_metadata: Callable[..., ResearchStatusMetadata],
+        _job_tasks: dict[str, asyncio.Task[None]],
+        _persist_runtime_conversation_snapshot: Callable[..., Any],
+        _resolve_research_session_id: Callable[..., tuple[str | None, str | None]],
+        _set_conversation_active_job: Callable[..., Any],
+        _update_job: Callable[..., ResearchJob],
+        _update_research_memory: Callable[..., Any],
+        append_runtime_event: Callable[..., Any],
+        ask_task_collection: Callable[..., Any],
+        chart_analysis_agent: ChartAnalysisAgent,
+        get_task: Callable[..., ResearchTaskResponse],
+        import_concurrency: int,
+        import_index_timeout_seconds: float | None,
+        observability_service: ResearchObservabilityService,
+        paper_import_service: PaperImportService,
+        paper_search_service: PaperSearchService,
+        record_import_turn: Callable[..., Any],
+        record_notice: Callable[..., Any],
+        record_qa_turn: Callable[..., Any],
+        report_service: ResearchReportService,
+        run_agent: Callable[..., Any],
+        save_job_state: Callable[..., ResearchJob],
+        save_task_state: Callable[..., ResearchTask],
+    ) -> None:
+        self._build_discovery_only_request = _build_discovery_only_request
+        self._build_status_metadata = _build_status_metadata
+        self._job_tasks = _job_tasks
+        self._persist_runtime_conversation_snapshot = _persist_runtime_conversation_snapshot
+        self._resolve_research_session_id = _resolve_research_session_id
+        self._set_conversation_active_job = _set_conversation_active_job
+        self._update_job = _update_job
+        self._update_research_memory = _update_research_memory
+        self.append_runtime_event = append_runtime_event
+        self.ask_task_collection = ask_task_collection
+        self.chart_analysis_agent = chart_analysis_agent
+        self.get_task = get_task
+        self.import_concurrency = import_concurrency
+        self.import_index_timeout_seconds = import_index_timeout_seconds
+        self.observability_service = observability_service
+        self.paper_import_service = paper_import_service
+        self.paper_search_service = paper_search_service
+        self.record_import_turn = record_import_turn
+        self.record_notice = record_notice
+        self.record_qa_turn = record_qa_turn
+        self.report_service = report_service
+        self.run_agent = run_agent
+        self.save_job_state = save_job_state
+        self.save_task_state = save_task_state
 
     async def list_paper_figures(
         self,
@@ -513,12 +559,29 @@ class PaperOperationsMixin:
         )
 
     async def import_papers(
+        self, request: ImportPapersRequest, *, graph_runtime: Any,
+        progress_callback: ImportProgressCallback | None = None,
+    ) -> ImportPapersResponse:
+        """Direct application entrypoint: execute ingestion and commit workflow results."""
+        result = await self.prepare_paper_import(
+            request, graph_runtime=graph_runtime, progress_callback=progress_callback,
+        )
+        if result.task_response is not None:
+            self.save_task_state(result.task_response.task, conversation_id=request.conversation_id)
+            if result.task_response.report is not None:
+                self.report_service.save_report(result.task_response.report)
+        if request.task_id and result.papers:
+            self.report_service.save_papers(request.task_id, result.papers)
+        self._update_research_memory(**result.memory_update_params)
+        return result.response
+
+    async def prepare_paper_import(
         self,
         request: ImportPapersRequest,
         *,
         graph_runtime,
         progress_callback: ImportProgressCallback | None = None,
-    ) -> ImportPapersResponse:
+    ) -> PaperImportExecutionResult:
         candidate_papers, persisted_papers = self._resolve_import_candidates(request)
         persisted_by_id = {paper.paper_id: paper for paper in persisted_papers}
         results: list[ImportedPaperResult] = []
@@ -559,6 +622,8 @@ class PaperOperationsMixin:
                 results.append(result)
                 persisted_by_id[updated_paper.paper_id] = updated_paper
 
+        updated_task = None
+        updated_report = None
         if request.task_id and persisted_papers:
             task = self.report_service.load_task(request.task_id)
             if task is not None:
@@ -602,12 +667,8 @@ class PaperOperationsMixin:
                         ),
                     }
                 )
-                self.save_task_state(updated_task, conversation_id=request.conversation_id)
                 if current_report is not None:
-                    self.report_service.save_report(
-                        current_report.model_copy(update={"workspace": updated_task.workspace})
-                    )
-            self.report_service.save_papers(request.task_id, list(persisted_by_id.values()))
+                    updated_report = current_report.model_copy(update={"workspace": updated_task.workspace})
 
         imported_count = sum(1 for result in results if result.status == "imported")
         skipped_count = sum(1 for result in results if result.status == "skipped")
@@ -617,9 +678,8 @@ class PaperOperationsMixin:
             for result in results
             if result.graph_pending and result.document_id
         ]
-        updated_task = self.report_service.load_task(request.task_id) if request.task_id else None
         updated_papers = list(persisted_by_id.values()) if persisted_by_id else []
-        self._update_research_memory(
+        memory_update_params = dict(
             graph_runtime=graph_runtime,
             conversation_id=request.conversation_id,
             task=updated_task,
@@ -639,11 +699,18 @@ class PaperOperationsMixin:
                 "pending_graph_backfill_ids": pending_graph_backfill_ids[:12],
             },
         )
-        return ImportPapersResponse(
+        response = ImportPapersResponse(
             results=results,
             imported_count=imported_count,
             skipped_count=skipped_count,
             failed_count=failed_count,
+        )
+
+        return PaperImportExecutionResult(
+            response=response,
+            task_response=ResearchTaskResponse(task=updated_task, papers=updated_papers, report=updated_report) if updated_task else None,
+            papers=updated_papers,
+            memory_update_params=memory_update_params,
         )
 
     def _emit_import_heartbeat(self, request: ImportPapersRequest, summary: str) -> None:
@@ -914,7 +981,6 @@ class PaperOperationsMixin:
             if paper.paper_id in discovered_ids
         ]
         return query, discovered_papers, refreshed_state.papers, list(response.warnings)
-
 
     async def _run_import_job(
         self,

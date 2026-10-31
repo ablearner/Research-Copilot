@@ -990,6 +990,26 @@ class ResearchRuntimeBase:
             context.import_result = delta.import_result
         if delta.compressed_context_summary is not None:
             context.compressed_context_summary = delta.compressed_context_summary
+        if delta.execution_context is not None:
+            context.execution_context = delta.execution_context
+        if delta.general_answer is not None:
+            context.general_answer = delta.general_answer
+        if delta.general_answer_metadata is not None:
+            context.general_answer_metadata = delta.general_answer_metadata
+        if delta.parsed_document is not None:
+            context.parsed_document = delta.parsed_document
+        if delta.document_index_result is not None:
+            context.document_index_result = delta.document_index_result
+        if delta.chart_result is not None:
+            context.chart_result = delta.chart_result
+        if delta.import_attempted is not None:
+            context.import_attempted = delta.import_attempted
+        if delta.document_attempted is not None:
+            context.document_attempted = delta.document_attempted
+        if delta.chart_attempted is not None:
+            context.chart_attempted = delta.chart_attempted
+        if delta.zotero_sync_results is not None:
+            context.zotero_sync_results = delta.zotero_sync_results
         if delta.rebuild_execution_context and delta.rebuild_execution_context_params is not None:
             context.execution_context = context.research_service.build_execution_context(
                 **delta.rebuild_execution_context_params,
@@ -1033,7 +1053,9 @@ class ResearchRuntimeBase:
         op_type = mem_op.op_type
         params = dict(mem_op.params)
         try:
-            if op_type == "set_active_papers":
+            if op_type == "update_research_memory":
+                context.research_service._update_research_memory(**params)
+            elif op_type == "set_active_papers":
                 gateway.set_active_papers(params["session_id"], params["paper_ids"])
             elif op_type == "persist_research_update":
                 gateway.persist_research_update(**params)

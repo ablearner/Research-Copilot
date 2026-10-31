@@ -78,7 +78,7 @@ def test_service_layer_no_longer_contains_qa_execution_subchain() -> None:
     assert "_run_scoped_task_qa" not in qa_router
     assert "_run_direct_collection_qa" not in qa_router
     assert "_maybe_recover_qa_route" not in qa_router
-    assert "ResearchQAAgent().execute_qa" in qa_router
+    assert ").execute_loaded_qa(" in qa_router
     assert "_select_recovery_qa_route" not in qa_router
     assert "_build_answer_quality_check" not in qa_router
     assert "_rewrite_collection_question" not in qa_router
@@ -109,7 +109,7 @@ def test_rag_layer_uses_rag_qa_worker_name_not_research_qa_agent_alias() -> None
 def test_services_use_external_tool_gateway_instead_of_raw_registry_calls() -> None:
     paper_search_service = _read("tools/research/paper_search.py")
     function_service = _read("tools/research/research_functions.py")
-    react_qa_worker = _read("agents/research_qa_agent.py")
+    react_qa_worker = _read("agents/rag_react_qa_worker.py")
 
     assert "ResearchExternalToolGateway" in paper_search_service
     assert "self.external_tool_gateway.call_tool(" in paper_search_service
@@ -141,7 +141,7 @@ def test_workspace_persistence_uses_standalone_functions() -> None:
     assert "def comparison_scope_papers(" in mixins
     assert "_WorkspacePersistenceMixin" not in knowledge_agent
     assert "_WorkspacePersistenceMixin" not in paper_analysis_agent
-    assert "persist_workspace_results(context" in knowledge_agent
+    assert "persist_workspace_results(" in knowledge_agent
     assert "persist_workspace_results(" in paper_analysis_agent
     assert "comparison_scope_papers(" in paper_analysis_agent
 
@@ -175,3 +175,32 @@ def test_intent_heuristics_are_module_level_not_instance_methods() -> None:
     assert "self._should_inherit_snapshot_scope(" not in runtime_core
     assert "self._route_mode_hint_for_request(" not in runtime_core
     assert "self._normalize_topic_text(" not in runtime_core
+
+
+def test_service_composes_explicit_application_collaborators():
+    from services.research.literature_research_service import LiteratureResearchService
+    assert LiteratureResearchService.__bases__ == (object,)
+    for path, cls in [
+        ('services/research/conversation_service.py', 'ConversationService'),
+        ('services/research/paper_operations.py', 'PaperOperationsService'),
+        ('services/research/qa_router.py', 'QAApplicationService'),
+    ]:
+        tree = ast.parse(_read(path))
+        owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == cls)
+        init = next(node for node in owner.body if isinstance(node, ast.FunctionDef) and node.name == '__init__')
+        names = {arg.arg for arg in init.args.args + init.args.kwonlyargs}
+        assert not names & {'host', 'service', 'research_service'}
+        assert '__getattr__' not in _read(path)
+        assert '__dict__' not in _read(path)
+    assert 'class ConversationMixin' not in _read('memory/conversation_manager.py')
+
+
+def test_loaded_qa_execution_has_no_storage_or_commit_and_worker_is_separate():
+    source = _read('agents/research_qa_agent.py')
+    assert 'class RagReActQAWorker' not in source
+    assert 'class RagReActQAWorker' in _read('agents/rag_react_qa_worker.py')
+    tree = ast.parse(source)
+    execute = next((node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == 'execute_loaded_qa'), None)
+    assert execute is not None
+    calls = {node.func.attr for node in ast.walk(execute) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
+    assert not calls & {'load_task', 'load_report', 'load_papers', 'save_task_state', 'save_report', 'persist_research_update', 'promote_conclusion_to_long_term'}

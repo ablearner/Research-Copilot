@@ -1,15 +1,20 @@
-"""QA lifecycle mixin for LiteratureResearchService.
-
-The service entry point delegates execution to ResearchQAAgent.execute_qa()
-and keeps only route helpers, follow-up persistence, and quality checks here.
-"""
+"""Task QA loading, routing helpers, follow-up calculation and persistence."""
 
 from __future__ import annotations
 
+from typing import Callable, Any, TYPE_CHECKING
 from datetime import UTC, datetime
-from typing import Any
 from uuid import uuid4
 
+from adapters.llm.base import BaseLLMAdapter
+from agents.chart_analysis_agent import ChartAnalysisAgent
+from tools.research import IntentResolutionTool, QARoutingTool, VisualIntentRoutingTool
+from tools.research.paper_search import PaperSearchService
+from tools.research.paper_selector import PaperSelectorService
+from tools.research.collection_qa_capability import ResearchCollectionQACapability
+from domain.schemas.research_context import ResearchExecutionContext
+from memory.research_memory_gateway import ResearchMemoryGateway
+from adapters.storage.research_report_service import ResearchReportService
 from domain.schemas.research import (
     PaperCandidate,
     ResearchReport,
@@ -22,31 +27,46 @@ from tools.research.qa_decisions import is_insufficient_answer
 from tools.research.qa_schemas import ResearchQARouteDecision
 from domain.research_workspace import build_workspace_from_task
 
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     from tools.research.paper_selector import PaperSelectionScope
+    from agents.research_qa_agent import ResearchQAAgent, QAExecutionResult
 
 
-class QARoutingMixin:
-    """Mixin providing QA route helpers and follow-up lifecycle methods.
+class QAApplicationService:
+    """Load QA inputs and commit results using explicit storage and tool ports."""
 
-    Assumes the host class exposes the following attributes (provided by
-    ``LiteratureResearchService.__init__``):
-
-    * ``report_service``
-    * ``paper_selector_service``
-    * ``qa_routing_tool``
-    * ``user_intent_resolver``
-    * ``chart_analysis_agent``
-    * ``memory_gateway``
-    * ``research_collection_qa_capability``
-    * ``paper_search_service``
-    * ``build_execution_context(...)``
-    * ``save_task_state(...)``
-    * ``_load_cached_figure_payload(...)``
-    * ``list_paper_figures(...)``
-    """
+    def __init__(
+        self,
+        *,
+        _load_cached_figure_payload: Callable[..., Any],
+        build_execution_context: Callable[..., ResearchExecutionContext],
+        chart_analysis_agent: ChartAnalysisAgent,
+        get_collection_qa_capability: Callable[..., ResearchCollectionQACapability],
+        list_paper_figures: Callable[..., Any],
+        llm_adapter: BaseLLMAdapter | None,
+        memory_gateway: ResearchMemoryGateway,
+        paper_search_service: PaperSearchService,
+        paper_selector_service: PaperSelectorService,
+        qa_routing_tool: QARoutingTool,
+        report_service: ResearchReportService,
+        save_task_state: Callable[..., ResearchTask],
+        user_intent_resolver: IntentResolutionTool,
+        visual_intent_router: VisualIntentRoutingTool,
+    ) -> None:
+        self._load_cached_figure_payload = _load_cached_figure_payload
+        self.build_execution_context = build_execution_context
+        self.chart_analysis_agent = chart_analysis_agent
+        self.get_collection_qa_capability = get_collection_qa_capability
+        self.list_paper_figures = list_paper_figures
+        self.llm_adapter = llm_adapter
+        self.memory_gateway = memory_gateway
+        self.paper_search_service = paper_search_service
+        self.paper_selector_service = paper_selector_service
+        self.qa_routing_tool = qa_routing_tool
+        self.report_service = report_service
+        self.save_task_state = save_task_state
+        self.user_intent_resolver = user_intent_resolver
+        self.visual_intent_router = visual_intent_router
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -59,15 +79,35 @@ class QARoutingMixin:
         *,
         graph_runtime,
     ) -> ResearchTaskAskResponse:
+        result = await self.execute_qa(task_id, request, graph_runtime=graph_runtime)
+        return result.response
+
+    async def execute_qa(
+        self, task_id: str, request: ResearchTaskAskRequest, *, graph_runtime: Any,
+        persist: bool = True, executor: ResearchQAAgent | None = None,
+    ) -> QAExecutionResult:
         from agents.research_qa_agent import ResearchQAAgent
 
-        result = await ResearchQAAgent().execute_qa(
-            self,
-            task_id,
-            request,
-            graph_runtime=graph_runtime,
+        task = self.report_service.load_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        report = self.report_service.load_report(task_id, task.report_id)
+        papers = self.report_service.load_papers(task_id)
+        result = await (executor or ResearchQAAgent()).execute_loaded_qa(
+            self, task, report, papers, request, graph_runtime=graph_runtime,
         )
-        return result.response
+        if persist:
+            self.save_task_state(result.updated_task, conversation_id=request.conversation_id)
+            self.report_service.save_report(result.updated_report)
+            self.memory_gateway.persist_research_update(**result.persist_params["persist_research_update"])
+            promotion = result.persist_params.get("promote_conclusion")
+            if promotion is not None:
+                self.memory_gateway.promote_conclusion_to_long_term(**promotion)
+        return result
+
+    @property
+    def research_collection_qa_capability(self) -> ResearchCollectionQACapability:
+        return self.get_collection_qa_capability()
 
     # ------------------------------------------------------------------
     # Route selection
@@ -268,7 +308,6 @@ class QARoutingMixin:
             max_papers=max(len(merged), 1),
         )
 
-
     # ------------------------------------------------------------------
     # Follow-up & quality helpers
     # ------------------------------------------------------------------
@@ -277,6 +316,7 @@ class QARoutingMixin:
         self,
         *,
         task: ResearchTask,
+        report: ResearchReport | None,
         request: ResearchTaskAskRequest,
         qa,
         papers: list[PaperCandidate],
@@ -284,7 +324,6 @@ class QARoutingMixin:
         scope: PaperSelectionScope,
     ) -> tuple[ResearchTask, ResearchReport]:
         now = datetime.now(UTC).isoformat()
-        report = self.report_service.load_report(task.task_id, task.report_id)
         if report is None:
             report = ResearchReport(
                 report_id=task.report_id or f"report_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}",

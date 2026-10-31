@@ -9,17 +9,25 @@ from core.utils import now_iso as _now_iso
 from agents.chart_analysis_agent import ChartAnalysisAgent
 from agents.preference_memory_agent import PreferenceMemoryAgent
 from domain.schemas.research import (
+    ResearchConversation,
+    CreateResearchConversationRequest,
+    ImportPapersRequest,
+    ImportPapersResponse,
+    ResearchTaskAskRequest,
+    ResearchTaskAskResponse,
+    ResearchPaperFigureListResponse,
+    AnalyzeResearchPaperFigureRequest,
+    AnalyzeResearchPaperFigureResponse,
+    ResearchTodoActionRequest,
+    ResearchTodoActionResponse,
     ResearchAdvancedStrategy,
     CreateResearchTaskRequest,
     PaperCandidate,
     ResearchAgentRunRequest,
     ResearchAgentRunResponse,
     ResearchConversationResponse,
-    ResearchContextSummary,
     ResearchJob,
     ResearchReport,
-    ResearchMessage,
-    ResearchRuntimeEvent,
     ResearchStatusMetadata,
     ResearchTask,
     ResearchTaskResponse,
@@ -53,15 +61,14 @@ from core.observability import ResearchObservabilityService
 from tools.research.paper_search import PaperSearchService
 from adapters.storage.research_report_service import ResearchReportService
 from domain.research_workspace import build_workspace_state
-from memory.conversation_manager import ConversationMixin, _preferred_answer_language_from_text
-from memory.research_context_manager import INTERNAL_CONVERSATION_MESSAGE_TITLES
-from services.research.paper_operations import PaperOperationsMixin
-from services.research.qa_router import QARoutingMixin
+from services.research.conversation_service import ConversationService, _preferred_answer_language_from_text
+from services.research.paper_operations import PaperOperationsService, ImportProgressCallback
+from services.research.qa_router import QAApplicationService
 
 logger = logging.getLogger(__name__)
 
 
-class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperationsMixin):
+class LiteratureResearchService:
     """MVP coordination layer for literature search, persistence, and report retrieval."""
 
     def __init__(
@@ -137,6 +144,58 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             report_service.storage_root / "observability"
         )
         self.external_tool_gateway = getattr(self.paper_search_service, "external_tool_gateway", None)
+
+        self.conversation_service = ConversationService(
+            _build_status_metadata=self._build_status_metadata,
+            _compact_text=self._compact_text,
+            _format_evidence_citation=self._format_evidence_citation,
+            _job_tasks=self._job_tasks,
+            memory_gateway=self.memory_gateway,
+            report_service=self.report_service,
+            research_context_manager=self.research_context_manager,
+        )
+        self.paper_service = PaperOperationsService(
+            _build_discovery_only_request=self._build_discovery_only_request,
+            _build_status_metadata=self._build_status_metadata,
+            _job_tasks=self._job_tasks,
+            _persist_runtime_conversation_snapshot=self._persist_runtime_conversation_snapshot,
+            _resolve_research_session_id=self._resolve_research_session_id,
+            _set_conversation_active_job=self._set_conversation_active_job,
+            _update_job=self._update_job,
+            _update_research_memory=self._update_research_memory,
+            append_runtime_event=lambda *args, **kwargs: self.append_runtime_event(*args, **kwargs),
+            ask_task_collection=lambda *args, **kwargs: self.ask_task_collection(*args, **kwargs),
+            chart_analysis_agent=self.chart_analysis_agent,
+            get_task=lambda *args, **kwargs: self.get_task(*args, **kwargs),
+            import_concurrency=self.import_concurrency,
+            import_index_timeout_seconds=self.import_index_timeout_seconds,
+            observability_service=self.observability_service,
+            paper_import_service=self.paper_import_service,
+            paper_search_service=self.paper_search_service,
+            record_import_turn=lambda *args, **kwargs: self.record_import_turn(*args, **kwargs),
+            record_notice=lambda *args, **kwargs: self.record_notice(*args, **kwargs),
+            record_qa_turn=lambda *args, **kwargs: self.record_qa_turn(*args, **kwargs),
+            report_service=self.report_service,
+            run_agent=lambda *args, **kwargs: self.run_agent(*args, **kwargs),
+            save_job_state=lambda *args, **kwargs: self.save_job_state(*args, **kwargs),
+            save_task_state=lambda *args, **kwargs: self.save_task_state(*args, **kwargs),
+        )
+        self.qa_service = QAApplicationService(
+            _load_cached_figure_payload=self._load_cached_figure_payload,
+            build_execution_context=lambda *args, **kwargs: self.build_execution_context(*args, **kwargs),
+            chart_analysis_agent=self.chart_analysis_agent,
+            get_collection_qa_capability=lambda: self.research_collection_qa_capability,
+            list_paper_figures=lambda *args, **kwargs: self.list_paper_figures(*args, **kwargs),
+            llm_adapter=self.llm_adapter,
+            memory_gateway=self.memory_gateway,
+            paper_search_service=self.paper_search_service,
+            paper_selector_service=self.paper_selector_service,
+            qa_routing_tool=self.qa_routing_tool,
+            report_service=self.report_service,
+            save_task_state=lambda *args, **kwargs: self.save_task_state(*args, **kwargs),
+            user_intent_resolver=self.user_intent_resolver,
+            visual_intent_router=self.visual_intent_router,
+        )
 
     def _find_conversation_id_for_task(self, task_id: str | None) -> str | None:
         if not task_id:
@@ -778,76 +837,8 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
         report = self.report_service.load_report(task_id, task.report_id)
         return ResearchTaskResponse(task=task, papers=papers, report=report, warnings=[])
 
-    def _build_message(
-        self,
-        *,
-        role: str,
-        kind: str,
-        title: str,
-        content: str = "",
-        meta: str | None = None,
-        citations: list[str] | None = None,
-        payload: dict | None = None,
-    ) -> ResearchMessage:
-        return ResearchMessage(
-            message_id=f"msg_{uuid4().hex}",
-            role=role,
-            kind=kind,
-            title=title,
-            content=content,
-            meta=meta,
-            created_at=_now_iso(),
-            citations=citations or [],
-            payload=payload or {},
-        )
 
-    def _build_runtime_event(
-        self,
-        *,
-        event_type: str,
-        conversation_id: str | None,
-        task_id: str | None = None,
-        correlation_id: str | None = None,
-        payload: dict[str, Any] | None = None,
-    ) -> ResearchRuntimeEvent:
-        return ResearchRuntimeEvent(
-            event_id=f"evt_{uuid4().hex}",
-            event_type=event_type,
-            task_id=task_id,
-            conversation_id=conversation_id,
-            correlation_id=correlation_id,
-            timestamp=_now_iso(),
-            payload=payload or {},
-        )
 
-    def _build_context_summary(
-        self,
-        *,
-        workspace: ResearchWorkspaceState,
-        topic: str | None,
-        days_back: int | None = None,
-        max_papers: int | None = None,
-        sources: list[str] | None = None,
-        selected_paper_ids: list[str] | None = None,
-        paper_count: int | None = None,
-        imported_document_ids: list[str] | None = None,
-        last_user_message: str | None = None,
-        correlation_id: str | None = None,
-        messages: list[ResearchMessage] | None = None,
-    ) -> ResearchContextSummary:
-        return self.research_context_manager.build_context_summary(
-            workspace=workspace,
-            topic=topic,
-            days_back=days_back,
-            max_papers=max_papers,
-            sources=sources,
-            selected_paper_ids=selected_paper_ids,
-            paper_count=paper_count,
-            imported_document_ids=imported_document_ids,
-            last_user_message=last_user_message,
-            correlation_id=correlation_id,
-            messages=messages,
-        )
 
     def _build_status_metadata(
         self,
@@ -961,248 +952,10 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
             }
         )
 
-    def _persist_runtime_conversation_snapshot(
-        self,
-        *,
-        conversation_id: str | None,
-        task_response: ResearchTaskResponse | None,
-        workspace: ResearchWorkspaceState,
-        advanced_strategy: ResearchAdvancedStrategy | None,
-    ) -> None:
-        if not conversation_id:
-            return
-        conversation = self.report_service.load_conversation(conversation_id)
-        if conversation is None:
-            return
-        task = task_response.task if task_response is not None else None
-        correlation_id = (
-            task.metadata.get("correlation_id")
-            if task is not None and isinstance(task.metadata, dict)
-            else conversation.status_metadata.correlation_id
-        )
-        task_id = task.task_id if task is not None else conversation.task_id
-        existing_messages = self.report_service.load_messages(conversation_id)
-        summary = self._build_context_summary(
-            workspace=workspace,
-            topic=task.topic if task is not None else conversation.snapshot.topic,
-            days_back=task.days_back if task is not None else conversation.snapshot.days_back,
-            max_papers=task.max_papers if task is not None else conversation.snapshot.max_papers,
-            sources=task.sources if task is not None else conversation.snapshot.sources,
-            selected_paper_ids=conversation.snapshot.selected_paper_ids,
-            paper_count=task.paper_count if task is not None else None,
-            imported_document_ids=task.imported_document_ids if task is not None else workspace.document_ids,
-            correlation_id=correlation_id,
-            messages=existing_messages,
-        )
-        event_type = "task_completed" if task_response is not None else "memory_updated"
-        next_events = [
-            *conversation.snapshot.recent_events[-11:],
-            self._build_runtime_event(
-                event_type=event_type,
-                conversation_id=conversation_id,
-                task_id=task_id,
-                correlation_id=correlation_id,
-                payload={
-                    "workspace_stage": workspace.current_stage,
-                    "status_summary": workspace.status_summary,
-                    "task_status": task.status if task is not None else None,
-                },
-            ),
-        ]
-        snapshot_update: dict[str, Any] = {
-            "workspace": workspace,
-            "context_summary": summary,
-            "recent_events": next_events,
-        }
-        if advanced_strategy is not None:
-            snapshot_update["advanced_strategy"] = advanced_strategy
-        if task_response is not None:
-            snapshot_update.update(
-                {
-                    "topic": task_response.task.topic,
-                    "days_back": task_response.task.days_back,
-                    "max_papers": task_response.task.max_papers,
-                    "sources": task_response.task.sources,
-                    "task_result": task_response,
-                }
-            )
-        updated = conversation.model_copy(
-            update={
-                "updated_at": _now_iso(),
-                "task_id": (
-                    task_response.task.task_id
-                    if task_response is not None
-                    else conversation.task_id
-                ),
-                "snapshot": conversation.snapshot.model_copy(update=snapshot_update),
-                "status_metadata": self._build_status_metadata(
-                    lifecycle_status="completed" if task_response is not None else "running",
-                    correlation_id=correlation_id,
-                    existing=conversation.status_metadata,
-                ),
-            }
-        )
-        self.report_service.save_conversation(updated)
 
-    def append_runtime_event(
-        self,
-        *,
-        conversation_id: str | None,
-        event_type: str,
-        task_id: str | None = None,
-        correlation_id: str | None = None,
-        payload: dict[str, Any] | None = None,
-    ) -> None:
-        if not conversation_id:
-            return
-        conversation = self.report_service.load_conversation(conversation_id)
-        if conversation is None:
-            return
-        next_events = [
-            *conversation.snapshot.recent_events[-11:],
-            self._build_runtime_event(
-                event_type=event_type,
-                conversation_id=conversation_id,
-                task_id=task_id or conversation.task_id,
-                correlation_id=correlation_id or conversation.status_metadata.correlation_id,
-                payload=payload,
-            ),
-        ]
-        updated = conversation.model_copy(
-            update={
-                "updated_at": _now_iso(),
-                "snapshot": conversation.snapshot.model_copy(update={"recent_events": next_events}),
-            }
-        )
-        self.report_service.save_conversation(updated)
 
-    def _record_conversation_messages(
-        self,
-        conversation_id: str,
-        *,
-        messages: list[ResearchMessage],
-        snapshot_update: dict,
-        task_id: str | None = None,
-        title_hint: str | None = None,
-    ) -> ResearchConversationResponse:
-        conversation = self.report_service.load_conversation(conversation_id)
-        if conversation is None:
-            raise KeyError(conversation_id)
-        existing_messages = self.report_service.load_messages(conversation_id)
-        next_messages = [*existing_messages, *messages]
-        last_user_message = next(
-            (message.content for message in reversed(next_messages) if message.role == "user" and message.content),
-            None,
-        )
-        workspace = snapshot_update.get("workspace", conversation.snapshot.workspace)
-        task_result = snapshot_update.get("task_result", conversation.snapshot.task_result)
-        topic = snapshot_update.get("topic", conversation.snapshot.topic)
-        task_correlation_id = None
-        if task_result is not None and isinstance(task_result.task.metadata, dict):
-            task_correlation_id = task_result.task.metadata.get("correlation_id")
-        correlation_id = (
-            snapshot_update.get("correlation_id")
-            or task_correlation_id
-            or conversation.status_metadata.correlation_id
-        )
-        effective_snapshot_update = dict(snapshot_update)
-        if effective_snapshot_update.get("active_route_mode") == "general_chat":
-            effective_snapshot_update.setdefault("selected_paper_ids", [])
-            effective_snapshot_update.setdefault("active_paper_ids", [])
-        effective_snapshot_update.update(
-            self._thread_metadata_update(
-                conversation=conversation,
-                snapshot_update=effective_snapshot_update,
-                last_user_message=last_user_message,
-                task_id=task_id if task_id is not None else conversation.task_id,
-            )
-        )
-        context_summary = self._build_context_summary(
-            workspace=workspace,
-            topic=topic,
-            days_back=effective_snapshot_update.get("days_back", conversation.snapshot.days_back),
-            max_papers=effective_snapshot_update.get("max_papers", conversation.snapshot.max_papers),
-            sources=effective_snapshot_update.get("sources", conversation.snapshot.sources),
-            selected_paper_ids=effective_snapshot_update.get(
-                "selected_paper_ids",
-                conversation.snapshot.selected_paper_ids,
-            ),
-            paper_count=len(task_result.papers) if task_result is not None else None,
-            imported_document_ids=task_result.task.imported_document_ids if task_result is not None else workspace.document_ids,
-            last_user_message=last_user_message,
-            correlation_id=correlation_id,
-            messages=next_messages,
-        )
-        last_message = messages[-1] if messages else None
-        event_type = "tool_failed" if snapshot_update.get("last_error") else "memory_updated"
-        next_snapshot = conversation.snapshot.model_copy(
-            update={
-                **effective_snapshot_update,
-                "context_summary": context_summary,
-                "recent_events": [
-                    *conversation.snapshot.recent_events[-11:],
-                    self._build_runtime_event(
-                        event_type=event_type,
-                        conversation_id=conversation_id,
-                        task_id=task_id if task_id is not None else conversation.task_id,
-                        correlation_id=correlation_id,
-                        payload={
-                            "message_kind": last_message.kind if last_message is not None else None,
-                            "message_title": last_message.title if last_message is not None else None,
-                            "last_error": effective_snapshot_update.get("last_error"),
-                            "active_route_mode": effective_snapshot_update.get("active_route_mode"),
-                            "active_thread_id": effective_snapshot_update.get("active_thread_id"),
-                        },
-                    ),
-                ],
-            }
-        )
-        last_preview = ""
-        if next_messages:
-            last_preview = self._compact_text(next_messages[-1].content or next_messages[-1].title, limit=90)
-        updated = conversation.model_copy(
-            update={
-                "title": (title_hint or conversation.title or "未命名研究会话").strip() or "未命名研究会话",
-                "updated_at": _now_iso(),
-                "task_id": task_id if task_id is not None else conversation.task_id,
-                "message_count": len(next_messages),
-                "last_message_preview": last_preview or conversation.last_message_preview,
-                "snapshot": next_snapshot,
-                "status_metadata": self._build_status_metadata(
-                    lifecycle_status="failed" if effective_snapshot_update.get("last_error") else "running",
-                    correlation_id=correlation_id,
-                    error_message=effective_snapshot_update.get("last_error"),
-                    existing=conversation.status_metadata,
-                ),
-            }
-        )
-        self.report_service.save_conversation(updated)
-        self.report_service.save_messages(conversation_id, next_messages)
-        return ResearchConversationResponse(conversation=updated, messages=next_messages)
 
-    def _filter_persisted_conversation_messages(
-        self,
-        messages: list[ResearchMessage],
-    ) -> list[ResearchMessage]:
-        return [
-            message
-            for message in messages
-            if message.title not in INTERNAL_CONVERSATION_MESSAGE_TITLES
-        ]
 
-    def _set_conversation_active_job(self, conversation_id: str | None, job_id: str | None) -> None:
-        if not conversation_id:
-            return
-        conversation = self.report_service.load_conversation(conversation_id)
-        if conversation is None:
-            return
-        updated = conversation.model_copy(
-            update={
-                "updated_at": _now_iso(),
-                "snapshot": conversation.snapshot.model_copy(update={"active_job_id": job_id}),
-            }
-        )
-        self.report_service.save_conversation(updated)
 
     def _update_job(self, job_id: str, **updates) -> ResearchJob:
         job = self.get_job(job_id)
@@ -1273,3 +1026,347 @@ class LiteratureResearchService(QARoutingMixin, ConversationMixin, PaperOperatio
                 payload=payload,
             )
         return job
+
+    # Thin compatibility facade; collaborators own application workflows.
+    def list_conversations(self) -> list[ResearchConversation]:
+        return self.conversation_service.list_conversations()
+
+    def _topic_continuity_score(self, *args, **kwargs):
+        return self.conversation_service._topic_continuity_score(*args, **kwargs)
+
+    def _looks_like_general_chat(self, *args, **kwargs):
+        return self.conversation_service._looks_like_general_chat(*args, **kwargs)
+
+    def _infer_route_mode(self, *args, **kwargs):
+        return self.conversation_service._infer_route_mode(*args, **kwargs)
+
+    def _thread_metadata_update(self, *args, **kwargs):
+        return self.conversation_service._thread_metadata_update(*args, **kwargs)
+
+    def create_conversation(self, request: CreateResearchConversationRequest) -> ResearchConversationResponse:
+        return self.conversation_service.create_conversation(request)
+
+    def get_conversation(self, conversation_id: str) -> ResearchConversationResponse:
+        return self.conversation_service.get_conversation(conversation_id)
+
+    def rename_conversation(self, conversation_id: str, title: str) -> ResearchConversationResponse:
+        return self.conversation_service.rename_conversation(conversation_id, title)
+
+    def _conversation_task_id(self, *args, **kwargs):
+        return self.conversation_service._conversation_task_id(*args, **kwargs)
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        return self.conversation_service.delete_conversation(conversation_id)
+
+    async def reset_state(self) -> None:
+        return await self.conversation_service.reset_state()
+
+    def record_search_turn(
+        self,
+        conversation_id: str,
+        *,
+        topic: str,
+        response: SearchPapersResponse,
+        days_back: int,
+        max_papers: int,
+        sources: list[str],
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_search_turn(conversation_id, topic=topic, response=response, days_back=days_back, max_papers=max_papers, sources=sources)
+
+    def record_task_turn(
+        self,
+        conversation_id: str,
+        *,
+        response: ResearchTaskResponse,
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_task_turn(conversation_id, response=response)
+
+    def record_import_turn(
+        self,
+        conversation_id: str,
+        *,
+        task_response: ResearchTaskResponse | None,
+        import_response: ImportPapersResponse,
+        selected_paper_ids: list[str] | None = None,
+        notice: str | None = None,
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_import_turn(conversation_id, task_response=task_response, import_response=import_response, selected_paper_ids=selected_paper_ids, notice=notice)
+
+    def record_qa_turn(
+        self,
+        conversation_id: str,
+        *,
+        task_response: ResearchTaskResponse,
+        ask_response: ResearchTaskAskResponse,
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_qa_turn(conversation_id, task_response=task_response, ask_response=ask_response)
+
+    def record_agent_turn(
+        self,
+        conversation_id: str,
+        *,
+        request: ResearchAgentRunRequest,
+        response: ResearchAgentRunResponse,
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_agent_turn(conversation_id, request=request, response=response)
+
+    def _active_paper_ids_from_agent_turn(self, *args, **kwargs):
+        return self.conversation_service._active_paper_ids_from_agent_turn(*args, **kwargs)
+
+    def record_notice(
+        self,
+        conversation_id: str,
+        *,
+        task_response: ResearchTaskResponse | None = None,
+        notice: str,
+        kind: str = "notice",
+        active_job_id: str | None = None,
+        last_error: str | None = None,
+    ) -> ResearchConversationResponse:
+        return self.conversation_service.record_notice(conversation_id, task_response=task_response, notice=notice, kind=kind, active_job_id=active_job_id, last_error=last_error)
+
+    def _task_response_from_agent_response(self, *args, **kwargs):
+        return self.conversation_service._task_response_from_agent_response(*args, **kwargs)
+
+    def _ask_response_from_agent_response(self, *args, **kwargs):
+        return self.conversation_service._ask_response_from_agent_response(*args, **kwargs)
+
+    def _build_message(self, *args, **kwargs):
+        return self.conversation_service._build_message(*args, **kwargs)
+
+    def _build_runtime_event(self, *args, **kwargs):
+        return self.conversation_service._build_runtime_event(*args, **kwargs)
+
+    def _build_context_summary(self, *args, **kwargs):
+        return self.conversation_service._build_context_summary(*args, **kwargs)
+
+    def _persist_runtime_conversation_snapshot(self, *args, **kwargs):
+        return self.conversation_service._persist_runtime_conversation_snapshot(*args, **kwargs)
+
+    def append_runtime_event(
+        self,
+        *,
+        conversation_id: str | None,
+        event_type: str,
+        task_id: str | None = None,
+        correlation_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        return self.conversation_service.append_runtime_event(conversation_id=conversation_id, event_type=event_type, task_id=task_id, correlation_id=correlation_id, payload=payload)
+
+    def _record_conversation_messages(self, *args, **kwargs):
+        return self.conversation_service._record_conversation_messages(*args, **kwargs)
+
+    def _filter_persisted_conversation_messages(self, *args, **kwargs):
+        return self.conversation_service._filter_persisted_conversation_messages(*args, **kwargs)
+
+    def _set_conversation_active_job(self, *args, **kwargs):
+        return self.conversation_service._set_conversation_active_job(*args, **kwargs)
+
+    async def list_paper_figures(
+        self,
+        task_id: str,
+        paper_id: str,
+        *,
+        graph_runtime: Any,
+    ) -> ResearchPaperFigureListResponse:
+        return await self.paper_service.list_paper_figures(task_id, paper_id, graph_runtime=graph_runtime)
+
+    async def analyze_paper_figure(
+        self,
+        task_id: str,
+        paper_id: str,
+        request: AnalyzeResearchPaperFigureRequest,
+        *,
+        graph_runtime: Any,
+        supervisor_instruction: str | None = None,
+        skill_context: str | None = None,
+        expert_context: dict[str, Any] | None = None,
+    ) -> AnalyzeResearchPaperFigureResponse:
+        return await self.paper_service.analyze_paper_figure(task_id, paper_id, request, graph_runtime=graph_runtime, supervisor_instruction=supervisor_instruction, skill_context=skill_context, expert_context=expert_context)
+
+    def _load_cached_figure_payload(self, *args, **kwargs):
+        return self.paper_service._load_cached_figure_payload(*args, **kwargs)
+
+    def _load_cached_figure_target(self, *args, **kwargs):
+        return self.paper_service._load_cached_figure_target(*args, **kwargs)
+
+    def _persist_paper_figure_cache(self, *args, **kwargs):
+        return self.paper_service._persist_paper_figure_cache(*args, **kwargs)
+
+    def _resolve_imported_paper(self, *args, **kwargs):
+        return self.paper_service._resolve_imported_paper(*args, **kwargs)
+
+    async def _parse_imported_paper_document(self, *args, **kwargs):
+        return await self.paper_service._parse_imported_paper_document(*args, **kwargs)
+
+    def persist_runtime_state(
+        self,
+        *,
+        task_response: ResearchTaskResponse | None,
+        workspace: ResearchWorkspaceState,
+        conversation_id: str | None = None,
+        advanced_strategy: ResearchAdvancedStrategy | None = None,
+    ) -> ResearchTaskResponse | None:
+        return self.paper_service.persist_runtime_state(task_response=task_response, workspace=workspace, conversation_id=conversation_id, advanced_strategy=advanced_strategy)
+
+    def get_job(self, job_id: str) -> ResearchJob:
+        return self.paper_service.get_job(job_id)
+
+    async def start_import_job(
+        self,
+        request: ImportPapersRequest,
+        *,
+        graph_runtime,
+    ) -> ResearchJob:
+        return await self.paper_service.start_import_job(request, graph_runtime=graph_runtime)
+
+    async def start_todo_import_job(
+        self,
+        task_id: str,
+        todo_id: str,
+        request: ResearchTodoActionRequest,
+        *,
+        graph_runtime,
+    ) -> ResearchJob:
+        return await self.paper_service.start_todo_import_job(task_id, todo_id, request, graph_runtime=graph_runtime)
+
+    def update_todo_status(self, task_id: str, todo_id: str, status: str) -> ResearchTaskResponse:
+        return self.paper_service.update_todo_status(task_id, todo_id, status)
+
+    async def rerun_todo_search(
+        self,
+        task_id: str,
+        todo_id: str,
+        request: ResearchTodoActionRequest,
+        *,
+        graph_runtime: Any,
+    ) -> ResearchTodoActionResponse:
+        return await self.paper_service.rerun_todo_search(task_id, todo_id, request, graph_runtime=graph_runtime)
+
+    async def import_from_todo(
+        self,
+        task_id: str,
+        todo_id: str,
+        request: ResearchTodoActionRequest,
+        *,
+        graph_runtime,
+    ) -> ResearchTodoActionResponse:
+        return await self.paper_service.import_from_todo(task_id, todo_id, request, graph_runtime=graph_runtime)
+
+    async def import_papers(
+        self,
+        request: ImportPapersRequest,
+        *,
+        graph_runtime,
+        progress_callback: ImportProgressCallback | None = None,
+    ) -> ImportPapersResponse:
+        return await self.paper_service.import_papers(request, graph_runtime=graph_runtime, progress_callback=progress_callback)
+
+    def _emit_import_heartbeat(self, *args, **kwargs):
+        return self.paper_service._emit_import_heartbeat(*args, **kwargs)
+
+    async def _import_single_paper(self, *args, **kwargs):
+        return await self.paper_service._import_single_paper(*args, **kwargs)
+
+    async def _sync_imported_paper_to_zotero(self, *args, **kwargs):
+        return await self.paper_service._sync_imported_paper_to_zotero(*args, **kwargs)
+
+    def _resolve_import_candidates(self, *args, **kwargs):
+        return self.paper_service._resolve_import_candidates(*args, **kwargs)
+
+    async def _search_follow_up_papers(self, *args, **kwargs):
+        return await self.paper_service._search_follow_up_papers(*args, **kwargs)
+
+    async def _run_import_job(self, *args, **kwargs):
+        return await self.paper_service._run_import_job(*args, **kwargs)
+
+    async def _run_todo_import_job(self, *args, **kwargs):
+        return await self.paper_service._run_todo_import_job(*args, **kwargs)
+
+    async def _run_graph_backfill_for_import_results(self, *args, **kwargs):
+        return await self.paper_service._run_graph_backfill_for_import_results(*args, **kwargs)
+
+    def _format_evidence_citation(self, *args, **kwargs):
+        return self.paper_service._format_evidence_citation(*args, **kwargs)
+
+    def _load_task_and_todo(self, *args, **kwargs):
+        return self.paper_service._load_task_and_todo(*args, **kwargs)
+
+    def _find_todo(self, *args, **kwargs):
+        return self.paper_service._find_todo(*args, **kwargs)
+
+    def _replace_task_todo(self, *args, **kwargs):
+        return self.paper_service._replace_task_todo(*args, **kwargs)
+
+    def _resolve_todos_after_import(self, *args, **kwargs):
+        return self.paper_service._resolve_todos_after_import(*args, **kwargs)
+
+    def _build_todo_query(self, *args, **kwargs):
+        return self.paper_service._build_todo_query(*args, **kwargs)
+
+    def _select_todo_import_candidates(self, *args, **kwargs):
+        return self.paper_service._select_todo_import_candidates(*args, **kwargs)
+
+    def _merge_papers(self, *args, **kwargs):
+        return self.paper_service._merge_papers(*args, **kwargs)
+
+    def _paper_identity_keys(self, *args, **kwargs):
+        return self.paper_service._paper_identity_keys(*args, **kwargs)
+
+    def _rebuild_task_report(self, *args, **kwargs):
+        return self.paper_service._rebuild_task_report(*args, **kwargs)
+
+    def _extract_markdown_section(self, *args, **kwargs):
+        return self.paper_service._extract_markdown_section(*args, **kwargs)
+
+    def _append_todo_action_entry(self, *args, **kwargs):
+        return self.paper_service._append_todo_action_entry(*args, **kwargs)
+
+    def _merge_text_entries(self, *args, **kwargs):
+        return self.paper_service._merge_text_entries(*args, **kwargs)
+
+    async def ask_task_collection(
+        self,
+        task_id: str,
+        request: ResearchTaskAskRequest,
+        *,
+        graph_runtime,
+    ) -> ResearchTaskAskResponse:
+        return await self.qa_service.ask_task_collection(task_id, request, graph_runtime=graph_runtime)
+
+    async def _select_qa_route(self, *args, **kwargs):
+        return await self.qa_service._select_qa_route(*args, **kwargs)
+
+    def _restore_visual_anchor_from_workspace(self, *args, **kwargs):
+        return self.qa_service._restore_visual_anchor_from_workspace(*args, **kwargs)
+
+    def _extract_visual_anchor(self, *args, **kwargs):
+        return self.qa_service._extract_visual_anchor(*args, **kwargs)
+
+    async def _infer_cached_visual_anchor(self, *args, **kwargs):
+        return await self.qa_service._infer_cached_visual_anchor(*args, **kwargs)
+
+    async def _infer_or_discover_visual_anchor(self, *args, **kwargs):
+        return await self.qa_service._infer_or_discover_visual_anchor(*args, **kwargs)
+
+    async def _discover_figures_for_scope(self, *args, **kwargs):
+        return await self.qa_service._discover_figures_for_scope(*args, **kwargs)
+
+    def _refresh_existing_pool(self, *args, **kwargs):
+        return self.qa_service._refresh_existing_pool(*args, **kwargs)
+
+    def _apply_qa_follow_up(self, *args, **kwargs):
+        return self.qa_service._apply_qa_follow_up(*args, **kwargs)
+
+    def _upsert_follow_up_todo(self, *args, **kwargs):
+        return self.qa_service._upsert_follow_up_todo(*args, **kwargs)
+
+    def _append_qa_report_entry(self, *args, **kwargs):
+        return self.qa_service._append_qa_report_entry(*args, **kwargs)
+
+    def _prepend_unique_text(self, *args, **kwargs):
+        return self.qa_service._prepend_unique_text(*args, **kwargs)
+
+    def _compact_text(self, *args, **kwargs):
+        return self.qa_service._compact_text(*args, **kwargs)

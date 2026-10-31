@@ -33,16 +33,17 @@ class ResearchDocumentAgent:
         decision: Any,
     ) -> ResearchToolResult:
         from tools.research.knowledge_access import ResearchKnowledgeAccess
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
         from runtime.research.unified_action_adapters import (
             build_document_understanding_input,
             build_document_understanding_output,
         )
 
-        context.document_attempted = True
+        delta = ResearchStateDelta(document_attempted=True)
         document_input = build_document_understanding_input(context=context, decision=decision)
         if not document_input.file_path:
             return ResearchToolResult(
+                state_delta=delta,
                 status="skipped",
                 observation="no document_file_path was provided for document understanding",
                 metadata={"reason": "missing_document_file_path"},
@@ -59,11 +60,12 @@ class ResearchDocumentAgent:
             )
         except RuntimeError as exc:
             return ResearchToolResult(
+                state_delta=delta,
                 status="failed",
                 observation=str(exc),
                 metadata={"tool_name": "parse_document"},
             )
-        context.parsed_document = parsed_document
+        delta.parsed_document = parsed_document
 
         if document_input.include_graph or document_input.include_embeddings:
             try:
@@ -76,9 +78,10 @@ class ResearchDocumentAgent:
                     metadata=document_input.metadata,
                     skill_name=document_input.skill_name,
                 )
-                context.document_index_result = index_result.model_dump(mode="json")
+                delta.document_index_result = index_result.model_dump(mode="json")
             except RuntimeError as exc:
                 return ResearchToolResult(
+                    state_delta=delta,
                     status="failed",
                     observation=str(exc),
                     metadata={"tool_name": "index_document"},
@@ -86,13 +89,14 @@ class ResearchDocumentAgent:
 
         output = build_document_understanding_output(
             parsed_document=parsed_document,
-            document_index_result=context.document_index_result,
+            document_index_result=delta.document_index_result,
         )
         return ResearchToolResult(
+            state_delta=delta,
             status="succeeded",
             observation=(
                 f"document understood; document_id={parsed_document.id}; "
-                f"pages={len(parsed_document.pages)}; indexed={bool(context.document_index_result)}"
+                f"pages={len(parsed_document.pages)}; indexed={bool(delta.document_index_result)}"
             ),
             metadata=output.to_metadata(),
         )

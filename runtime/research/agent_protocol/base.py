@@ -186,6 +186,16 @@ class ResearchStateDelta:
     preference_recommendation_result: RecommendPapersFunctionOutput | None = None
     import_result: ImportPapersResponse | None = None
     compressed_context_summary: dict[str, Any] | None = None
+    execution_context: ResearchExecutionContext | None = None
+    general_answer: str | None = None
+    general_answer_metadata: dict[str, Any] | None = None
+    parsed_document: Any | None = None
+    document_index_result: dict[str, Any] | None = None
+    chart_result: Any | None = None
+    import_attempted: bool | None = None
+    document_attempted: bool | None = None
+    chart_attempted: bool | None = None
+    zotero_sync_results: list[dict[str, Any]] | None = None
     rebuild_execution_context: bool = False
     rebuild_execution_context_params: dict[str, Any] | None = None
 

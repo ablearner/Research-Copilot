@@ -61,7 +61,7 @@ class ChartAnalysisAgent:
         *,
         task_type: str = "supervisor_understand_chart",
     ) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
 
         if task_type == "supervisor_understand_chart":
             return await self._run_understand_chart(context=context, decision=decision)
@@ -74,36 +74,43 @@ class ChartAnalysisAgent:
         )
 
     async def _run_understand_chart(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
         from runtime.research.unified_action_adapters import (
             build_chart_understanding_input,
             build_chart_understanding_output,
         )
 
-        context.chart_attempted = True
+        delta = ResearchStateDelta(chart_attempted=True)
         chart_input = build_chart_understanding_input(context=context, decision=decision)
         if not chart_input.image_path:
             return ResearchToolResult(
                 status="skipped",
                 observation="no chart_image_path was provided for chart understanding",
                 metadata={"reason": "missing_chart_image_path"},
+                state_delta=delta,
             )
         chart_context = dict(chart_input.context or {})
         expert_context = chart_context.get("expert_context") if isinstance(chart_context.get("expert_context"), dict) else {}
         if expert_context.get("supervisor_instruction"):
             chart_context["supervisor_instruction"] = expert_context["supervisor_instruction"]
-        chart_result = await self.understand_chart(
-            graph_runtime=context.graph_runtime,
-            image_path=chart_input.image_path,
-            document_id=chart_input.document_id,
-            page_id=chart_input.page_id,
-            page_number=chart_input.page_number,
-            chart_id=chart_input.chart_id,
-            session_id=chart_input.session_id,
-            context=chart_context,
-            skill_name=chart_input.skill_name,
-        )
-        context.chart_result = chart_result
+        try:
+            chart_result = await self.understand_chart(
+                graph_runtime=context.graph_runtime,
+                image_path=chart_input.image_path,
+                document_id=chart_input.document_id,
+                page_id=chart_input.page_id,
+                page_number=chart_input.page_number,
+                chart_id=chart_input.chart_id,
+                session_id=chart_input.session_id,
+                context=chart_context,
+                skill_name=chart_input.skill_name,
+            )
+        except RuntimeError as exc:
+            return ResearchToolResult(
+                status="failed", observation=str(exc),
+                metadata={"tool_name": "understand_chart"}, state_delta=delta,
+            )
+        delta.chart_result = chart_result
         chart = getattr(chart_result, "chart", None)
         output = build_chart_understanding_output(
             chart_result=chart_result,
@@ -116,6 +123,7 @@ class ChartAnalysisAgent:
                 f"chart_type={getattr(chart, 'chart_type', 'unknown')}"
             ),
             metadata=output.to_metadata(),
+            state_delta=delta,
         )
 
     async def _run_analyze_paper_figures(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
@@ -264,7 +272,6 @@ class ChartAnalysisAgent:
             analysis_response.metadata["paper_figure_rejected_ids"] = sorted(excluded_figure_ids)
             analysis_response.metadata["paper_figure_candidate_count"] = len(figure_list.figures)
             analysis_response.metadata["paper_figure_untried_count"] = len(available_figures)
-        context.chart_result = analysis_response
         paper_figure_analysis = self._paper_figure_workspace_payload(
             analysis_response=analysis_response,
             target_paper=target_paper,
@@ -278,7 +285,7 @@ class ChartAnalysisAgent:
             paper_figure_analysis=paper_figure_analysis,
             persist=False,
         )
-        state_delta = None
+        state_delta = ResearchStateDelta(chart_result=analysis_response)
         if workspace_update is not None:
             memory_ops = []
             if workspace_update.memory_save_context_params is not None:
@@ -289,6 +296,8 @@ class ChartAnalysisAgent:
                     )
                 )
             state_delta = ResearchStateDelta(
+                chart_result=analysis_response,
+                execution_context=workspace_update.updated_execution_context,
                 task=workspace_update.updated_task,
                 report=workspace_update.updated_report,
                 task_response=workspace_update.updated_task_response,

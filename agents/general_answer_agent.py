@@ -51,7 +51,7 @@ class GeneralAnswerAgent:
         context: ResearchAgentToolContext,
         decision: Any,
     ) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
         from runtime.research.unified_action_adapters import build_expert_context, resolve_active_message
 
         active_message = resolve_active_message(decision)
@@ -103,12 +103,11 @@ class GeneralAnswerAgent:
                     "suggested_action": self._suggested_action(context=context),
                 },
             )
-        context.general_answer = result.answer
-        context.general_answer_metadata = result.model_dump(mode="json")
         return ResearchToolResult(
             status="succeeded",
             observation="general question answered directly without research workspace tools",
-            metadata=context.general_answer_metadata,
+            metadata=result.model_dump(mode="json"),
+            state_delta=ResearchStateDelta(general_answer=result.answer, general_answer_metadata=result.model_dump(mode="json")),
         )
 
     def _suggested_action(self, *, context: ResearchAgentToolContext) -> str:

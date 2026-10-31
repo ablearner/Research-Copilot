@@ -19,7 +19,7 @@ from memory.factory import resolve_memory_db_path
 from rag_runtime.checkpoint import build_checkpointer
 from rag_runtime.memory import GraphSessionMemory, SQLiteSessionMemoryStore
 from rag_runtime.runtime import GraphRuntime, RagRuntime
-from agents.research_qa_agent import RagReActQAWorker as ReActReasoningAgent
+from agents.rag_react_qa_worker import RagReActQAWorker as ReActReasoningAgent
 from chains.cot import CoTReasoningAgent
 from chains.plan_and_solve import PlanAndSolveReasoningAgent
 from rag_runtime.strategies import ReasoningStrategySet

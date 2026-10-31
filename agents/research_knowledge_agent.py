@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from dataclasses import replace
 
 from domain.schemas.research import ImportPapersRequest
 from domain.schemas.retrieval import RetrievalHit, merge_retrieval_hits, retrieval_hit_score  # noqa: F401
@@ -53,7 +54,7 @@ class ResearchKnowledgeAgent:
         *,
         task_type: str = "compress_context",
     ) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
 
         if task_type == "import_papers":
             return await self._run_import_papers(context=context, decision=decision)
@@ -72,12 +73,13 @@ class ResearchKnowledgeAgent:
         from runtime.research.unified_action_adapters import build_paper_import_input, build_paper_import_output
 
         task_response = context.task_response
-        context.import_attempted = True
+        attempt_delta = ResearchStateDelta(import_attempted=True)
         if task_response is None:
             return ResearchToolResult(
                 status="skipped",
                 observation="no research task is available for paper import",
                 metadata={"reason": "missing_task"},
+                state_delta=attempt_delta,
             )
         import_input = build_paper_import_input(context=context, decision=decision)
         paper_ids = import_input.resolved_paper_ids(task_response.papers)
@@ -86,8 +88,9 @@ class ResearchKnowledgeAgent:
                 status="skipped",
                 observation="no importable paper with an available PDF was found",
                 metadata={"reason": "no_import_candidates"},
+                state_delta=attempt_delta,
             )
-        import_result = await context.research_service.import_papers(
+        prepared = await context.research_service.paper_service.prepare_paper_import(
             ImportPapersRequest(
                 task_id=task_response.task.task_id,
                 paper_ids=paper_ids,
@@ -98,7 +101,8 @@ class ResearchKnowledgeAgent:
             ),
             graph_runtime=context.graph_runtime,
         )
-        refreshed = context.research_service.get_task(task_response.task.task_id)
+        import_result = prepared.response
+        refreshed = prepared.task_response or task_response
         request = context.request
         rebuild_params = {
             "graph_runtime": context.graph_runtime,
@@ -112,7 +116,7 @@ class ResearchKnowledgeAgent:
             "reasoning_style": request.reasoning_style,
             "metadata": request.metadata,
         }
-        memory_ops: list[MemoryOp] = []
+        memory_ops: list[MemoryOp] = [MemoryOp(op_type="update_research_memory", params=prepared.memory_update_params)]
         if request.conversation_id:
             memory_ops.append(MemoryOp(
                 op_type="record_import_turn",
@@ -124,8 +128,13 @@ class ResearchKnowledgeAgent:
                 },
             ))
         delta = ResearchStateDelta(
+            task=prepared.task_response.task if prepared.task_response else None,
+            report=prepared.task_response.report if prepared.task_response else None,
+            papers=prepared.papers,
+            save_task_conversation_id=request.conversation_id,
             task_response=refreshed,
             import_result=import_result,
+            import_attempted=True,
             rebuild_execution_context=True,
             rebuild_execution_context_params=rebuild_params,
             memory_ops=memory_ops or None,
@@ -142,7 +151,7 @@ class ResearchKnowledgeAgent:
         )
 
     async def _run_sync_to_zotero(self, *, context: ResearchAgentToolContext, decision: Any) -> ResearchToolResult:
-        from runtime.research.agent_protocol.base import ResearchToolResult
+        from runtime.research.agent_protocol.base import ResearchStateDelta, ResearchToolResult
         from runtime.research.unified_action_adapters import resolve_active_message
 
         task_response = context.task_response
@@ -183,11 +192,11 @@ class ResearchKnowledgeAgent:
                 collection_name=collection_name,
             )
             results.append({"paper_id": paper.paper_id, "title": paper.title, **dict(sync_result)})
-        context.zotero_sync_results = results
         synced_count = sum(1 for item in results if str(item.get("status") or "") in {"imported", "reused"})
         failed_count = len(results) - synced_count
         return ResearchToolResult(
             status="succeeded" if failed_count == 0 else "failed" if synced_count == 0 else "succeeded",
+            state_delta=ResearchStateDelta(zotero_sync_results=results),
             observation=f"zotero sync finished; synced={synced_count}; failed={failed_count}",
             metadata={
                 "paper_ids": paper_ids,
@@ -227,10 +236,12 @@ class ResearchKnowledgeAgent:
                 }
             },
         )
-        execution_context.research_context = updated_context
-        execution_context.context_slices = context.research_service.build_context_slices(
-            updated_context,
-            selected_paper_ids=selected_paper_ids,
+        execution_context = replace(
+            execution_context,
+            research_context=updated_context,
+            context_slices=context.research_service.build_context_slices(
+                updated_context, selected_paper_ids=selected_paper_ids,
+            ),
         )
         compression_summary = {
             "paper_count": len({summary.paper_id for summary in compressed}),
@@ -238,7 +249,7 @@ class ResearchKnowledgeAgent:
             "levels": sorted({summary.level for summary in compressed}),
             "compressed_paper_ids": list(dict.fromkeys(summary.paper_id for summary in compressed)),
         }
-        ws_result = persist_workspace_results(context, compression_summary=compression_summary, persist=False)
+        ws_result = persist_workspace_results(replace(context, execution_context=execution_context), compression_summary=compression_summary, persist=False)
         output = build_context_compression_output(
             compression_summary=compression_summary,
         )
@@ -256,6 +267,7 @@ class ResearchKnowledgeAgent:
             save_task_event_payload=ws_result.save_event_payload if ws_result else None,
             task_response=ws_result.updated_task_response if ws_result else None,
             compressed_context_summary=compression_summary,
+            execution_context=ws_result.updated_execution_context if ws_result else execution_context,
             memory_ops=memory_ops or None,
         )
         return ResearchToolResult(

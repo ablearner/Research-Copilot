@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from domain.schemas.api import QAResponse
 from domain.schemas.evidence import EvidenceBundle
@@ -22,8 +22,14 @@ logger = logging.getLogger(__name__)
 class ResearchQAToolset:
     """Route-specific QA tools used by the task-level ResearchQAAgent."""
 
-    def __init__(self, research_service: Any) -> None:
-        self.research_service = research_service
+    def __init__(
+        self, *, chart_analysis_agent: Any,
+        load_cached_figure_payload: Callable[..., dict[str, Any] | None],
+        collection_qa_capability: ResearchCollectionQACapability,
+    ) -> None:
+        self.chart_analysis_agent = chart_analysis_agent
+        self.load_cached_figure_payload = load_cached_figure_payload
+        self.collection_qa_capability = collection_qa_capability
 
     async def run(
         self,
@@ -93,10 +99,10 @@ class ResearchQAToolset:
             )
 
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
-        visual_anchor_figure = self.research_service.chart_analysis_agent.resolve_visual_anchor_figure(
+        visual_anchor_figure = self.chart_analysis_agent.resolve_visual_anchor_figure(
             papers=papers,
             qa_metadata={"visual_anchor": qa_route_decision.visual_anchor},
-            load_cached_figure_payload=self.research_service._load_cached_figure_payload,
+            load_cached_figure_payload=self.load_cached_figure_payload,
         )
         figure_context = (
             {
@@ -235,14 +241,7 @@ class ResearchQAToolset:
             papers=papers,
             scope_mode=str((request.metadata or {}).get("qa_scope_mode") or "all_imported"),
         )
-        capability = getattr(
-            self.research_service,
-            "research_collection_qa_capability",
-            ResearchCollectionQACapability(
-                llm_adapter=getattr(self.research_service, "llm_adapter", None),
-            ),
-        )
-        return await capability.run_collection_qa(
+        return await self.collection_qa_capability.run_collection_qa(
             graph_runtime=graph_runtime,
             task=task,
             request=request,

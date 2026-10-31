@@ -138,6 +138,7 @@ class PaperAnalysisAgent:
             ))
         delta = ResearchStateDelta(
             task=ws_result.updated_task if ws_result else None,
+            execution_context=ws_result.updated_execution_context if ws_result else None,
             report=ws_result.updated_report if ws_result else None,
             save_task_conversation_id=context.request.conversation_id,
             save_task_event_type=ws_result.save_event_type if ws_result else None,

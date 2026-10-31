@@ -32,6 +32,22 @@ entry points such as `/research/papers/search` and TODO follow-up search now
 enter the same supervisor graph via a `workflow_constraint=discovery_only`
 request flag instead of bypassing the graph.
 
+The facade composes `ConversationService`, `PaperOperationsService` and
+`QAApplicationService` through explicit resources and named callback ports.
+Conversation lifecycle and snapshot recording live in the application layer;
+`memory.conversation_manager` retains only a language-helper import for compatibility.
+QA application loading and persistence surround `ResearchQAAgent.execute_loaded_qa`;
+`agents.rag_react_qa_worker` separately owns the RAG ReAct loop.
+
+Specialists return typed `ResearchStateDelta` values. The runtime applies and
+persists each returned delta once, including deliberate partial progress on a
+failed action (for example, a parsed document whose indexing failed). Workspace
+calculation with `persist=False` returns a replacement execution context without
+changing shared input. The direct QA/import/workspace application entrypoints
+still commit their own results. Downloads, document/vector ingestion, progress
+events, Zotero effects and derived figure-cache writes remain explicit tool or
+application effects; this boundary is not an external-effect transaction.
+
 `ResearchDiscoveryCapability` is the shared discovery engine used under
 `LiteratureDiscoveryCapability`. Topic planning, provider search, paper
 curation, report drafting, and TODO generation are centralized now that the old

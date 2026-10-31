@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from domain.schemas.research import PaperCandidate, ResearchReport, ResearchTask, ResearchTaskResponse
@@ -14,6 +14,7 @@ from runtime.research.agent_protocol.base import ResearchAgentToolContext
 @dataclass
 class WorkspaceUpdateResult:
     """Pure data produced by persist_workspace_results when persist=False."""
+    updated_execution_context: Any | None = None
     updated_task: ResearchTask | None = None
     updated_report: ResearchReport | None = None
     updated_task_response: ResearchTaskResponse | None = None
@@ -204,10 +205,12 @@ def persist_workspace_results(
         )
         if selected_paper_ids:
             research_context.active_papers = _dedupe_ids(selected_paper_ids)
-        execution_context.research_context = research_context
-        execution_context.context_slices = context.research_service.build_context_slices(
-            research_context,
-            selected_paper_ids=_dedupe_ids(selected_paper_ids),
+        execution_context = replace(
+            execution_context,
+            research_context=research_context,
+            context_slices=context.research_service.build_context_slices(
+                research_context, selected_paper_ids=_dedupe_ids(selected_paper_ids),
+            ),
         )
         if execution_context.session_id:
             memory_save_context_params = {
@@ -225,6 +228,7 @@ def persist_workspace_results(
         if updated_report is not None:
             context.research_service.report_service.save_report(updated_report)
         context.task_response = updated_task_response
+        context.execution_context = execution_context
         if memory_save_context_params is not None:
             context.research_service.memory_gateway.save_context(
                 memory_save_context_params["session_id"],
@@ -233,6 +237,7 @@ def persist_workspace_results(
         return None
 
     return WorkspaceUpdateResult(
+        updated_execution_context=execution_context,
         updated_task=updated_task,
         updated_report=updated_report,
         updated_task_response=updated_task_response,
