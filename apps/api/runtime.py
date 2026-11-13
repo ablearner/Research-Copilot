@@ -58,12 +58,13 @@ logger = logging.getLogger(__name__)
 _OPENAI_COMPATIBLE_PROVIDERS = {"openai", "openai_relay", "openai_compatible", "relay"}
 
 
-def build_rag_runtime(settings: Settings) -> RagRuntime:
+def build_rag_runtime(settings: Settings, *, graph_store=None) -> RagRuntime:
     llm_adapter = _build_llm_adapter(settings)
     chart_llm_adapter = _build_chart_vision_adapter(settings, default_adapter=llm_adapter)
     embedding_adapter = _build_embedding_adapter(settings)
     vector_store = _build_vector_store(settings, embedding_adapter)
-    graph_store = _build_graph_store(settings)
+    if graph_store is None:
+        graph_store = _build_graph_store(settings)
     document_parser = LocalDocumentParser(storage_root=settings.resolve_path(settings.local_storage_root))
 
     vector_retriever = VectorRetriever(embedding_adapter, vector_store)
@@ -105,7 +106,10 @@ def build_rag_runtime(settings: Settings) -> RagRuntime:
             llm_adapter=chart_llm_adapter,
             vision_timeout_seconds=settings.chart_vision_timeout_seconds,
         ),
-        graph_extraction_tools=GraphExtractionTools(llm_adapter=llm_adapter),
+        graph_extraction_tools=GraphExtractionTools(
+            llm_adapter=llm_adapter,
+            text_graph_timeout_seconds=settings.graph_text_timeout_seconds,
+        ),
         retrieval_tools=RetrievalTools(hybrid_retriever),
         answer_tools=AnswerTools(
             llm_adapter=llm_adapter,

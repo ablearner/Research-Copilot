@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_timeout_seconds: float = 60.0
     chart_vision_timeout_seconds: float = 180.0
+    graph_text_timeout_seconds: float = 12.0
     dashscope_max_retries: int = 2
     dashscope_retry_delay_seconds: float = 2.0
     cors_allow_origins: str = "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3001,http://localhost:3001"

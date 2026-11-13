@@ -9,6 +9,7 @@ from pathlib import Path
 
 from apps.api.runtime import build_rag_runtime, initialize_rag_runtime, close_rag_runtime
 from apps.api.research_runtime import build_literature_research_service
+from adapters.local_runtime import InMemoryGraphStore
 from domain.schemas.research import (
     PaperCandidate,
     ResearchTask,
@@ -82,11 +83,13 @@ class AgentBridge:
             self.settings = self.settings.model_copy(
                 update={"research_sqlite_db_path": str(memory_path)}
             )
-        self.runtime = build_rag_runtime(self.settings)
+        # This graph belongs to one authorized attempt, including with remote models.
+        self.runtime = build_rag_runtime(self.settings, graph_store=InMemoryGraphStore())
         retrieval = self.runtime.retrieval_tools
         retrieval.hybrid_retriever = ScopedRetriever(retrieval.hybrid_retriever, allowed)
         self.service = build_literature_research_service(self.settings, graph_runtime=self.runtime)
         self.allowed = list(allowed)
+        self.pdf_paths: dict[str, str] = {}
 
         # Public academic search remains available; server-local personal libraries do not.
         self.service.paper_search_service.zotero_tool = None
@@ -94,6 +97,18 @@ class AgentBridge:
 
     async def initialize(self):
         await initialize_rag_runtime(self.runtime)
+
+    async def materialize_document(self, document_id, data):
+        if document_id not in self.allowed:
+            raise PermissionError("Document outside authorized scope")
+        # Only server-authorized bytes become local inputs to figure tools.
+        path = Path(self.settings.upload_dir) / (
+            hashlib.sha256(document_id.encode()).hexdigest() + ".pdf"
+        )
+        await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_bytes, data)
+        self.pdf_paths[document_id] = str(path)
+        return path
 
     async def close(self):
         vector = self.runtime.embedding_index_service.vector_store
@@ -185,6 +200,7 @@ class AgentBridge:
                         "document_id": d["id"],
                         "document_ids": [d["id"]],
                         "platform_upload": True,
+                        "storage_uri": self.pdf_paths[d["id"]],
                     },
                 )
                 for d in documents

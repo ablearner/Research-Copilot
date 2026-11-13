@@ -6,6 +6,7 @@ from core.config import Settings
 
 def test_build_embedding_adapter_normalizes_dashscope_relay_base_url() -> None:
     settings = Settings(
+        _env_file=None,
         embedding_provider="dashscope",
         embedding_model="text-embedding-3-small",
         embedding_text_batch_size=24,
@@ -23,6 +24,7 @@ def test_build_embedding_adapter_normalizes_dashscope_relay_base_url() -> None:
 
 def test_build_embedding_adapter_uses_openai_relay_for_openai_provider() -> None:
     settings = Settings(
+        _env_file=None,
         embedding_provider="openai_compatible",
         embedding_model="text-embedding-3-small",
         embedding_text_batch_size=20,

@@ -25,7 +25,7 @@ PLATFORM_API_ORIGIN=http://127.0.0.1:8000 npm --prefix web run build
 | 要求 | 实现和证据 | 验证边界 |
 | --- | --- | --- |
 | 身份、工作区、项目及私有文件 | identity/business/papers API 测试，真实上传和浏览器双用户文件拒绝 | 个人工作区，无团队邀请 UI |
-| 多用户检索隔离 | `test_scope.py`：越界命中、嵌套图谱来源、检索期间撤销、attempt 独立集合 | memory provider；真实 Milvus 部署未验收 |
+| 多用户检索隔离 | `test_scope.py`：越界命中、嵌套图谱来源、检索期间撤销、attempt 独立集合 | 真实 Milvus 单文档链路已验收；混合用户召回仍需专项验证 |
 | 幂等提交、Outbox 确认间隙 | `test_task_mysql.py`、`test_queue_resilience.py` | 真实 MySQL/RabbitMQ；确认间隙以异常注入复现 |
 | Worker 被终止后恢复、旧 epoch 拒绝 | 独立领取进程 SIGKILL、过期租约回收与迟到提交断言 | 测试缩短租约，不是生产恢复 SLA |
 | 部分失败与阶段复用 | 实际 PDF/Supervisor 集成、成功下载阶段复用、失败项重试 | 任意 LangGraph 节点续跑不在当前实现内 |
@@ -50,7 +50,7 @@ PLATFORM_API_ORIGIN=http://127.0.0.1:8000 npm --prefix web run build
 ## 仍需外部环境或人工完成的验收
 
 - 邀请真实使用者试用并记录反馈；本轮未发送邀请，也没有真实用户规模数据。
-- 全新主机依赖安装、公网 TLS/邮件/反向代理、真实模型与真实 Milvus 效果验证。
+- 全新主机依赖安装、公网 TLS/邮件/反向代理、真实论文集模型与检索效果验证。真实模型与 Milvus 的合成 PDF 链路已通过，见[真实 API 验收](platform-real-api-validation.md)。
 - HTTP 容量和固定延迟模型调度压测；已补充小 fixture 的实际 HTTP 测量，但样本不能支持容量结论。
 - 迁移到不同 Worker 路径时，解析 JSON 中页面图片的本地绝对路径需要重解析；目前未实现派生图片的私有下载代理。
 - 本地旧 attempt 工件与异常退出遗留向量集合尚无自动保留期清理；对象存储孤儿对账由运维 CLI 执行，默认 dry run。
@@ -71,3 +71,5 @@ PLATFORM_API_ORIGIN=http://127.0.0.1:8000 npm --prefix web run build
 - 备份归档 SHA256 验证及恢复前后业务指纹重新比较通过；`platform-local.py migrate`、`doctor` 退出0，迁移 head为0006。
 
 新增回归确实暴露了三项缺陷：第101条资源被列表截断误拒绝、嵌套图谱外部来源未校验、账号切换残留明文PAT；另有损坏清单阻断恢复。已修复并保留用例。浏览器失败基线包含测试专用凭证，未作为公开仓库附件提交；不得复用这些本机测试账号。
+
+后续真实模型验收：DeepSeek、Embedding、VLM 共 23 次远程请求全部 HTTP 200，合成 PDF 的导入、文本/图片问答、报告持久化、异用户文件拒绝和应用重启恢复通过。修复后的完整回归 **1031 passed，2 warnings，160.47 秒，退出 0**。具体失败记录、修复、复现命令及边界见[真实 API 验收](platform-real-api-validation.md)。

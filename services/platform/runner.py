@@ -477,6 +477,8 @@ class Worker:
         # Fresh graph/memory and local vector providers are hydrated only from active authorized data.
         for doc in docs:
             version = await self.versions(task, doc["id"], doc["active_version"])
+            data, _ = await self.business.file(self.context(task), version["file_id"])
+            await bridge.materialize_document(doc["id"], data)
             parsed = ParsedDocument.model_validate_json(
                 await self.business.objects.get(version["parsed_ref"])
             )

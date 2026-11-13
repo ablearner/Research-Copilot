@@ -91,3 +91,42 @@ async def test_authorized_hit_cannot_hide_foreign_graph_source():
 
     with pytest.raises(PermissionError):
         await ScopedRetriever(Provider(), ["mine"]).retrieve(RetrievalQuery(query="secret"))
+
+
+def test_business_bridge_can_construct_attempt_scoped_graph(tmp_path):
+    from core.config import Settings
+    from services.platform.agent_bridge import AgentBridge
+    from adapters.local_runtime import InMemoryGraphStore
+
+    settings = Settings(
+        _env_file=None,
+        runtime_backend="business",
+        llm_provider="openai",
+        llm_model="text-model",
+        openai_api_key="test-key",
+        embedding_provider="openai",
+        vector_store_provider="milvus",
+        graph_text_timeout_seconds=60,
+        reranker_allow_download=False,
+        reranker_unavailable_policy="heuristic",
+    )
+    bridge = AgentBridge(settings, tmp_path, "workspace", [])
+    assert isinstance(bridge.runtime.graph_index_service.graph_store, InMemoryGraphStore)
+    assert bridge.runtime.graph_extraction_tools.text_graph_timeout_seconds == 60
+
+
+@pytest.mark.asyncio
+async def test_bridge_materializes_only_authorized_document_in_attempt(tmp_path):
+    from types import SimpleNamespace
+    from services.platform.agent_bridge import AgentBridge
+
+    bridge = AgentBridge.__new__(AgentBridge)
+    bridge.allowed = ["allowed"]
+    bridge.settings = SimpleNamespace(upload_dir=str(tmp_path / "uploads"))
+    bridge.pdf_paths = {}
+    with pytest.raises(PermissionError):
+        await bridge.materialize_document("foreign", b"%PDF-test")
+    path = await bridge.materialize_document("allowed", b"%PDF-test")
+    assert path.read_bytes() == b"%PDF-test"
+    assert path.parent == tmp_path / "uploads"
+    assert bridge.pdf_paths["allowed"] == str(path)
