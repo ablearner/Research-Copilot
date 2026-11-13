@@ -57,5 +57,5 @@ def test_agent_toolset_map_unknown():
 
 
 def test_agent_toolset_map_has_all_expected_agents():
-    assert "ResearchQAAgent" in AGENT_TOOLSET_MAP
+    assert "ResearchAnalystAgent" in AGENT_TOOLSET_MAP
     assert "LiteratureScoutAgent" in AGENT_TOOLSET_MAP

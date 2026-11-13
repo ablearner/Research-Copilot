@@ -1,4 +1,4 @@
-"""Tests for reasoning style normalization (canonical: agents.research_qa_agent)."""
+"""Tests for reasoning style normalization (canonical: agents.research_analyst_agent)."""
 
 from domain.schemas.research import normalize_reasoning_style, DEFAULT_AGENT_REASONING_STYLE
 

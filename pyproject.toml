@@ -15,6 +15,13 @@ dependencies = [
     "pymilvus>=2.5.0",
     "psycopg[binary]>=3.1.18",
     "PyMySQL>=1.1.0",
+    "SQLAlchemy>=2.0,<2.1",
+    "alembic>=1.13,<2",
+    "asyncmy>=0.2.9,<0.3",
+    "argon2-cffi>=23.1",
+    "aio-pika>=9.4,<11",
+    "redis>=5,<8",
+    "boto3>=1.34,<2",
     "pymupdf>=1.27.0",
     "pypdf>=6.0.0",
     "qdrant-client>=1.10.1",
@@ -35,6 +42,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.4.0",
+    "aiosqlite>=0.20",
 ]
 
 [project.scripts]

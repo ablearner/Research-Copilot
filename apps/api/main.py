@@ -59,6 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    import os
+    if os.getenv("PLATFORM_ENVIRONMENT") == "production" or os.getenv("APP_ENV") == "production":
+        raise RuntimeError("Legacy API is offline-only. Start apps.platform.main:app in production.")
     settings = get_settings()
     configure_logging(settings.log_level, json_format=settings.json_log_format)
     app = FastAPI(title=settings.app_name, lifespan=lifespan)

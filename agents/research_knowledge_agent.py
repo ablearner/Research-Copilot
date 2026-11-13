@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 from dataclasses import replace
 
 from domain.schemas.research import ImportPapersRequest
+from tools.research.workflows.research_document import DocumentWorkflow
 from domain.schemas.retrieval import RetrievalHit, merge_retrieval_hits, retrieval_hit_score  # noqa: F401
 from tools.research.collection_qa_capability import (
     ResearchCollectionKnowledgeCapability,
@@ -34,6 +35,7 @@ class ResearchKnowledgeAgent:
         llm_adapter: Any | None = None,
     ) -> None:
         self.llm_adapter = llm_adapter
+        self.document_workflow = DocumentWorkflow()
         self._collection_qa = ResearchCollectionKnowledgeCapability(llm_adapter=llm_adapter)
 
     def _dedupe_ids(self, values: list[str]) -> list[str]:
@@ -62,6 +64,8 @@ class ResearchKnowledgeAgent:
             return await self._run_sync_to_zotero(context=context, decision=decision)
         if task_type == "compress_context":
             return await self._run_compress_context(context=context, decision=decision)
+        if task_type == "understand_document":
+            return await self.document_workflow.execute(context, decision)
         return ResearchToolResult(
             status="skipped",
             observation=f"ResearchKnowledgeAgent does not support task_type={task_type}",

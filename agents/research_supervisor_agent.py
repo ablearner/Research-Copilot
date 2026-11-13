@@ -1593,21 +1593,21 @@ class ResearchSupervisorAgent:
         actions: list[dict[str, Any]] = []
         if state.user_intent.get("needs_clarification"):
             actions.append(self._action_descriptor("clarify_request", "ResearchSupervisorAgent", "Ask a focused clarification question when the user's target or topic boundary is ambiguous.", state=state))
-        actions.append(self._action_descriptor("general_answer", "GeneralAnswerAgent", "Answer a general non-research question directly when the user does not need literature search, local RAG, document parsing, or chart reasoning.", state=state))
+        actions.append(self._action_descriptor("general_answer", "ResearchAnalystAgent", "Answer a general non-research question directly when the user does not need literature search, local RAG, document parsing, or chart reasoning.", state=state))
         if state.preference_recommendation_requested or state.known_interest_count > 0:
             actions.append(
                 self._action_descriptor(
                     "recommend_from_preferences",
-                    "PreferenceMemoryAgent",
+                    "LiteratureScoutAgent",
                     "Recommend recent papers from the user's long-term interest profile when the user asks for broad worth-reading suggestions.",
                     state=state,
                 )
             )
         if state.has_document_input and not state.document_understood:
-            actions.append(self._action_descriptor("understand_document", "ResearchDocumentAgent", "Parse and ground the uploaded document before other research actions.", state=state))
+            actions.append(self._action_descriptor("understand_document", "ResearchKnowledgeAgent", "Parse and ground the uploaded document before other research actions.", state=state))
         intent_name = str(state.user_intent.get("intent") or "").strip()
         if (state.has_chart_input and not state.chart_understood) or intent_name == "figure_qa":
-            actions.append(self._action_descriptor("supervisor_understand_chart", "ChartAnalysisAgent", "Understand or analyze a chart, figure, or diagram from an uploaded image.", state=state))
+            actions.append(self._action_descriptor("supervisor_understand_chart", "ResearchAnalystAgent", "Understand or analyze a chart, figure, or diagram from an uploaded image.", state=state))
         if not state.has_task:
             actions.append(self._action_descriptor("search_literature", "LiteratureScoutAgent", "Start a new research exploration and create the initial task, candidate papers, and workspace.", state=state))
         else:
@@ -1616,12 +1616,12 @@ class ResearchSupervisorAgent:
                 self._action_descriptor("write_review", "ResearchWriterAgent", "Synthesize the current research workspace into a grounded review or progress report.", state=state),
                 self._action_descriptor("import_papers", "ResearchKnowledgeAgent", "Import promising papers into the local research workspace when the user wants grounded QA, evidence retrieval, or local ingestion.", state=state),
                 self._action_descriptor("sync_to_zotero", "ResearchKnowledgeAgent", "Sync targeted candidate papers to Zotero when the user asks to import, save, or add papers into their Zotero library.", state=state),
-                self._action_descriptor("answer_question", "ResearchQAAgent", "Answer a collection, document, or chart question using the selected QA route and current workspace.", state=state),
-                self._action_descriptor("analyze_papers", "PaperAnalysisAgent", "Analyze the selected papers and answer comparison, explanation, or recommendation questions.", state=state),
+                self._action_descriptor("answer_question", "ResearchAnalystAgent", "Answer a collection, document, or chart question using the selected QA route and current workspace.", state=state),
+                self._action_descriptor("analyze_papers", "ResearchAnalystAgent", "Analyze the selected papers and answer comparison, explanation, or recommendation questions.", state=state),
                 self._action_descriptor("compress_context", "ResearchKnowledgeAgent", "Compress a large workspace into reusable summaries before deeper reasoning.", state=state),
             ]
             if state.imported_document_count > 0:
-                task_actions.append(self._action_descriptor("analyze_paper_figures", "ChartAnalysisAgent", "Extract and analyze figures, charts, or diagrams from an imported paper's PDF. Use when the user asks about a figure, system diagram, architecture, experimental result plot, or any visual element in a paper.", state=state))
+                task_actions.append(self._action_descriptor("analyze_paper_figures", "ResearchAnalystAgent", "Extract and analyze figures, charts, or diagrams from an imported paper's PDF. Use when the user asks about a figure, system diagram, architecture, experimental result plot, or any visual element in a paper.", state=state))
             actions.extend(task_actions)
         actions.append(self._action_descriptor("finalize", "ResearchSupervisorAgent", "Stop when additional tool use is low value or clarification from the user is needed.", state=state))
         visible_actions = [
@@ -2842,8 +2842,8 @@ class ResearchSupervisorAgent:
         if message.task_type == "answer_question":
             return {
                 "action_name": "answer_question",
-                "worker_agent": "ResearchQAAgent",
-                "thought": "Manager 将问答交给 ResearchQAAgent，让它按 Supervisor 选择的 QA route 完成 grounded QA。",
+                "worker_agent": "ResearchAnalystAgent",
+                "thought": "Manager 将问答交给 ResearchAnalystAgent，让它按 Supervisor 选择的 QA route 完成 grounded QA。",
                 "rationale": "Task-level QA should be owned by the QA specialist while RAG and retrieval remain tool-layer capabilities.",
                 "phase": "reflect",
                 "estimated_gain": 0.78,
@@ -2853,9 +2853,9 @@ class ResearchSupervisorAgent:
         if message.task_type == "recommend_from_preferences":
             return {
                 "action_name": "recommend_from_preferences",
-                "worker_agent": "PreferenceMemoryAgent",
-                "thought": "Manager 把跨会话兴趣推荐交给 PreferenceMemoryAgent，由它基于长期记忆挑选最近值得看的论文。",
-                "rationale": "Long-term preference modeling and personalized recommendation should live in a dedicated specialist instead of being hidden inside discovery or paper-analysis workers.",
+                "worker_agent": "LiteratureScoutAgent",
+                "thought": "Manager 把跨会话兴趣推荐交给 LiteratureScoutAgent，由它基于长期记忆挑选最近值得看的论文。",
+                "rationale": "The discovery specialist uses long-term preferences to search and recommend relevant papers.",
                 "phase": "reflect",
                 "estimated_gain": 0.84,
                 "estimated_cost": 0.18,
@@ -2864,8 +2864,8 @@ class ResearchSupervisorAgent:
         if message.task_type in {"compare_papers", "recommend_papers", "analyze_papers"}:
             return {
                 "action_name": "analyze_papers",
-                "worker_agent": "PaperAnalysisAgent",
-                "thought": "Manager 把基于已选论文的分析交给 PaperAnalysisAgent，由统一的论文分析能力完成比较、讲解或推荐。",
+                "worker_agent": "ResearchAnalystAgent",
+                "thought": "Manager 把基于已选论文的分析交给 ResearchAnalystAgent，由统一的论文分析能力完成比较、讲解或推荐。",
                 "rationale": "Selected-paper analysis should flow through one analysis capability so comparison, recommendation, and explanation share the same evidence and reasoning surface.",
                 "phase": "reflect",
                 "estimated_gain": 0.72,
@@ -2886,7 +2886,7 @@ class ResearchSupervisorAgent:
         if message.task_type == "understand_document":
             return {
                 "action_name": "understand_document",
-                "worker_agent": "ResearchDocumentAgent",
+                "worker_agent": "ResearchKnowledgeAgent",
                 "thought": "Planner 把文档理解排在最前面，先解析用户提供的文档证据。",
                 "rationale": "Document understanding turns a raw file into indexed evidence that the research loop can reuse.",
                 "phase": "act",
@@ -2897,9 +2897,9 @@ class ResearchSupervisorAgent:
         if message.task_type == "supervisor_understand_chart":
             return {
                 "action_name": "supervisor_understand_chart",
-                "worker_agent": "ChartAnalysisAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "thought": "Planner 识别到图表证据输入，先完成图表结构化理解以服务后续研究分析。",
-                "rationale": "Chart understanding belongs inside the research assistant as a visual evidence worker.",
+                "rationale": "The analysis specialist uses chart understanding to ground visual evidence.",
                 "phase": "act",
                 "estimated_gain": 0.88,
                 "estimated_cost": 0.3,

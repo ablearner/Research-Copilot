@@ -1,7 +1,3 @@
 'use client';
-
-import App from '../src/App';
-
-export default function Page() {
-  return <App />;
-}
+import PlatformApp from '../src/PlatformApp';
+export default function Page() { return <PlatformApp />; }

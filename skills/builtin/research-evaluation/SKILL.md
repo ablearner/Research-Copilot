@@ -1,6 +1,6 @@
 ---
 name: research-evaluation
-description: "评估研究工作的质量、创新性、实验严谨性和影响力，输出结构化审稿意见。Supervisor 应先确保论文已导入，再调度 PaperAnalysisAgent 和 ResearchQAAgent 执行评估。"
+description: "评估研究工作的质量、创新性、实验严谨性和影响力，输出结构化审稿意见。Supervisor 应先确保论文已导入，再调度 ResearchAnalystAgent 执行评估。"
 version: 1.1.0
 author: Research-Copilot
 category: research
@@ -33,8 +33,8 @@ enabled: true
 ## Agent 路由策略
 Supervisor 应按以下顺序编排 agent：
 1. **ResearchKnowledgeAgent (import_papers)** — 确保论文已导入并解析
-2. **PaperAnalysisAgent** — 提取论文结构化信息
-3. **ResearchQAAgent** — 针对评估维度进行 grounded 证据检索
+2. **ResearchAnalystAgent (analyze_papers)** — 提取论文结构化信息
+3. **ResearchAnalystAgent (answer_question)** — 针对评估维度进行 grounded 证据检索
 
 ## 使用场景
 当用户要求评估论文质量、给出审稿意见或判断创新性时激活此技能。典型请求：

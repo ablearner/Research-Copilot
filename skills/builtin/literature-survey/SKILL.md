@@ -57,7 +57,7 @@ Supervisor 应按以下顺序编排 agent：
 1. **LiteratureScoutAgent** — 先搜索和发现相关论文，确保论文池覆盖面足够
 2. **ResearchWriterAgent** — 默认基于候选论文标题、摘要、来源、年份和可用元数据生成结构化综述
 3. **ResearchKnowledgeAgent (import_papers)** — 仅在用户明确要求全文、PDF 入库、精读、基于全文证据问答，或后续任务确实需要本地文档证据时再导入
-4. **PaperAnalysisAgent / ResearchQAAgent** — 可选：在导入后对关键论文做深度分析或证据问答
+4. **ResearchAnalystAgent (analyze_papers / answer_question)** — 可选：在导入后对关键论文做深度分析或证据问答
 
 ## 使用场景
 当用户需要撰写文献综述或 survey 报告时激活此技能。典型请求：

@@ -31,7 +31,7 @@ from domain.research_workspace import build_workspace_from_task
 
 if TYPE_CHECKING:
     from tools.research.paper_selector import PaperSelectionScope
-    from agents.research_qa_agent import ResearchQAAgent, QAExecutionResult
+    from agents.research_analyst_agent import ResearchAnalystAgent, QAExecutionResult
 
 
 class QAApplicationService:
@@ -90,9 +90,9 @@ class QAApplicationService:
 
     async def execute_qa(
         self, task_id: str, request: ResearchTaskAskRequest, *, graph_runtime: Any,
-        persist: bool = True, executor: ResearchQAAgent | None = None,
+        persist: bool = True, executor: ResearchAnalystAgent | None = None,
     ) -> QAExecutionResult:
-        from agents.research_qa_agent import ResearchQAAgent
+        from agents.research_analyst_agent import ResearchAnalystAgent
 
         task = self.report_service.load_task(task_id)
         if task is None:
@@ -109,7 +109,7 @@ class QAApplicationService:
             reasoning_style=request.reasoning_style,
             metadata=request.metadata,
         )
-        result = await (executor or ResearchQAAgent()).execute_loaded_qa(
+        result = await (executor or ResearchAnalystAgent()).execute_loaded_qa(
             self, task, report, papers, request, graph_runtime=graph_runtime,
             execution_context=execution_context,
         )

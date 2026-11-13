@@ -18,7 +18,14 @@ build/
 *.egg-info/
 evaluation/datasets/pdfqa_benchmark/real-pdfQA/
 evaluation/datasets/scigraphqa_easy_50/images/
-docs/
+docs/*
+!docs/Research-Copilot校招项目完整改进方案.md
+!docs/platform-*.md
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/plans/
+docs/superpowers/plans/*
+!docs/superpowers/plans/2026-11-09-backend-platform.md
 /evaluation/*
 !/evaluation/README.md
 !/evaluation/*.py
@@ -31,3 +38,7 @@ mcp_servers.json
 skills/community/
 skills/.skill_config.json
 #ARCHITECTURE_AUDIT.md
+.env.platform
+.superpowers/backend-platform/
+web/test-results/
+web/playwright-report/

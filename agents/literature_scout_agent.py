@@ -139,16 +139,38 @@ class LiteratureScoutAgent:
         *,
         llm_adapter: Any | None = None,
         curation_tool: Any | None = None,
+        preference_workflow: Any | None = None,
     ) -> None:
         self.paper_search_service = paper_search_service
         self.llm_adapter = llm_adapter
         self.curation_tool = curation_tool
+        self.preference_workflow = preference_workflow
 
     # ------------------------------------------------------------------
     # SpecialistAgent protocol — owns the full discovery pipeline
     # ------------------------------------------------------------------
 
     async def run_action(
+        self,
+        context: ResearchAgentToolContext,
+        decision: Any,
+        *,
+        task_type: str = "search_literature",
+    ) -> ResearchToolResult:
+        from runtime.research.agent_protocol.base import ResearchToolResult
+
+        if task_type == "search_literature":
+            return await self._run_search(context, decision)
+        if task_type == "recommend_from_preferences":
+            if self.preference_workflow is None:
+                return ResearchToolResult(
+                    status="failed", observation="Preference workflow is not configured",
+                    metadata={"reason": "missing_preference_workflow"},
+                )
+            return await self.preference_workflow.execute(context, decision)
+        raise ValueError(f"LiteratureScoutAgent does not support task_type={task_type}")
+
+    async def _run_search(
         self,
         context: ResearchAgentToolContext,
         decision: Any,

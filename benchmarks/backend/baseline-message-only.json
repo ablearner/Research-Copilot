@@ -1,0 +1,30 @@
+{
+  "scenario": "synthetic message cursor pagination",
+  "model_calls": 0,
+  "python": "3.11.15",
+  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31",
+  "messages": 100000,
+  "requests": 200,
+  "concurrency": 10,
+  "throughput_requests_per_second": 519.3895859034988,
+  "p50_ms": 17.251796962227672,
+  "p95_ms": 26.920842938125134,
+  "p99_ms": 28.340748976916075,
+  "errors": 0,
+  "explain": [
+    {
+      "id": 1,
+      "select_type": "SIMPLE",
+      "table": "messages",
+      "partitions": null,
+      "type": "range",
+      "possible_keys": "uq_messages_workspace_id_conversation_id_seq,uq_messages_workspace_id_id,fk_messages_workspace_id_research_tasks",
+      "key": "uq_messages_workspace_id_conversation_id_seq",
+      "key_len": "300",
+      "ref": null,
+      "rows": 49981,
+      "filtered": 100.0,
+      "Extra": "Using index condition"
+    }
+  ]
+}

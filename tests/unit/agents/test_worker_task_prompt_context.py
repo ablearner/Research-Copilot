@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.paper_analysis_agent import PaperAnalysisAgent
+from tools.research.workflows.paper_analysis import PaperAnalysisWorkflow
 from agents.research_writer_agent import ResearchWriterAgent
 from domain.schemas.research import PaperCandidate, ResearchAgentRunRequest, ResearchReport, ResearchTask, ResearchTaskResponse
 from domain.schemas.research_context import ResearchContextSlice
@@ -72,7 +72,7 @@ async def test_paper_analysis_llm_receives_task_and_prior_summary_without_unrela
         papers=context.task_response.papers[:1],
     )
     llm = CapturingLLM({"answer": "p1 uses retrieval", "focus": "analysis"})
-    agent = PaperAnalysisAgent(paper_analysis_tool=PaperAnalysisTool(llm_adapter=llm))
+    agent = PaperAnalysisWorkflow(paper_analysis_tool=PaperAnalysisTool(llm_adapter=llm))
 
     await agent.analyze(
         question=analysis_input.resolved_question(), papers=analysis_input.papers,
@@ -175,16 +175,16 @@ async def test_analysis_run_action_obeys_prepared_document_scope(scope_source, d
         action_name="analyze_papers", thought="", rationale="",
         action_input=scope if scope_source == "action_input" else {},
         metadata={"active_message": AgentMessage(
-            task_id="analyze", agent_from="manager", agent_to="PaperAnalysisAgent",
+            task_id="analyze", agent_from="manager", agent_to="ResearchAnalystAgent",
             task_type="analyze_papers", instruction="Explain selected paper",
             payload=scope,
         )} if scope_source == "message" else {},
     )
     worker, decision = prepare_worker_invocation(context=parent, decision=decision, agent_results=[])
     llm = CapturingLLM({"answer": "Selected analysis", "focus": "analysis"})
-    agent = PaperAnalysisAgent(paper_analysis_tool=PaperAnalysisTool(llm_adapter=llm))
+    agent = PaperAnalysisWorkflow(paper_analysis_tool=PaperAnalysisTool(llm_adapter=llm))
 
-    result = await agent.run_action(worker, decision)
+    result = await agent.execute(worker, decision)
 
     if document_id == "unknown":
         assert result.status == "skipped"
@@ -220,7 +220,7 @@ def test_prepared_qa_scope_reaches_collection_selector(scope_source):
         action_name="answer_question", thought="", rationale="",
         action_input=scope if scope_source == "action_input" else {},
         metadata={"active_message": AgentMessage(
-            task_id="qa", agent_from="manager", agent_to="ResearchQAAgent",
+            task_id="qa", agent_from="manager", agent_to="ResearchAnalystAgent",
             task_type="answer_question", instruction="Explain selected paper", payload=scope,
         )} if scope_source == "message" else {},
     )
@@ -238,7 +238,7 @@ def test_prepared_qa_scope_reaches_collection_selector(scope_source):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["none", "document", "image"])
 async def test_qa_empty_worker_paper_scope_skips_only_without_direct_route(route):
-    from agents.research_qa_agent import ResearchQAAgent
+    from agents.research_analyst_agent import ResearchAnalystAgent
 
     context = _context()
     context.worker_input = _task_context([])
@@ -246,7 +246,7 @@ async def test_qa_empty_worker_paper_scope_skips_only_without_direct_route(route
         context.request.selected_document_ids = ["standalone-doc"]
     if route == "image":
         context.request.chart_image_path = "/tmp/chart.png"
-    agent = ResearchQAAgent()
+    agent = ResearchAnalystAgent()
 
     async def visual(**kwargs):
         return SimpleNamespace(search_new_figure=False)
@@ -274,7 +274,7 @@ async def test_qa_empty_worker_paper_scope_skips_only_without_direct_route(route
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["document", "image", "unknown_image"])
 async def test_loaded_qa_direct_route_does_not_restore_unselected_workspace_papers(monkeypatch, route):
-    from agents.research_qa_agent import ResearchQAAgent
+    from agents.research_analyst_agent import ResearchAnalystAgent
     from domain.schemas.research import ResearchTaskAskRequest
     from tools.research.paper_selector import PaperSelectorService
     from tools.research.visual_intent import VisualIntentDecision
@@ -314,7 +314,7 @@ async def test_loaded_qa_direct_route_does_not_restore_unselected_workspace_pape
 
     monkeypatch.setattr(qa_tools, "scope_qa_execution_context", capture)
     with pytest.raises(ReachedScopedExecution):
-        await ResearchQAAgent().execute_loaded_qa(
+        await ResearchAnalystAgent().execute_loaded_qa(
             dependencies, context.task, None, context.papers, request,
             graph_runtime=object(), execution_context=None,
         )

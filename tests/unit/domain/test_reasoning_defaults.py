@@ -1,5 +1,5 @@
 from domain.schemas.research import ImportPapersRequest, ResearchAgentRunRequest, ResearchTaskAskRequest
-from agents.research_qa_agent import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style
+from agents.research_analyst_agent import DEFAULT_AGENT_REASONING_STYLE, normalize_reasoning_style
 
 
 def test_agent_reasoning_style_defaults_to_react() -> None:

@@ -18,15 +18,19 @@ ACTION_AGENT_CATALOG: dict[str, str] = {
     "write_review": "ResearchWriterAgent",
     "import_papers": "ResearchKnowledgeAgent",
     "sync_to_zotero": "ResearchKnowledgeAgent",
-    "answer_question": "ResearchQAAgent",
-    "general_answer": "GeneralAnswerAgent",
-    "recommend_from_preferences": "PreferenceMemoryAgent",
-    "analyze_papers": "PaperAnalysisAgent",
+    "answer_question": "ResearchAnalystAgent",
+    "general_answer": "ResearchAnalystAgent",
+    "recommend_from_preferences": "LiteratureScoutAgent",
+    "analyze_papers": "ResearchAnalystAgent",
     "compress_context": "ResearchKnowledgeAgent",
-    "understand_document": "ResearchDocumentAgent",
-    "supervisor_understand_chart": "ChartAnalysisAgent",
-    "analyze_paper_figures": "ChartAnalysisAgent",
+    "understand_document": "ResearchKnowledgeAgent",
+    "supervisor_understand_chart": "ResearchAnalystAgent",
+    "analyze_paper_figures": "ResearchAnalystAgent",
 }
+
+
+def _actions_for_worker(name: str) -> list[str]:
+    return [action for action, owner in ACTION_AGENT_CATALOG.items() if owner == name]
 
 
 class UnifiedAgentExecutor(Protocol):
@@ -73,7 +77,7 @@ class SpecialistAgentExecutor:
     async def execute_action(self, context: Any, decision: Any, *, action_name: str) -> Any:
         if action_name not in self.descriptor.supported_task_types:
             raise ValueError(f"{self.descriptor.name} cannot execute {action_name}")
-        kwargs = {"task_type": action_name} if self.descriptor.name in {"ResearchKnowledgeAgent", "ChartAnalysisAgent"} else {}
+        kwargs = {"task_type": action_name} if len(self.descriptor.supported_task_types) > 1 else {}
         return await self.agent_delegate.run_action(context, decision, **kwargs)
 
 
@@ -116,158 +120,65 @@ def build_phase1_unified_blueprint(
         ),
         _build_descriptor(
             name="LiteratureScoutAgent",
-            description="Discovery specialist for topic planning, provider search, and import candidate scouting.",
+            description="Literature discovery and personalized recommendations from research preferences.",
             kind="specialist",
             execution_mode="hybrid",
-            supported_task_types=["search_literature"],
+            supported_task_types=_actions_for_worker("LiteratureScoutAgent"),
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_report", capability_profile_names),
-                service_names=["PaperSearchService"],
-                notes=[
-                    "Topic planning is currently embedded in the search service and reasoning agent.",
-                ],
+                service_names=["PaperSearchService", "ResearchMemoryGateway"],
             ),
             preferred_tool_names=["search_papers", "academic_search", "search_or_import_paper"],
             available_tool_names=tool_names,
             legacy_boundaries=[],
-            notes=["Executes literature discovery through LiteratureDiscoveryCapability under the specialist boundary."],
+            notes=["Owns query planning, search, curation and preference recommendations."],
         ),
         _build_descriptor(
             name="ResearchKnowledgeAgent",
-            description="Knowledge ingestion and retrieval specialist over imported papers, graph summaries, and collection context.",
+            description="Knowledge ingestion, document parsing/indexing, library sync and context compression.",
             kind="specialist",
             execution_mode="tool_native",
-            supported_task_types=["import_papers", "sync_to_zotero", "compress_context"],
+            supported_task_types=_actions_for_worker("ResearchKnowledgeAgent"),
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_report", capability_profile_names),
-                notes=["Owns import, library sync, retrieval-support, and context compression capabilities."],
             ),
-            preferred_tool_names=[
-                "search_or_import_paper",
-                "hybrid_retrieve",
-                "query_graph_summary",
-                "answer_with_evidence",
-                "ask_paper",
-                "parse_document",
-                "index_document",
-            ],
+            preferred_tool_names=["search_or_import_paper", "parse_document", "index_document",
+                                  "hybrid_retrieve", "query_graph_summary"],
             available_tool_names=tool_names,
             legacy_boundaries=[],
-            notes=["Use this agent for knowledge operations and retrieval-support steps, not task-level QA routing."],
+            notes=["Document processing is an internal workflow, not an independent worker."],
         ),
         _build_descriptor(
-            name="ResearchDocumentAgent",
-            description="Document understanding specialist for parsing uploaded files and indexing grounded evidence.",
+            name="ResearchAnalystAgent",
+            description="Grounded QA, paper comparison, chart/figure understanding and general answers.",
             kind="specialist",
-            execution_mode="tool_native",
-            supported_task_types=["understand_document"],
-            capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("research_report", capability_profile_names),
-                notes=["Owns parse/index capability behind a single specialist boundary."],
-            ),
-            preferred_tool_names=["parse_document", "index_document"],
-            available_tool_names=tool_names,
-            legacy_boundaries=[],
-            notes=["Supervisor routes uploaded document grounding to this specialist."],
-        ),
-        _build_descriptor(
-            name="ResearchQAAgent",
-            description="Task-level QA specialist for supervisor-selected collection, document, and chart question answering routes.",
-            kind="specialist",
-            execution_mode="tool_native",
-            supported_task_types=["answer_question"],
-            capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("research_report", capability_profile_names),
-                notes=["Supervisor selects qa_route; this agent executes the chosen QA tool path."],
-            ),
-            preferred_tool_names=[
-                "collection_qa",
-                "ask_document",
-                "ask_fused",
-                "hybrid_retrieve",
-                "query_graph_summary",
-                "answer_with_evidence",
-            ],
-            available_tool_names=tool_names,
-            legacy_boundaries=[],
-            notes=["Owns QA execution under Supervisor; RAG remains a tool layer behind ResearchKnowledgeAccess."],
-        ),
-        _build_descriptor(
-            name="ResearchWriterAgent",
-            description="Synthesis specialist for review drafting, answer polishing, and TODO generation.",
-            kind="specialist",
-            execution_mode="service_native",
-            supported_task_types=["write_review"],
-            capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("research_report", capability_profile_names),
-                service_names=["ReviewWritingTool", "WritingPolishTool", "PaperAnalysisTool"],
-                notes=["Capability classes live in services.research.capabilities."],
-            ),
-            preferred_tool_names=["generate_review", "answer_with_evidence", "compare_papers", "recommend_papers"],
-            available_tool_names=tool_names,
-            legacy_boundaries=[],
-            notes=["Executes review drafting through ReviewWritingCapability."],
-        ),
-        _build_descriptor(
-            name="PaperAnalysisAgent",
-            description="Single-paper drilldown specialist for structure extraction and reading cards.",
-            kind="specialist",
-            execution_mode="service_native",
-            supported_task_types=["analyze_papers"],
+            execution_mode="hybrid",
+            supported_task_types=_actions_for_worker("ResearchAnalystAgent"),
             capability_binding=UnifiedCapabilityBinding(
                 profile_name=_preferred_capability("research_report", capability_profile_names),
                 service_names=["PaperAnalysisTool", "PaperReadingTool"],
             ),
-            preferred_tool_names=["extract_paper_structure", "ask_paper", "parse_document", "index_document"],
+            preferred_tool_names=["collection_qa", "ask_document", "ask_fused", "hybrid_retrieve",
+                                  "query_graph_summary", "answer_with_evidence", "understand_chart",
+                                  "extract_paper_structure", "compare_papers"],
             available_tool_names=tool_names,
             legacy_boundaries=[],
-            notes=["Executes selected-paper analysis through PaperAnalysisCapability."],
+            notes=["Supervisor selects the task and QA route; internal workflows do not dispatch peers."],
         ),
         _build_descriptor(
-            name="ChartAnalysisAgent",
-            description="Visual evidence specialist for chart understanding and chart-grounded answers.",
-            kind="specialist",
-            execution_mode="tool_native",
-            supported_task_types=["supervisor_understand_chart", "analyze_paper_figures"],
-            capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("financial_report", capability_profile_names)
-                or _preferred_capability("research_report", capability_profile_names),
-            ),
-            preferred_tool_names=["supervisor_understand_chart"],
-            available_tool_names=tool_names,
-            legacy_boundaries=[],
-            notes=["Executes chart and paper-figure actions through ChartAnalysisCapability."],
-        ),
-        _build_descriptor(
-            name="GeneralAnswerAgent",
-            description="General-answer specialist for questions that do not require research workspace evidence.",
+            name="ResearchWriterAgent",
+            description="Review/report synthesis, quality checks and TODO generation.",
             kind="specialist",
             execution_mode="service_native",
-            supported_task_types=["general_answer"],
+            supported_task_types=_actions_for_worker("ResearchWriterAgent"),
             capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("general_answer", capability_profile_names),
-                notes=["Executes direct answers through GeneralAnswerCapability."],
+                profile_name=_preferred_capability("research_report", capability_profile_names),
+                service_names=["ReviewWritingTool", "WritingPolishTool"],
             ),
-            preferred_tool_names=[],
+            preferred_tool_names=["generate_review"],
             available_tool_names=tool_names,
             legacy_boundaries=[],
-            notes=["Can request Supervisor reroute when the question needs research evidence."],
-        ),
-        _build_descriptor(
-            name="PreferenceMemoryAgent",
-            description="Preference-memory specialist for personalized paper recommendations.",
-            kind="specialist",
-            execution_mode="service_native",
-            supported_task_types=["recommend_from_preferences"],
-            capability_binding=UnifiedCapabilityBinding(
-                profile_name=_preferred_capability("research_preferences", capability_profile_names),
-                service_names=["ResearchMemoryGateway"],
-                notes=["Long-term memory access is mediated by ResearchMemoryGateway."],
-            ),
-            preferred_tool_names=["search_papers", "academic_search"],
-            available_tool_names=tool_names,
-            legacy_boundaries=[],
-            notes=["Executes preference recommendations through PreferenceRecommendationCapability."],
+            notes=["Owns synthesis over the evidence supplied by Supervisor."],
         ),
     ]
     return UnifiedRuntimeBlueprint(

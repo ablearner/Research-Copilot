@@ -1,6 +1,6 @@
 ---
 name: paper-recommendation
-description: "基于用户长期研究兴趣和偏好记忆，个性化推荐值得关注的论文。Supervisor 应调度 PreferenceMemoryAgent 执行推荐。"
+description: "基于用户长期研究兴趣和偏好记忆，个性化推荐值得关注的论文。Supervisor 应调度 LiteratureScoutAgent 执行推荐。"
 version: 1.0.0
 author: Research-Copilot
 category: research
@@ -33,7 +33,7 @@ enabled: true
 
 ## Agent 路由策略
 Supervisor 应调度：
-1. **PreferenceMemoryAgent** — 基于用户兴趣档案生成个性化推荐
+1. **LiteratureScoutAgent (recommend_from_preferences)** — 基于用户兴趣档案生成个性化推荐
 
 ## 使用场景
 当用户想要基于个人兴趣获得论文推荐时激活此技能。典型请求：

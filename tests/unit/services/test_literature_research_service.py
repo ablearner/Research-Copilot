@@ -1378,8 +1378,8 @@ async def test_ask_task_collection_updates_report_and_todo(tmp_path) -> None:
     assert response.todo_items
     assert response.todo_items[0].source == "qa_follow_up"
     assert response.todo_items[0].priority == "medium"
-    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
-    assert "ResearchQAAgent" in response.qa.metadata["primary_agents"]
+    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_analyst_agent"
+    assert "ResearchAnalystAgent" in response.qa.metadata["primary_agents"]
     assert "ResearchCollectionKnowledgeCapability.plan_collection_queries" in response.qa.metadata["primary_tools"]
     assert "ResearchCollectionAnswerCapability.answer_collection_question" in response.qa.metadata["primary_tools"]
     assert response.report.workspace.current_stage == "qa"
@@ -1499,7 +1499,7 @@ async def test_ask_task_collection_adds_gap_todo_when_evidence_is_insufficient(t
 
     assert response.report is not None
     assert response.qa.metadata["autonomy_mode"] == "lead_agent_loop"
-    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
+    assert response.qa.metadata["agent_architecture"] == "supervisor_to_research_analyst_agent"
     assert response.todo_items
     assert response.todo_items[0].source == "evidence_gap"
     assert response.todo_items[0].priority == "high"

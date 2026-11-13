@@ -1,6 +1,6 @@
 ---
 name: chart-analysis
-description: "分析和解读论文中的图表（实验结果图、架构图、流程图、数据分布图等），提取关键发现和洞察。Supervisor 应调度 ChartAnalysisAgent 执行分析。"
+description: "分析和解读论文中的图表（实验结果图、架构图、流程图、数据分布图等），提取关键发现和洞察。Supervisor 应调度 ResearchAnalystAgent 执行分析。"
 version: 1.0.0
 author: Research-Copilot
 category: research
@@ -34,8 +34,8 @@ enabled: true
 ## Agent 路由策略
 Supervisor 应按以下顺序编排 agent：
 1. **ResearchKnowledgeAgent (import_papers)** — 确保论文已导入（需要图表原始数据）
-2. **ChartAnalysisAgent** — 执行图表理解和分析
-3. **ResearchQAAgent** — 可选：结合论文文本回答关于图表的追问
+2. **ResearchAnalystAgent (analyze_paper_figures / supervisor_understand_chart)** — 执行图表理解和分析
+3. **ResearchAnalystAgent (answer_question)** — 可选：结合论文文本回答关于图表的追问
 
 ## 使用场景
 当用户要求分析或解读论文中的图表时激活此技能。典型请求：

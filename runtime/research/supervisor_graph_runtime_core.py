@@ -4,14 +4,10 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from agents.chart_analysis_agent import ChartAnalysisAgent
-from agents.general_answer_agent import GeneralAnswerAgent
 from agents.literature_scout_agent import LiteratureScoutAgent
-from agents.paper_analysis_agent import PaperAnalysisAgent
-from agents.preference_memory_agent import PreferenceMemoryAgent
-from agents.research_document_agent import ResearchDocumentAgent
+from tools.research.workflows.preference_memory import PreferenceRecommendationWorkflow
 from agents.research_knowledge_agent import ResearchKnowledgeAgent
-from agents.research_qa_agent import ResearchQAAgent
+from agents.research_analyst_agent import ResearchAnalystAgent
 from agents.research_supervisor_agent import (
     ResearchSupervisorAgent,
     ResearchSupervisorDecision,
@@ -97,32 +93,30 @@ class ResearchRuntimeBase:
             self.manager_agent.llm_adapter = llm_adapter
         self.user_intent_resolver = IntentResolutionTool(llm_adapter=llm_adapter)
         self.max_steps = max_steps
+        preference_workflow = getattr(research_service, "preference_workflow", None)
+        if preference_workflow is None:
+            preference_workflow = PreferenceRecommendationWorkflow(
+                memory_manager=research_service.memory_manager,
+                memory_gateway=getattr(research_service, "memory_gateway", None),
+                paper_search_service=research_service.paper_search_service,
+                storage_root=research_service.report_service.storage_root,
+                llm_adapter=llm_adapter,
+            )
         self.literature_scout_agent = LiteratureScoutAgent(
             research_service.paper_search_service,
             llm_adapter=llm_adapter,
+            preference_workflow=preference_workflow,
         )
-        self.research_knowledge_agent = ResearchKnowledgeAgent(
+        self.research_knowledge_agent = ResearchKnowledgeAgent(llm_adapter=llm_adapter)
+        self.research_analyst_agent = ResearchAnalystAgent(
             llm_adapter=llm_adapter,
-        )
-        self.research_document_agent = ResearchDocumentAgent()
-        self.research_qa_agent = ResearchQAAgent()
-        self.research_writer_agent = ResearchWriterAgent(
-            research_service.paper_search_service,
-            llm_adapter=llm_adapter,
-        )
-        self.paper_analysis_agent = PaperAnalysisAgent(
             paper_analysis_tool=PaperAnalysisTool(
                 paper_reading_tool=paper_reading_tool,
                 llm_adapter=llm_adapter,
-            )
+            ),
         )
-        self.chart_analysis_agent = ChartAnalysisAgent(llm_adapter=llm_adapter)
-        self.general_answer_agent = GeneralAnswerAgent(llm_adapter=llm_adapter)
-        self.preference_memory_agent = getattr(research_service, "preference_memory_agent", None) or PreferenceMemoryAgent(
-            memory_manager=research_service.memory_manager,
-            memory_gateway=getattr(research_service, "memory_gateway", None),
-            paper_search_service=research_service.paper_search_service,
-            storage_root=research_service.report_service.storage_root,
+        self.research_writer_agent = ResearchWriterAgent(
+            research_service.paper_search_service,
             llm_adapter=llm_adapter,
         )
         self.paper_curation_tool = PaperCurationTool(research_service.paper_search_service)
@@ -426,13 +420,8 @@ class ResearchRuntimeBase:
             "ResearchSupervisorAgent": self.manager_agent,
             "LiteratureScoutAgent": self.literature_scout_agent,
             "ResearchKnowledgeAgent": self.research_knowledge_agent,
-            "ResearchDocumentAgent": self.research_document_agent,
-            "ResearchQAAgent": self.research_qa_agent,
+            "ResearchAnalystAgent": self.research_analyst_agent,
             "ResearchWriterAgent": self.research_writer_agent,
-            "PaperAnalysisAgent": self.paper_analysis_agent,
-            "PreferenceMemoryAgent": self.preference_memory_agent,
-            "ChartAnalysisAgent": self.chart_analysis_agent,
-            "GeneralAnswerAgent": self.general_answer_agent,
         }
 
     def _with_standardized_observation(
@@ -647,7 +636,7 @@ class ResearchRuntimeBase:
                 estimated_gain=0.3,
                 estimated_cost=0.1,
                 metadata={
-                    "worker_agent": "GeneralAnswerAgent",
+                    "worker_agent": "ResearchAnalystAgent",
                     "fast_route": True,
                     "route_mode": route_mode,
                     "intent": intent_name,
@@ -1567,11 +1556,9 @@ class ResearchRuntimeBase:
         }
         assignments = {
             "LiteratureScoutAgent": "research",
-            "ChartAnalysisAgent": "research",
             "ResearchKnowledgeAgent": "research",
-            "PreferenceMemoryAgent": "research",
+            "ResearchAnalystAgent": "research",
             "ResearchWriterAgent": "writing",
-            "PaperAnalysisAgent": "writing",
         }
         for task in task_plan:
             key = assignments.get(task.assigned_to)
@@ -2137,16 +2124,7 @@ class ResearchRuntimeBase:
             "routing_engine": "llm_native_multi_agent",
             "autonomy_mode": "manager_delegates_to_worker_agents",
             "agent_architecture": "llm_native_manager_worker_agents",
-            "primary_agents": [
-                "ResearchSupervisorAgent",
-                "GeneralAnswerAgent",
-                "ChartAnalysisAgent",
-                "LiteratureScoutAgent",
-                "ResearchKnowledgeAgent",
-                "ResearchWriterAgent",
-                "PaperAnalysisAgent",
-                "PreferenceMemoryAgent",
-            ],
+            "primary_agents": ["ResearchSupervisorAgent", *dict.fromkeys(ACTION_AGENT_CATALOG.values())],
             "primary_runtime_workers": [],
             "primary_tools": [
                 "PaperCurationTool",
@@ -2474,16 +2452,7 @@ class ResearchSupervisorGraphRuntime(ResearchRuntimeBase):
             "routing_engine": "langgraph_supervisor_specialists",
             "autonomy_mode": "supervisor_delegates_to_specialists",
             "agent_architecture": "langgraph_supervisor_multi_agent",
-            "primary_agents": [
-                "ResearchSupervisorAgent",
-                "GeneralAnswerAgent",
-                "ChartAnalysisAgent",
-                "LiteratureScoutAgent",
-                "ResearchKnowledgeAgent",
-                "ResearchWriterAgent",
-                "PaperAnalysisAgent",
-                "PreferenceMemoryAgent",
-            ],
+            "primary_agents": ["ResearchSupervisorAgent", *dict.fromkeys(ACTION_AGENT_CATALOG.values())],
             "primary_runtime_workers": [],
             "primary_tools": [
                 "PaperCurationTool",

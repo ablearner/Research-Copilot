@@ -36,6 +36,14 @@ def test_wheel_installed_outside_checkout_loads_runtime_resources(tmp_path: Path
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
     assert "runtime/research/supervisor_graph_runtime_core.py" in names
+    assert "agents/research_analyst_agent.py" in names
+    assert "tools/research/workflows/chart_analysis.py" in names
+    assert "tools/research/workflows/preference_memory.py" in names
+    assert not {
+        "agents/chart_analysis_agent.py", "agents/general_answer_agent.py",
+        "agents/paper_analysis_agent.py", "agents/preference_memory_agent.py",
+        "agents/research_document_agent.py", "agents/research_qa_agent.py",
+    } & names
     resource_paths = [
         *PROJECT_ROOT.joinpath("prompts").rglob("*.txt"),
         *PROJECT_ROOT.joinpath("prompts").rglob("*.md"),

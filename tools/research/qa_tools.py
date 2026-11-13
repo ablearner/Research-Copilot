@@ -76,7 +76,7 @@ def scope_qa_execution_context(
 
 
 class ResearchQAToolset:
-    """Route-specific QA tools used by the task-level ResearchQAAgent."""
+    """Route-specific QA tools used by the task-level ResearchAnalystAgent."""
 
     def __init__(
         self, *, visual_anchor_tool: VisualAnchorTool,
@@ -176,7 +176,7 @@ class ResearchQAToolset:
             else {}
         )
         logger.info(
-            "ResearchQAAgent running fused chart drilldown: image_path=%s chart_id=%s page_id=%s page_number=%s document_count=%s",
+            "ResearchAnalystAgent running fused chart drilldown: image_path=%s chart_id=%s page_id=%s page_number=%s document_count=%s",
             str(qa_route_decision.visual_anchor.get("image_path") or ""),
             str(qa_route_decision.visual_anchor.get("chart_id") or ""),
             str(qa_route_decision.visual_anchor.get("page_id") or ""),
@@ -198,7 +198,7 @@ class ResearchQAToolset:
             metadata={
                 **request.metadata,
                 "qa_route": qa_route_decision.route,
-                "qa_route_source": "ResearchQAAgent",
+                "qa_route_source": "ResearchAnalystAgent",
                 "visual_anchor": qa_route_decision.visual_anchor,
                 "visual_anchor_figure": (
                     visual_anchor_figure.model_dump(mode="json")
@@ -218,8 +218,8 @@ class ResearchQAToolset:
                 "metadata": {
                     **qa.metadata,
                     "autonomy_mode": "task_scoped_drilldown",
-                    "agent_architecture": "supervisor_to_research_qa_agent",
-                    "primary_agents": ["ResearchQAAgent"],
+                    "agent_architecture": "supervisor_to_research_analyst_agent",
+                    "primary_agents": ["ResearchAnalystAgent"],
                     "primary_tools": ["ResearchKnowledgeAccess.ask_fused"],
                     "memory_enabled": execution_context.memory_enabled,
                     "session_id": execution_context.session_id,
@@ -240,7 +240,7 @@ class ResearchQAToolset:
     ) -> QAResponse:
         knowledge_access = ResearchKnowledgeAccess.from_runtime(graph_runtime)
         logger.info(
-            "ResearchQAAgent running document drilldown: route=%s document_count=%s has_visual_anchor=%s",
+            "ResearchAnalystAgent running document drilldown: route=%s document_count=%s has_visual_anchor=%s",
             qa_route_decision.route,
             len(document_ids),
             qa_route_decision.visual_anchor is not None,
@@ -259,7 +259,7 @@ class ResearchQAToolset:
             metadata={
                 **request.metadata,
                 "qa_route": qa_route_decision.route,
-                "qa_route_source": "ResearchQAAgent",
+                "qa_route_source": "ResearchAnalystAgent",
             },
             reasoning_style=request.reasoning_style,
         )
@@ -268,8 +268,8 @@ class ResearchQAToolset:
                 "metadata": {
                     **qa.metadata,
                     "autonomy_mode": "task_scoped_drilldown",
-                    "agent_architecture": "supervisor_to_research_qa_agent",
-                    "primary_agents": ["ResearchQAAgent"],
+                    "agent_architecture": "supervisor_to_research_analyst_agent",
+                    "primary_agents": ["ResearchAnalystAgent"],
                     "primary_tools": ["ResearchKnowledgeAccess.ask_document"],
                     "memory_enabled": execution_context.memory_enabled,
                     "session_id": execution_context.session_id,
@@ -309,7 +309,7 @@ class ResearchQAToolset:
             original_question=request.question,
             primary_agents=[
                 "ResearchSupervisorAgent",
-                "ResearchQAAgent",
+                "ResearchAnalystAgent",
             ],
         )
 
@@ -346,7 +346,7 @@ class ResearchQAToolset:
             metadata={
                 **(request.metadata if isinstance(request.metadata, dict) else {}),
                 "qa_route": qa_route_decision.route,
-                "qa_route_source": "ResearchQAAgent",
+                "qa_route_source": "ResearchAnalystAgent",
                 "chart_drilldown_blocked_reason": "missing_document_scope_and_visual_anchor",
             },
         )

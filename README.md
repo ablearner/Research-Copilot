@@ -1,6 +1,8 @@
 # Research-Copilot
 
-`Research-Copilot`是一个面向科研调研工作区的多智能体系统。它把前端研究工作台、高层 research 编排、底层 RAG 执行、CLI 和本地持久化放在同一个仓库里。
+`Research-Copilot` 是一个面向多用户科研工作流的 Agent 平台：用户在个人工作区创建项目、导入论文、开展研究并保存对话与报告。现有 Supervisor / Specialist / RAG 负责研究能力，新增后端负责身份、权限、任务可靠性与业务持久化。MySQL 仅保存服务端业务事实，Agent 记忆仍由独立后端管理。
+
+新平台入口是 `apps.platform.main:app`，前端为 `web/src/PlatformApp.tsx`，配套独立 Worker 与 Scheduler。先阅读[运行手册](docs/platform-runbook.md)，再查看[架构与 ER](docs/platform-architecture.md)、[演示脚本](docs/platform-demo.md)、[验证记录](docs/platform-validation.md)、[性能报告](docs/platform-performance.md)和[工程复盘](docs/platform-retrospective.md)。首期为单 Worker 的单机部署，不包含计费、团队共享或生产高可用承诺。
 
 ## 当前代码主线
 
@@ -17,55 +19,33 @@
 
 当前活跃前端工作区（`web/` 目录）：
 
-- 技术栈：Next.js 15 (App Router) + React 18 + TypeScript + Tailwind CSS
-- 应用入口：`web/app/layout.tsx` + `web/app/page.tsx`
-- 主组件：`web/src/App.tsx`
-- API 封装：`web/src/api.ts`（当前直接请求 `http://127.0.0.1:8000`；`next.config.ts` 里仍保留 `/api/backend/*` rewrite，但活跃前端请求没有走这层代理）
-- 图片服务：`web/app/api/files/[...path]/route.ts`（Next.js Route Handler）
-- 聊天视图：`web/src/components/ChatView.tsx`
-- 消息气泡：`web/src/components/MessageBubble.tsx`（含内联图片渲染）
+- 技术栈：Next.js 15 (App Router) + React 18 + TypeScript + Tailwind CSS。
+- 应用入口：`web/app/layout.tsx` + `web/app/page.tsx` → `web/src/PlatformApp.tsx`。
+- API 封装：`web/src/platform-api.ts`，通过同源 `/api/backend/*` 代理访问新平台 `/api/v1`。
+- 产品流程：注册/验证/登录、项目、论文库、异步导入、研究对话、任务与报告、会话和个人凭证管理。
+- 私有文件通过平台授权下载；旧 `web/app/api/files/[...path]/route.ts` 返回 404。
 
-### 前端设计
-
-前端采用类似 ChatGPT / Claude 的对话式布局：
-
-- **主区域**：居中的对话线程，占满屏幕高度
-- **输入栏**：底部固定，支持文本输入、文件选择和流式发送
-- **侧边栏**：桌面端默认展开，移动端可通过顶部按钮收起/展开
-- **内联图片**：自动检测消息中的图片路径并渲染为 `<img>` 标签
-- **决策轨迹**：Agent 活动和 Trace 默认展开显示
-
-核心前端组件（`web/src/components/`）：
-
-| 组件 | 职责 |
-|---|---|
-| `ChatView` | 聊天视图：消息过滤、发送、task_id 跟踪 |
-| `MessageBubble` | 消息气泡：Markdown 渲染、内联图片、论文卡片、决策轨迹 |
-| `InputBar` | 底部输入栏 |
-| `FileUpload` | 文件选择和待上传文件预览 |
-| `PaperCard` | 论文卡片 |
-| `Sidebar` | 侧边栏会话列表 |
-| `Toast` | 前端提示消息 |
-| `WelcomeScreen` | 空状态欢迎页 |
-
+`web/src/App.tsx`、`web/src/api.ts` 与原 `ChatView`/`MessageBubble` 等组件保留作离线兼容代码，不是当前 `page.tsx` 使用的在线入口。旧组件的内联图片和轨迹展示能力不能直接算作新平台已验收功能。
 
 ## 架构概览
 
 ```text
-Browser (http://localhost:3000)
--> Next.js (web/, App Router)
--> web/src/api.ts -> FastAPI (http://127.0.0.1:8000)
--> /api/files/* -> Route Handler -> .data/storage/
--> LiteratureResearchService
--> ResearchSupervisorGraphRuntime
--> runtime/research context builder / dispatcher / result aggregator
--> specialist agents / research services
--> RagRuntime
--> DocumentTools / RetrievalTools / AnswerTools / ChartTools
--> Milvus (vector + Sparse-BM25) / Neo4j (graph) / session memory / local persistence
+Browser → Next.js / PlatformApp → 同源代理 → apps.platform /api/v1
+                                               ↓
+                           MySQL 业务事实 / Redis 限流 / 私有对象存储
+                                               ↓
+                       Outbox → Scheduler → RabbitMQ → 单 Research Worker
+                                               ↓
+                          AgentBridge（身份、文档版本、attempt 隔离）
+                                               ↓
+                       LiteratureResearchService → Supervisor / Specialists
+                                               ↓
+                         RagRuntime → scoped retrieval / tools / 独立记忆
 ```
 
-## 当前主能力
+上面的四层 Agent 边界继续保留。在线桥接每次执行构造受限上下文，关闭服务器个人 Zotero、全局 MCP 和本地代码执行；当前图使用 attempt 内存图。离线模式仍可使用原有工具配置，具体能力不能直接等同于在线开放权限。
+
+## Agent 能力基础（在线开放范围见上文）
 
 - `research discovery`
   根据研究主题搜索 arXiv、OpenAlex、Semantic Scholar、IEEE 等学术源，生成候选论文池和研究草稿。
@@ -89,7 +69,7 @@ Browser (http://localhost:3000)
 - RAG runtime session memory
   定义在 `rag_runtime/memory.py`，核心是 `GraphSessionMemory`，用于给底层问答链路保存结构化会话快照。
 
-代码默认配置下：
+以下是原 Agent/离线运行配置；在线桥接会覆盖目录、身份和图 provider，并按作用域发布记忆：
 
 - `SESSION_MEMORY_PROVIDER=sqlite`
   底层 `GraphSessionMemory` 默认写入 `RESEARCH_SQLITE_DB_PATH` 的 `session_memory` 表；research agent 的 `SessionMemory` 默认写入同一个 DB 的 `research_session_memory` 表。
@@ -100,20 +80,24 @@ Browser (http://localhost:3000)
 - `VECTOR_STORE_PROVIDER=milvus`
 - `GRAPH_STORE_PROVIDER=memory`
 
-本机常用业务配置会覆盖上述代码默认值。当前业务运行一般使用 `RUNTIME_BACKEND=business`、OpenAI-compatible LLM/embedding、Milvus compose 暴露端口 `19531`、`GRAPH_STORE_PROVIDER=neo4j`。Milvus 同时承载向量检索和原生 Sparse-BM25 关键词检索；在这种配置下 Neo4j 是必需服务。如果保持代码默认的 `GRAPH_STORE_PROVIDER=memory`，则不需要启动 Neo4j。
+原离线环境配置可能覆盖上述代码默认值，例如使用 `RUNTIME_BACKEND=business`、OpenAI-compatible LLM/embedding、Milvus compose 暴露端口 `19531`、`GRAPH_STORE_PROVIDER=neo4j`。Milvus 同时承载向量检索和原生 Sparse-BM25 关键词检索；在这种配置下 Neo4j 是必需服务。如果保持代码默认的 `GRAPH_STORE_PROVIDER=memory`，则不需要启动 Neo4j。
 
 ## 主要目录
 
 - `web/`
   当前活跃前端（Next.js 15 + React 18 + Tailwind），ChatGPT 风格对话式布局
+- `apps/platform/`、`apps/worker/`、`apps/scheduler/`
+  在线业务 API、可靠任务执行、Outbox 投递与租约恢复
+- `services/platform/`、`services/identity/`、`services/projects/`、`services/task_execution/`
+  多用户业务、权限、资源生命周期与任务状态机
 - `apps/api/`
-  FastAPI 入口、依赖注入、runtime 装配和 HTTP 路由
+  原离线兼容 API 与可复用 runtime 装配；不是公网多用户入口
 - `services/research/`
   research 主业务 service、paper operations、QA router 和 workspace/report/conversation 持久化
 - `runtime/research/`
   高层 Supervisor Graph runtime、context builder、unified action adapters、result aggregator 和 response formatter
 - `agents/`
-  高层 specialist agents（10 个：Supervisor、Writer、PreferenceMemory、Knowledge、LiteratureScout、ChartAnalysis、GeneralAnswer、PaperAnalysis、ResearchQA、ResearchDocument）
+  高层采用 1 个 Supervisor + 4 个子 Agent：LiteratureScout（检索与推荐）、Knowledge（文档与知识管理）、Analyst（分析与问答）、Writer（综述写作）。内部流程位于 `tools/research/workflows/`，不单独注册为 Agent。
 - `rag_runtime/`
   底层 RAG runtime
 - `tools/`
@@ -127,7 +111,7 @@ Browser (http://localhost:3000)
 - `adapters/mcp/zotero_local.py`
   Zotero 本地 Connector 网关和进程内 MCP app
 - `adapters/storage/`
-  数据持久化后端（JSON 文件 / SQLite），通过 `StorageBackend` 协议抽象
+  新平台使用 `adapters/storage/mysql/` 保存业务数据；原 JSON / SQLite StorageBackend 保留作离线、迁移与测试兼容
 - `observability/`
   轻量级进程内指标收集（counters、histograms）、LLM 调用自动埋点
 - `security/`
@@ -135,7 +119,7 @@ Browser (http://localhost:3000)
 - `memory/`
   research 侧工作记忆、会话记忆、长期记忆、用户画像记忆和论文知识记忆
 - `chains/` + `rag_runtime/strategies.py`
-  可复用推理策略实现与协议。`CoTReasoningAgent` 和 `PlanAndSolveReasoningAgent` 在 `chains/`，ReAct 工具推理 worker 在 `agents/research_qa_agent.py`，策略组合定义在 `rag_runtime/strategies.py`。
+  可复用推理策略实现与协议。`CoTReasoningAgent` 和 `PlanAndSolveReasoningAgent` 在 `chains/`，独立的底层 ReAct 工具推理 worker 在 `agents/rag_react_qa_worker.py`，策略组合定义在 `rag_runtime/strategies.py`；它不计入上述 4 个高层子 Agent。
 - `tooling/`
   工具注册 / 执行框架和 research function 规范
 - `mcp/`
@@ -151,14 +135,18 @@ Browser (http://localhost:3000)
 - `sdk/`
   本地 CLI / SDK 调用封装和 runtime profile 管理
 
-## 当前入口
+## 新平台与离线入口
 
-### Research API
+在线运行使用 `apps.platform.main:app` 的 `/api/v1`；完整启动命令见[运行手册](docs/platform-runbook.md)。在线 CLI 位于 `apps/platform/cli.py`，使用可撤销 PAT。
+
+### 原 Research API（仅受控离线兼容）
+
+下面列出旧 `apps.api` 接口，不是新平台 Web 的请求入口。生产配置禁止启动旧入口，不应将其匿名路由、reset 或本地文件能力暴露到公网。
 
 - `POST /research/agent`
-  当前统一主入口
+  原 Agent 统一调用入口
 - `POST /research/agent/stream`
-  前端当前使用的 SSE 流式入口
+  原离线前端使用的 SSE 流式入口
 - `GET/POST /research/conversations`
 - `GET/PATCH/DELETE /research/conversations/{conversation_id}`
 - `POST /research/reset`
@@ -381,9 +369,11 @@ requires:
 
 更完整的链路见 [docs/RC技能系统选取加载使用详解.md](docs/RC技能系统选取加载使用详解.md)。
 
-## 本地启动
+## 原离线 Agent 启动（兼容开发）
 
-### 常用启动顺序
+新平台请使用[运行手册](docs/platform-runbook.md)启动 API、Worker、Scheduler 和 Web。以下命令仅保留原 Agent 的受控本地开发路径，不能与新平台占用同一 API 端口，也不能作为当前 Web 的完整启动方案。
+
+### 原服务启动顺序
 
 #### 第一步：基础设施
 
@@ -420,13 +410,7 @@ cd /home/myc/Research-Copilot
 # 注意：必须用 --reload-dir 限制监视目录，否则 watchfiles 会因 web/node_modules 文件过多而崩溃
 ```
 
-#### 第三步：前端
-
-```bash
-cd /home/myc/Research-Copilot/web
-npm run dev
-# 访问 http://localhost:3000
-```
+原 `App.tsx` 未挂载在当前页面；启动旧 API 后可通过原 CLI/SDK 调试，不会自动切换新 Web 的业务接口。
 
 ### 端口一览
 
@@ -436,7 +420,7 @@ npm run dev
 | Neo4j | 7474/7687 | 仅 `GRAPH_STORE_PROVIDER=neo4j` 时需要，常用 `docker start kepler-neo4j` |
 | Zotero Bridge | 23119 | 仅需要本地 Zotero 时启动，`bash scripts/wsl_zotero_bridge.sh start` |
 | 后端 (FastAPI) | 8000 | `uvicorn apps.api.main:app` |
-| 前端 (Next.js) | 3000 | `cd web && npm run dev` |
+| 新平台前端 (Next.js) | 3000 | 需配套新平台服务，见运行手册 |
 
 ### WSL 环境注意事项
 
@@ -485,3 +469,7 @@ npm run dev
 - [docs/rag流程详解.md](docs/rag流程详解.md)
 - [docs/Zotero本地连接指南.md](docs/Zotero本地连接指南.md)
 - [docs/CLI终端使用文档.md](docs/CLI终端使用文档.md)
+
+## 多用户平台独立运行入口
+
+新平台使用 `apps.platform.main:app`、`apps.worker` 与 `apps.scheduler`，通过 MySQL 持久化业务与任务状态。本机启动、邮箱验证、停机备份和空环境恢复步骤见 [平台运行手册](docs/platform-runbook.md)，决策见 [部署 ADR](docs/platform-adr.md)，已执行与未执行范围见 [部署验证记录](docs/platform-validation.md)。本机离线演示与脚本校验不代表公网生产或真实模型质量验证完成。

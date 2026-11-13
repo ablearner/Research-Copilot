@@ -38,7 +38,7 @@ def context():
 
 def decision(task_id="t1", skill=None):
     metadata = {"skill_context": skill, "active_skill_names": [task_id]} if skill else {}
-    message = AgentMessage(task_id=task_id, agent_from="manager", agent_to="GeneralAnswerAgent",
+    message = AgentMessage(task_id=task_id, agent_from="manager", agent_to="ResearchAnalystAgent",
                            task_type="general_answer", instruction=f"Instruction {task_id}",
                            depends_on=["prior"], metadata=metadata)
     return ResearchSupervisorDecision(action_name="general_answer", thought="", rationale="",
@@ -208,7 +208,7 @@ async def test_runtime_dispatches_with_parent_registry_without_giving_it_to_work
         assert not hasattr(worker.research_service, 'run_agent')
         observed.append(action_name)
         return ResearchToolResult(status='succeeded', observation='done', metadata={})
-    executor = SimpleNamespace(descriptor=SimpleNamespace(name='GeneralAnswerAgent'), execute_action=execute)
+    executor = SimpleNamespace(descriptor=SimpleNamespace(name='ResearchAnalystAgent'), execute_action=execute)
     parent.unified_agent_registry = SimpleNamespace(resolve_for_action=lambda action: executor, get=lambda name: None)
     runtime = ResearchSupervisorGraphRuntime.__new__(ResearchSupervisorGraphRuntime)
     runtime._rebuild_execution_context = lambda **kwargs: None

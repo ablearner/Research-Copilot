@@ -1,6 +1,6 @@
 ---
 name: paper-comparison
-description: "对多篇论文进行系统性对比分析，生成方法差异、实验对比、适用场景的结构化报告。Supervisor 应调度 PaperAnalysisAgent 或 ResearchQAAgent 执行对比。"
+description: "对多篇论文进行系统性对比分析，生成方法差异、实验对比、适用场景的结构化报告。Supervisor 应调度 ResearchAnalystAgent 执行对比。"
 version: 1.1.0
 author: Research-Copilot
 category: research
@@ -31,8 +31,8 @@ enabled: true
 ## Agent 路由策略
 Supervisor 应按以下顺序编排 agent：
 1. **ResearchKnowledgeAgent (import_papers)** — 确保待对比论文已导入
-2. **PaperAnalysisAgent** — 对每篇论文提取结构化信息
-3. **ResearchQAAgent** — 针对具体对比维度进行 grounded QA
+2. **ResearchAnalystAgent (analyze_papers)** — 对每篇论文提取结构化信息
+3. **ResearchAnalystAgent (answer_question)** — 针对具体对比维度进行 grounded QA
 
 ## 使用场景
 当用户要求对比多篇论文时激活此技能。典型请求：

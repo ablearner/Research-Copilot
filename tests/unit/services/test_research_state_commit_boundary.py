@@ -4,9 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from agents.general_answer_agent import GeneralAnswerAgent
-from agents.research_document_agent import ResearchDocumentAgent
-from agents.chart_analysis_agent import ChartAnalysisAgent
+from agents.research_analyst_agent import ResearchAnalystAgent
+from agents.research_knowledge_agent import ResearchKnowledgeAgent
 from domain.schemas.research import ResearchAgentRunRequest, ResearchTask, ResearchTaskResponse
 from domain.schemas.research_context import ResearchExecutionContext
 from memory.research_context_manager import ResearchContextManager
@@ -22,7 +21,7 @@ def context(**kwargs):
 @pytest.mark.asyncio
 async def test_general_answer_only_changes_context_at_commit():
     ctx = context()
-    result = await GeneralAnswerAgent().run_action(ctx, SimpleNamespace(metadata={}))
+    result = await ResearchAnalystAgent().run_action(ctx, SimpleNamespace(metadata={}), task_type="general_answer")
     assert ctx.general_answer is None
     assert result.state_delta.general_answer
     runtime = object.__new__(ResearchSupervisorGraphRuntime)
@@ -43,7 +42,7 @@ async def test_document_failure_returns_deliberate_partial_progress(index_failur
             raise RuntimeError('index failed')
     ctx = context(knowledge_access=Access())
     ctx.request.document_file_path = '/tmp/input.pdf'
-    result = await ResearchDocumentAgent().run_action(ctx, SimpleNamespace(metadata={}))
+    result = await ResearchKnowledgeAgent().run_action(ctx, SimpleNamespace(metadata={}), task_type="understand_document")
     assert result.status == 'failed'
     assert ctx.document_attempted is False
     assert ctx.parsed_document is None
@@ -58,7 +57,7 @@ async def test_document_failure_returns_deliberate_partial_progress(index_failur
 @pytest.mark.asyncio
 async def test_missing_chart_defers_attempt_flag():
     ctx = context()
-    result = await ChartAnalysisAgent().run_action(ctx, SimpleNamespace(metadata={}), task_type='supervisor_understand_chart')
+    result = await ResearchAnalystAgent().run_action(ctx, SimpleNamespace(metadata={}), task_type='supervisor_understand_chart')
     assert result.status == 'skipped'
     assert ctx.chart_attempted is False
     assert result.state_delta.chart_attempted is True
@@ -83,7 +82,7 @@ def test_workspace_calculation_does_not_mutate_execution_context():
 async def test_qa_application_loads_inputs_and_commits_once(persist, fail):
     import inspect
     from services.research.qa_router import QAApplicationService
-    from agents.research_qa_agent import QAExecutionResult
+    from agents.research_analyst_agent import QAExecutionResult
     from domain.schemas.research import ResearchTaskAskRequest
     task = SimpleNamespace(task_id='task', report_id='report')
     report, papers = object(), []
@@ -160,8 +159,8 @@ async def test_chart_failure_defers_attempt_until_commit():
     from unittest.mock import AsyncMock
     ctx = context()
     ctx.request.chart_image_path = '/tmp/chart.png'
-    agent = ChartAnalysisAgent()
-    agent.understand_chart = AsyncMock(side_effect=RuntimeError('chart failed'))
+    agent = ResearchAnalystAgent()
+    agent.chart_workflow.understand_chart = AsyncMock(side_effect=RuntimeError('chart failed'))
     result = await agent.run_action(ctx, SimpleNamespace(metadata={}), task_type='supervisor_understand_chart')
     assert result.status == 'failed'
     assert ctx.chart_attempted is False
@@ -267,7 +266,7 @@ async def test_specialist_import_workflow_commits_once(tmp_path, with_conversati
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [{"paper_ids": ["paper-1"]}, {"document_ids": ["doc-1"]}])
 async def test_loaded_qa_never_reads_application_storage_and_preserves_scope(tmp_path, selection):
-    from agents.research_qa_agent import ResearchQAAgent
+    from agents.research_analyst_agent import ResearchAnalystAgent
     from services.research.literature_research_service import LiteratureResearchService
     from adapters.storage.research_report_service import ResearchReportService
     from domain.schemas.research import PaperCandidate, ResearchTaskAskRequest, ResearchReport, ResearchWorkspaceState
@@ -294,7 +293,7 @@ async def test_loaded_qa_never_reads_application_storage_and_preserves_scope(tmp
     svc.qa_service.report_service = SimpleNamespace(load_task=forbidden, load_report=forbidden, load_papers=forbidden, load_conversation=forbidden, load_messages=forbidden)
     svc.qa_service.memory_gateway = SimpleNamespace(load_user_profile=forbidden, hydrate_context=forbidden)
     # The executor receives context already hydrated by the application.
-    result = await ResearchQAAgent().execute_loaded_qa(svc.qa_service, task, report, papers, request, graph_runtime=graph, execution_context=loaded)
+    result = await ResearchAnalystAgent().execute_loaded_qa(svc.qa_service, task, report, papers, request, graph_runtime=graph, execution_context=loaded)
     assert result.response.paper_ids == ['paper-1']
     scoped = captured[0]
     assert scoped.task_context['paper_titles'] == ['Paper 1']
@@ -309,7 +308,7 @@ async def test_loaded_qa_never_reads_application_storage_and_preserves_scope(tmp
 @pytest.mark.parametrize('needs_recovery', [False, True])
 async def test_qa_action_commits_current_snapshot_for_next_action(tmp_path, needs_recovery):
     from unittest.mock import AsyncMock
-    from agents.research_qa_agent import ResearchQAAgent
+    from agents.research_analyst_agent import ResearchAnalystAgent
     from agents.research_supervisor_agent import ResearchSupervisorDecision
     from adapters.storage.research_report_service import ResearchReportService
     from services.research.literature_research_service import LiteratureResearchService
@@ -347,7 +346,7 @@ async def test_qa_action_commits_current_snapshot_for_next_action(tmp_path, need
     svc.save_task_state = Mock(wraps=svc.save_task_state)
     store.save_report = Mock(wraps=store.save_report)
     store.save_papers = Mock(wraps=store.save_papers)
-    agent = ResearchQAAgent()
+    agent = ResearchAnalystAgent()
     results = []
     async def execute(**kwargs):
         result = await agent.run_action(kwargs['context'], kwargs['decision'])
@@ -359,7 +358,7 @@ async def test_qa_action_commits_current_snapshot_for_next_action(tmp_path, need
     runtime._execute_agent_run_action = execute
     runtime._message_result_update = Mock(return_value={})
     runtime._rebuild_execution_context = Mock()
-    message = AgentMessage(task_id='qa', agent_from='ResearchSupervisorAgent', agent_to='ResearchQAAgent', task_type='answer_question', payload={'question': ctx.request.message, 'qa_route': 'collection_qa', 'routing_authority': 'supervisor_llm'})
+    message = AgentMessage(task_id='qa', agent_from='ResearchSupervisorAgent', agent_to='ResearchAnalystAgent', task_type='answer_question', payload={'question': ctx.request.message, 'qa_route': 'collection_qa', 'routing_authority': 'supervisor_llm'})
     decision = ResearchSupervisorDecision(action_name='answer_question', thought='Answer', rationale='Question', metadata={'active_message': message})
     await runtime._run_action_node({'context': ctx, 'current_decision': decision}, 'answer_question')
 

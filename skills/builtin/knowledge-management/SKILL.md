@@ -1,6 +1,6 @@
 ---
 name: knowledge-management
-description: "管理论文库：导入论文、同步到 Zotero、整理分类、构建知识图谱。Supervisor 应调度 ResearchKnowledgeAgent 或 ResearchDocumentAgent 执行。"
+description: "管理论文库：导入论文、同步到 Zotero、整理分类、构建知识图谱。Supervisor 应调度 ResearchKnowledgeAgent 执行。"
 version: 1.0.0
 author: Research-Copilot
 category: management
@@ -34,7 +34,7 @@ enabled: true
 ## Agent 路由策略
 Supervisor 根据具体操作选择 agent：
 - **论文导入** → ResearchKnowledgeAgent (task_type=import_papers)
-- **文档解析** → ResearchDocumentAgent
+- **文档解析** → ResearchKnowledgeAgent (understand_document)
 - **Zotero 同步** → ResearchKnowledgeAgent (task_type=sync_to_zotero)
 - **上下文压缩** → ResearchKnowledgeAgent (task_type=compress_context)
 

@@ -120,7 +120,7 @@ async def test_research_supervisor_agent_loads_soul_prompt(tmp_path) -> None:
     llm_stub = ManagerDecisionLLMStub(
         {
             "action_name": "general_answer",
-            "worker_agent": "GeneralAnswerAgent",
+            "worker_agent": "ResearchAnalystAgent",
             "instruction": "Answer briefly.",
             "thought": "General answer is enough.",
             "rationale": "No research action needed.",
@@ -146,7 +146,7 @@ async def test_research_supervisor_agent_uses_llm_to_route_selected_paper_analys
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "analyze_papers",
-                "worker_agent": "PaperAnalysisAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Analyze the papers by method and experiment.",
                 "thought": "User explicitly asked for selected-paper analysis.",
                 "rationale": "A unified paper analysis worker is the best next worker.",
@@ -184,7 +184,7 @@ async def test_research_supervisor_agent_uses_llm_to_route_selected_paper_analys
     )
 
     assert decision.action_name == "analyze_papers"
-    assert decision.metadata["worker_agent"] == "PaperAnalysisAgent"
+    assert decision.metadata["worker_agent"] == "ResearchAnalystAgent"
     assert decision.metadata["active_message"].payload["dimensions"] == ["method", "experiment", "year"]
     assert decision.metadata["selected_skill_names"] == ["paper-comparison"]
     assert decision.metadata["active_message"].metadata["selected_skill_names"] == ["paper-comparison"]
@@ -196,10 +196,10 @@ async def test_research_supervisor_agent_keeps_qa_mode_on_qa_specialist() -> Non
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "answer_question",
-                "worker_agent": "ResearchQAAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Answer the user's research question using imported evidence.",
                 "thought": "The user is in QA mode with an imported document.",
-                "rationale": "ResearchQAAgent should handle this scoped question.",
+                "rationale": "ResearchAnalystAgent should handle this scoped question.",
                 "phase": "act",
                 "payload": {"goal": "这篇论文的方法是什么？", "mode": "qa"},
             }
@@ -218,7 +218,7 @@ async def test_research_supervisor_agent_keeps_qa_mode_on_qa_specialist() -> Non
     )
 
     assert decision.action_name == "answer_question"
-    assert decision.metadata["worker_agent"] == "ResearchQAAgent"
+    assert decision.metadata["worker_agent"] == "ResearchAnalystAgent"
     assert decision.metadata["active_message"].task_type == "answer_question"
     assert decision.metadata["decision_source"] == "llm"
 
@@ -229,7 +229,7 @@ async def test_research_supervisor_agent_can_route_general_question_to_general_a
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "general_answer",
-                "worker_agent": "GeneralAnswerAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Answer the user's general question directly.",
                 "thought": "This does not require research workspace tools.",
                 "rationale": "A lightweight general-answer worker is the best fit.",
@@ -248,7 +248,7 @@ async def test_research_supervisor_agent_can_route_general_question_to_general_a
     )
 
     assert decision.action_name == "general_answer"
-    assert decision.metadata["worker_agent"] == "GeneralAnswerAgent"
+    assert decision.metadata["worker_agent"] == "ResearchAnalystAgent"
     assert decision.metadata["active_message"].task_type == "general_answer"
 
 
@@ -280,8 +280,8 @@ async def test_research_supervisor_agent_supplies_qa_route_when_llm_omits_it() -
     )
 
     assert decision.action_name == "answer_question"
-    assert decision.metadata["worker_agent"] == "ResearchQAAgent"
-    assert decision.metadata["active_message"].agent_to == "ResearchQAAgent"
+    assert decision.metadata["worker_agent"] == "ResearchAnalystAgent"
+    assert decision.metadata["active_message"].agent_to == "ResearchAnalystAgent"
     assert decision.action_input["routing_authority"] == "supervisor_llm"
     assert decision.action_input["qa_route"] == "document_drilldown"
     assert decision.metadata["active_message"].payload["qa_route"] == "document_drilldown"
@@ -293,7 +293,7 @@ async def test_research_supervisor_agent_replans_qa_route_from_worker_observatio
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "answer_question",
-                "worker_agent": "ResearchQAAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Re-answer with document drilldown route.",
                 "thought": "The previous answer was under-supported, retrying with document drilldown.",
                 "rationale": "Worker observation suggested answer_question with document_drilldown.",
@@ -307,7 +307,7 @@ async def test_research_supervisor_agent_replans_qa_route_from_worker_observatio
     )
     latest_result = AgentResultMessage(
         task_id="qa-1",
-        agent_from="ResearchQAAgent",
+        agent_from="ResearchAnalystAgent",
         agent_to="ResearchSupervisorAgent",
         task_type="answer_question",
         status="skipped",
@@ -580,7 +580,7 @@ async def test_research_supervisor_agent_guardrail_routes_figure_question_to_cha
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "analyze_paper_figures",
-                "worker_agent": "ChartAnalysisAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Extract and analyze figures from the paper.",
                 "thought": "The user is asking about a figure in an imported paper.",
                 "rationale": "analyze_paper_figures can extract the actual visual from the PDF.",
@@ -615,7 +615,7 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "supervisor_understand_chart",
-                "worker_agent": "ChartAnalysisAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Understand the uploaded chart.",
                 "thought": "A chart image was provided and should be processed.",
                 "rationale": "The chart should be understood before further reasoning.",
@@ -635,7 +635,7 @@ async def test_research_supervisor_agent_guardrail_routes_explicit_chart_input()
     )
 
     assert decision.action_name == "supervisor_understand_chart"
-    assert decision.metadata["worker_agent"] == "ChartAnalysisAgent"
+    assert decision.metadata["worker_agent"] == "ResearchAnalystAgent"
     assert decision.metadata["decision_source"] == "llm"
 
 
@@ -677,7 +677,7 @@ async def test_research_supervisor_agent_guardrail_keeps_explicit_figure_scope_w
         llm_adapter=ManagerDecisionLLMStub(
             {
                 "action_name": "analyze_paper_figures",
-                "worker_agent": "ChartAnalysisAgent",
+                "worker_agent": "ResearchAnalystAgent",
                 "instruction": "Extract and analyze figures from the paper.",
                 "thought": "The user asks about figures in a specific paper.",
                 "rationale": "Use analyze_paper_figures for the resolved paper.",
@@ -752,7 +752,7 @@ async def test_research_supervisor_agent_does_not_turn_general_answer_timeout_in
     manager = ResearchSupervisorAgent(llm_adapter=FailingManagerDecisionLLMStub())
     latest_result = AgentResultMessage(
         task_id="general-1",
-        agent_from="GeneralAnswerAgent",
+        agent_from="ResearchAnalystAgent",
         agent_to="ResearchSupervisorAgent",
         task_type="general_answer",
         status="failed",
@@ -779,7 +779,7 @@ async def test_research_supervisor_agent_finalizes_general_answer_without_manage
     manager = ResearchSupervisorAgent(llm_adapter=FailingManagerDecisionLLMStub())
     latest_result = AgentResultMessage(
         task_id="general-2",
-        agent_from="GeneralAnswerAgent",
+        agent_from="ResearchAnalystAgent",
         agent_to="ResearchSupervisorAgent",
         task_type="general_answer",
         status="succeeded",

@@ -566,7 +566,7 @@ class ResearchCollectionAnswerCapability:
             "research_topic": state.task.topic,
             "qa_mode": "research_collection",
             "autonomy_mode": "lead_agent_loop",
-            "agent_architecture": "main_agents_only" if writer_agent else "supervisor_to_research_qa_agent",
+            "agent_architecture": "main_agents_only" if writer_agent else "supervisor_to_research_analyst_agent",
             "primary_agents": primary_agents,
             "answer_capability": self.__class__.__name__,
             **({"writer_agent": writer_agent} if writer_agent else {}),
@@ -1021,7 +1021,7 @@ class ResearchCollectionQACapability:
                 "metadata": {
                     **(qa.metadata if isinstance(qa.metadata, dict) else {}),
                     "autonomy_mode": "lead_agent_loop",
-                    "agent_architecture": "supervisor_to_research_qa_agent",
+                    "agent_architecture": "supervisor_to_research_analyst_agent",
                     "primary_agents": list(primary_agents),
                     "primary_tools": [
                         "ResearchCollectionKnowledgeCapability.plan_collection_queries",

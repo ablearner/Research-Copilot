@@ -69,8 +69,8 @@ async def test_discovery_workflow_dispatches_writer_after_report_free_search(tmp
         from types import SimpleNamespace
         return _complete_english_report(SimpleNamespace(task_id=state.task_id, topic=state.topic, created_at="2026-01-01T00:00:00Z"))
     runtime.research_writer_agent.synthesize_async = AsyncMock(side_effect=complete_english_review)
-    async def check_search(context, decision):
-        result = await search(context, decision)
+    async def check_search(context, decision, *, task_type):
+        result = await search(context, decision, task_type=task_type)
         assert result.state_delta.report is None
         assert result.state_delta.task.todo_items == []
         return result

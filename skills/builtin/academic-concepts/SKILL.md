@@ -1,6 +1,6 @@
 ---
 name: academic-concepts
-description: "解释学术概念、术语、方法论和研究范式，提供通俗易懂的讲解和类比。Supervisor 应调度 GeneralAnswerAgent 执行回答。"
+description: "解释学术概念、术语、方法论和研究范式，提供通俗易懂的讲解和类比。Supervisor 应调度 ResearchAnalystAgent 执行回答。"
 version: 1.0.0
 author: Research-Copilot
 category: education
@@ -37,8 +37,8 @@ enabled: true
 
 ## Agent 路由策略
 Supervisor 应调度：
-1. **GeneralAnswerAgent** — 基于知识回答学术概念问题
-2. **ResearchQAAgent** — 可选：如果已导入论文中有相关说明，用原文佐证
+1. **ResearchAnalystAgent (general_answer)** — 基于知识回答学术概念问题
+2. **ResearchAnalystAgent (answer_question)** — 可选：如果已导入论文中有相关说明，用原文佐证
 
 ## 使用场景
 当用户询问学术概念、术语或方法的解释时激活此技能。典型请求：

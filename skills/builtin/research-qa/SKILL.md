@@ -1,6 +1,6 @@
 ---
 name: research-qa
-description: "基于已导入的论文集合进行 grounded 研究问答，回答必须有论文证据支撑。Supervisor 应调度 ResearchQAAgent 执行问答，必要时先导入论文。"
+description: "基于已导入的论文集合进行 grounded 研究问答，回答必须有论文证据支撑。Supervisor 应调度 ResearchAnalystAgent 执行问答，必要时先导入论文。"
 version: 1.0.0
 author: Research-Copilot
 category: research
@@ -34,7 +34,7 @@ enabled: true
 ## Agent 路由策略
 Supervisor 应按以下顺序编排 agent：
 1. **ResearchKnowledgeAgent (import_papers)** — 确保相关论文已导入
-2. **ResearchQAAgent** — 执行 grounded 问答
+2. **ResearchAnalystAgent (answer_question)** — 执行 grounded 问答
 
 ## 使用场景
 当用户针对已导入的论文提出具体问题时激活此技能。典型请求：

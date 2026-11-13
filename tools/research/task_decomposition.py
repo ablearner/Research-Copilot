@@ -18,8 +18,8 @@ class _TaskProposal(BaseModel):
 # These are descriptive destinations in the returned plan, never executable objects.
 _ACTIONS = {
     "search_literature": ("LiteratureScoutAgent", ["papers"]),
-    "answer_question": ("ResearchQAAgent", ["answer"]),
-    "analyze_papers": ("PaperAnalysisAgent", ["answer", "focus", "recommended_paper_ids"]),
+    "answer_question": ("ResearchAnalystAgent", ["answer"]),
+    "analyze_papers": ("ResearchAnalystAgent", ["answer", "focus", "recommended_paper_ids"]),
     "write_review": ("ResearchWriterAgent", ["review_text"]),
 }
 

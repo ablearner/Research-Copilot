@@ -8,7 +8,7 @@ from uuid import uuid4
 from core.utils import now_iso as _now_iso
 from tools.research.paper_figures import ResearchPaperFigureTool
 from tools.research.visual_anchor import VisualAnchorTool
-from agents.preference_memory_agent import PreferenceMemoryAgent
+from tools.research.workflows.preference_memory import PreferenceRecommendationWorkflow
 from domain.schemas.research import (
     ResearchConversation,
     CreateResearchConversationRequest,
@@ -130,7 +130,7 @@ class LiteratureResearchService:
             paper_reading_tool=self.paper_reading_tool,
             compact_text=lambda value: self._compact_text(value, limit=280),
         )
-        self.preference_memory_agent = PreferenceMemoryAgent(
+        self.preference_workflow = PreferenceRecommendationWorkflow(
             memory_manager=self.memory_manager,
             memory_gateway=self.memory_gateway,
             paper_search_service=self.paper_search_service,
@@ -694,7 +694,7 @@ class LiteratureResearchService:
 
         if self._agent_runtime is None:
             self._agent_runtime = ResearchSupervisorGraphRuntime(research_service=self)
-        self.preference_memory_agent.observe_user_message(
+        self.preference_workflow.observe_user_message(
             message=request.message,
             sources=list(request.sources),
             answer_language=_preferred_answer_language_from_text(request.message),

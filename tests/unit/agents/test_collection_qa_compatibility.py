@@ -174,10 +174,10 @@ async def test_legacy_writer_preserves_language_citations_and_selected_analysis(
     assert "当前结论仍需补充更多直接证据" in response.metadata["extended_analysis"]
 
     canonical = await ResearchCollectionAnswerCapability(paper_analysis_tool=PaperAnalysis()).answer_collection_question(
-        graph_runtime=object(), state=state, primary_agents=["ResearchQAAgent"]
+        graph_runtime=object(), state=state, primary_agents=["ResearchAnalystAgent"]
     )
-    assert seen["metadata"]["agent_architecture"] == "supervisor_to_research_qa_agent"
-    assert canonical.metadata["agent_architecture"] == "supervisor_to_research_qa_agent"
+    assert seen["metadata"]["agent_architecture"] == "supervisor_to_research_analyst_agent"
+    assert canonical.metadata["agent_architecture"] == "supervisor_to_research_analyst_agent"
 
 
 def test_legacy_decision_delegates_to_knowledge_capability(monkeypatch):

@@ -9,7 +9,7 @@ from domain.schemas.research import PaperCandidate, ResearchPaperFigurePreview
 def test_qa_and_figure_services_do_not_depend_on_peer_chart_agent():
     root = Path(__file__).resolve().parents[4]
     for relative in (
-        'agents/research_qa_agent.py', 'tools/research/qa_tools.py',
+        'agents/research_analyst_agent.py', 'tools/research/qa_tools.py',
         'tools/research/paper_figures.py',
         'services/research/qa_router.py', 'services/research/paper_operations.py',
     ):

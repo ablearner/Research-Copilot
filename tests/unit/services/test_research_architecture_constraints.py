@@ -19,9 +19,8 @@ def test_workers_and_research_tools_do_not_import_peer_agents() -> None:
     worker_modules = {
         "agents." + name.removesuffix(".py")
         for name in (
-            "literature_scout_agent.py", "research_writer_agent.py", "research_qa_agent.py",
-            "research_knowledge_agent.py", "research_document_agent.py", "paper_analysis_agent.py",
-            "chart_analysis_agent.py", "general_answer_agent.py", "preference_memory_agent.py",
+            "literature_scout_agent.py", "research_writer_agent.py", "research_analyst_agent.py",
+            "research_knowledge_agent.py",
         )
     }
     files = [PROJECT_ROOT / (name.replace(".", "/") + ".py") for name in worker_modules]
@@ -78,7 +77,7 @@ def test_legacy_unified_bridge_methods_are_removed() -> None:
 
 
 def test_supervisor_authorized_qa_requires_explicit_route() -> None:
-    qa_agent = _read("agents/research_qa_agent.py")
+    qa_agent = _read("agents/research_analyst_agent.py")
     supervisor_agent = _read("agents/research_supervisor_agent.py")
 
     assert "Supervisor-authorized research QA must include preferred_qa_route" in qa_agent
@@ -159,7 +158,7 @@ def test_specialists_use_direct_agent_run_action_dispatch() -> None:
 def test_workspace_persistence_uses_standalone_functions() -> None:
     mixins = _read("runtime/research/agent_protocol/mixins.py")
     knowledge_agent = _read("agents/research_knowledge_agent.py")
-    paper_analysis_agent = _read("agents/paper_analysis_agent.py")
+    paper_analysis_agent = _read("tools/research/workflows/paper_analysis.py")
 
     assert "class _WorkspacePersistenceMixin" not in mixins
     assert "def persist_workspace_results(" in mixins
@@ -221,7 +220,7 @@ def test_service_composes_explicit_application_collaborators():
 
 
 def test_loaded_qa_execution_has_no_storage_or_commit_and_worker_is_separate():
-    source = _read('agents/research_qa_agent.py')
+    source = _read('agents/research_analyst_agent.py')
     assert 'class RagReActQAWorker' not in source
     assert 'class RagReActQAWorker' in _read('agents/rag_react_qa_worker.py')
     tree = ast.parse(source)

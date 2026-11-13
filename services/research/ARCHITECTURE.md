@@ -36,7 +36,7 @@ The facade composes `ConversationService`, `PaperOperationsService` and
 `QAApplicationService` through explicit resources and named callback ports.
 Conversation lifecycle and snapshot recording live in the application layer;
 `memory.conversation_manager` retains only a language-helper import for compatibility.
-QA application loading and persistence surround `ResearchQAAgent.execute_loaded_qa`;
+QA application loading and persistence surround `ResearchAnalystAgent.execute_loaded_qa`;
 `agents.rag_react_qa_worker` separately owns the RAG ReAct loop.
 
 Specialists return typed `ResearchStateDelta` values. The runtime applies and
@@ -123,14 +123,14 @@ instructions, pending agent messages, and recent agent results.
 For research QA, it is also the route authority: `answer_question` messages
 must carry `payload.qa_route` (`collection_qa`, `document_drilldown`, or
 `chart_drilldown`) plus `routing_authority=supervisor_llm`. The
-`ResearchQAAgent` specialist executes that route through the QA toolset and may
+`ResearchAnalystAgent` specialist executes that route through the QA toolset and may
 return recovery observations, but lower layers do not silently pick a different
 route for supervisor-authorized calls.
 
 The action node calls `ResearchSupervisorGraphRuntime._execute_agent_run_action`.
 It resolves the selected worker from `UnifiedAgentRegistry`, which binds each
-descriptor to a specialist's `run_action(context, decision)`. `ResearchKnowledgeAgent` and
-`ChartAnalysisAgent` also receive `task_type=action_name`. The runtime
+descriptor to a specialist's `run_action(context, decision)`. All multi-action specialists receive `task_type=action_name`;
+`ResearchWriterAgent` has a single write action. The runtime
 standardizes the returned observation and execution metadata, applies any
 state delta, and records a missing-agent failure if no registry entry is found.
 Recoverable QA route observations return to the supervisor for an explicit
@@ -150,32 +150,29 @@ fallbacks to the existing `RagRuntime` methods for compatibility.
 Grounded answering calls `AnswerTools` directly; it never delegates to the
 RAG ReAct worker from inside another Worker.
 
-Specialist agents keep their domain responsibilities:
+Supervisor dispatches exactly four specialists; all twelve public action names
+remain available:
 
-- `LiteratureScoutAgent`: paper discovery and search planning through search
-  and curation tools.
-- `ResearchKnowledgeAgent`: paper ingestion, Zotero sync, retrieval-support,
-  and context compression through `KnowledgeOpsCapability`.
-- `ResearchQAAgent`: task-level QA specialist for collection, document, and
-  chart drilldown routes selected by the supervisor.
-- `ResearchWriterAgent`: review/report synthesis and TODO planning through
-  writing tools.
-- `PaperAnalysisAgent`: paper structure and comparison analysis through
-  `PaperAnalysisCapability`.
-- `ChartAnalysisAgent`: chart and paper figure analysis through
-  `ResearchPaperFigureTool` and `VisualAnchorTool`. QA and application figure
-  endpoints share these tools without invoking ChartAnalysisAgent.
-- `GeneralAnswerAgent`: general non-research answer branch through
-  `GeneralAnswerCapability`.
-- `PreferenceMemoryAgent`: long-term preference observation and recommendations
-  through `PreferenceRecommendationCapability` and `ResearchMemoryGateway`.
+| Specialist | Actions |
+| --- | --- |
+| `LiteratureScoutAgent` | `search_literature`, `recommend_from_preferences` |
+| `ResearchKnowledgeAgent` | `import_papers`, `sync_to_zotero`, `compress_context`, `understand_document` |
+| `ResearchAnalystAgent` | `answer_question`, `general_answer`, `analyze_papers`, `supervisor_understand_chart`, `analyze_paper_figures` |
+| `ResearchWriterAgent` | `write_review` |
+
+The former document, preference, paper-analysis, chart and general-answer workers
+are internal workflows under `tools/research/workflows`. They expose `execute`,
+not the worker `run_action` protocol, and have no separate agent identity or
+registry entry. Only the owning specialist receives a scoped worker invocation.
+Workflow modules keep domain code separate without additional dispatch layers.
+They return the same state deltas; Runtime remains the persistence authority.
 
 `RagRuntime`, `RetrievalTools`, `HybridRetriever`, `AnswerTools`, and
 `AnswerChain` remain the underlying Knowledge/RAG implementation. They are now
 internal capability providers behind `ResearchKnowledgeAccess`, not a separate
 public API surface.
 The RAG-layer ReAct QA worker is named `RagReActQAWorker` and is exposed as
-`RagRuntime.rag_qa_worker`; it is not the task-level `ResearchQAAgent`.
+`RagRuntime.rag_qa_worker`; it is not the task-level `ResearchAnalystAgent`.
 It remains a standalone low-level entrypoint and is not exposed to research
 Workers. Research function tools likewise construct no Agents: paper analysis
 uses `PaperAnalysisTool`, and `TaskDecompositionTool` returns a validated task
@@ -270,7 +267,7 @@ The remaining research-domain search endpoints (`/research/papers/search`,
 `/research/tasks/{task_id}/todos/{todo_id}/search`) no longer bypass the
 supervisor runtime. They construct discovery-only `ResearchAgentRunRequest`
 objects, go through `ResearchSupervisorGraphRuntime -> ResearchSupervisorAgent
--> LiteratureScoutAgent -> LiteratureDiscoveryCapability`, and then adapt the
+-> LiteratureScoutAgent -> search/curation tools`, and then adapt the
 supervisor response back to their legacy response models.
 
 ## Verification and limits

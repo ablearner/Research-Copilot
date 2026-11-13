@@ -48,7 +48,7 @@ async def test_answer_boundary_receives_bounded_task_without_stale_prompt_contex
         ),
     )
     await ResearchCollectionAnswerCapability().answer_collection_question(
-        graph_runtime=object(), state=state, primary_agents=["ResearchQAAgent"],
+        graph_runtime=object(), state=state, primary_agents=["ResearchAnalystAgent"],
     )
     assert seen["preference_context"]["expert_context"] == expert
     assert seen["task_context"]["dependency_summaries"] == task["dependency_summaries"]
@@ -92,7 +92,7 @@ async def test_metadata_only_fallback_analysis_receives_current_task_without_wor
             }}),
     )
     response = await ResearchCollectionAnswerCapability(paper_analysis_tool=PaperAnalysisTool(llm_adapter=LLM())).answer_collection_question(
-        graph_runtime=object(), state=state, primary_agents=["ResearchQAAgent"],
+        graph_runtime=object(), state=state, primary_agents=["ResearchAnalystAgent"],
     )
     assert response.answer == "Scoped analysis"
     assert calls[0]["task_context"] == task

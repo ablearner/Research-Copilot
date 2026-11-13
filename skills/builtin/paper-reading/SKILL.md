@@ -1,6 +1,6 @@
 ---
 name: paper-reading
-description: "深度阅读单篇论文，提取核心贡献、方法、实验、局限性等结构化知识卡片。Supervisor 应先导入论文，再调度 PaperAnalysisAgent 分析，必要时用 ChartAnalysisAgent 解读图表。"
+description: "深度阅读单篇论文，提取核心贡献、方法、实验、局限性等结构化知识卡片。Supervisor 应先导入论文，再调度 ResearchAnalystAgent 完成论文分析、图表解读与后续问答。"
 version: 1.1.0
 author: Research-Copilot
 category: research
@@ -33,9 +33,9 @@ enabled: true
 ## Agent 路由策略
 Supervisor 应按以下顺序编排 agent：
 1. **ResearchKnowledgeAgent (import_papers)** — 确保论文已导入并解析
-2. **PaperAnalysisAgent** — 提取结构化分析
-3. **ChartAnalysisAgent** — 可选：解读论文中的关键图表
-4. **ResearchQAAgent** — 可选：回答用户关于论文的追问
+2. **ResearchAnalystAgent (analyze_papers)** — 提取结构化分析
+3. **ResearchAnalystAgent (analyze_paper_figures / supervisor_understand_chart)** — 可选：解读论文中的关键图表
+4. **ResearchAnalystAgent (answer_question)** — 可选：回答用户关于论文的追问
 
 ## 使用场景
 当用户要求深度阅读或讲解某篇论文时激活此技能。典型请求：

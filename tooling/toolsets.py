@@ -92,15 +92,10 @@ TOOLSETS: dict[str, dict[str, Any]] = {
 
 AGENT_TOOLSET_MAP: dict[str, list[str]] = {
     "ResearchSupervisorAgent": ["supervisor_action", "research-capability"],
-    "ResearchQAAgent": ["rag", "research-capability"],
-    "ResearchDocumentAgent": ["rag"],
-    "ChartAnalysisAgent": ["rag", "research-capability"],
     "LiteratureScoutAgent": ["research_function", "runtime_ops", "research-capability"],
-    "ResearchKnowledgeAgent": ["research_function", "runtime_ops"],
+    "ResearchKnowledgeAgent": ["rag", "research_function", "runtime_ops"],
+    "ResearchAnalystAgent": ["rag", "research_function", "research-capability"],
     "ResearchWriterAgent": ["research_function", "research-capability"],
-    "PaperAnalysisAgent": ["research_function", "research-capability"],
-    "GeneralAnswerAgent": ["rag", "research_function"],
-    "PreferenceMemoryAgent": ["research_function"],
 }
 
 
